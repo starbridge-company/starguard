@@ -5,8 +5,6 @@
 // ============================================================
 import type { AIProvider, PhaseKey, StepAIConfig } from "@/types";
 
-export const DEMO_MODE = process.env.DEMO_MODE !== "false"; // default: true
-
 const DEFAULT_PROVIDER = (process.env.AI_PROVIDER as AIProvider) || "anthropic";
 const DEFAULT_MODEL = process.env.AI_MODEL || "claude-sonnet-5";
 
@@ -105,17 +103,33 @@ export const API_RATE = parseRate(process.env.API_RATE_LIMIT || "100/1m", {
   windowMs: 60_000,
 });
 
-// ---- Demo user ----
-export const DEMO_USER = {
-  email: process.env.DEMO_USER_EMAIL || "admin@starguard.local",
-  password: process.env.DEMO_USER_PASSWORD || "StarGuard!2026",
-  role: "Superadmin" as const,
+// ---- Papéis (RBAC) ----
+export const ROLES = {
+  superadmin: "superadmin",
+  admin: "admin",
+} as const;
+export type Role = (typeof ROLES)[keyof typeof ROLES];
+
+// ---- Banco de dados ----
+export const DATABASE_URL = process.env.DATABASE_URL || "";
+
+// ---- Usuários iniciais (seed idempotente; senha via Argon2id em runtime) ----
+export const SEED_SUPERADMIN = {
+  email: process.env.SEED_SUPERADMIN_EMAIL || "admin@starguard.local",
+  password: process.env.SEED_SUPERADMIN_PASSWORD || "StarGuard!2026",
+  name: "Super Admin",
+  role: ROLES.superadmin,
+};
+export const SEED_ADMIN = {
+  email: process.env.SEED_ADMIN_EMAIL || "membro@starguard.local",
+  password: process.env.SEED_ADMIN_PASSWORD || "StarGuard!2026",
+  name: "Membro",
+  role: ROLES.admin,
 };
 
 // Resumo legível para exibir no header/relatório ("como está configurado agora").
 export function engineSummary() {
   return {
-    demo: DEMO_MODE,
     sast: ENGINES.sast,
     sca: ENGINES.sca,
     dast: ENGINES.dast,

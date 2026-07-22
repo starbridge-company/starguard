@@ -47,7 +47,8 @@ const nextConfig = {
   poweredByHeader: false,
   // O Claude Agent SDK traz um binário nativo e faz spawn de subprocesso —
   // deixa fora do bundle do servidor (require direto do node_modules).
-  serverExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
+  // `pg` tem binding nativo opcional (pg-native) — também fica externo.
+  serverExternalPackages: ["@anthropic-ai/claude-agent-sdk", "pg"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

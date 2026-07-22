@@ -51,6 +51,14 @@ export const githubUrlField = z
   .max(300)
   .refine((v) => parseGitHubRepo(v) !== null, "URL de repositório GitHub inválida");
 
+// UUID v4/v5 (independente da versão do zod).
+const uuidRe =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const uuidField = z
+  .string()
+  .trim()
+  .refine((v) => uuidRe.test(v), "id inválido");
+
 // ---- Schemas por rota ----
 export const loginSchema = z.object({
   email: emailField,
@@ -67,8 +75,49 @@ export const analyzeSchema = z.object({
   systemDescription: z.string().trim().min(1).max(50_000),
   repoUrl: z.union([githubUrlField, z.literal("")]).optional(),
   token: z.string().max(500).optional(),
+  // Usar um token salvo na conta (id) em vez de digitar um novo.
+  tokenId: uuidField.optional(),
+  // Ao digitar um token novo: salvá-lo na conta (cifrado) com este nome.
+  saveToken: z.boolean().optional(),
+  tokenName: z.string().trim().max(100).optional(),
   skills: z.array(skillItemSchema).max(20).optional(),
 });
+
+// Cadastro de token do GitHub na conta.
+export const tokenCreateSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  token: z.string().trim().min(8).max(500),
+});
+
+// Criação de usuário (somente superadmin). Papel escolhido no ato.
+export const userCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: emailField,
+  password: z.string().min(8).max(200),
+  role: z.enum(["superadmin", "admin"]),
+});
+
+// Alteração de papel de um usuário (somente superadmin).
+export const roleUpdateSchema = z.object({
+  role: z.enum(["superadmin", "admin"]),
+});
+
+// Atualização do próprio perfil (nome, login/e-mail, senha). Alterar e-mail ou
+// senha exige a senha atual (verificada na rota).
+export const profileUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    email: emailField.optional(),
+    currentPassword: z.string().max(200).optional(),
+    newPassword: z.string().min(8).max(200).optional(),
+  })
+  .refine(
+    (d) =>
+      d.name !== undefined ||
+      d.email !== undefined ||
+      d.newPassword !== undefined,
+    "nada para atualizar"
+  );
 
 export const step1Schema = z.object({
   systemDescription: z.string().trim().min(1).max(50_000),
@@ -116,6 +165,8 @@ export const prSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(10_000).optional(),
   token: z.string().max(500).optional(),
+  tokenId: uuidField.optional(),
+  analysisId: uuidField.optional(),
 });
 
 // PR consolidado: várias correções commitadas numa única branch/PR.
@@ -133,6 +184,8 @@ export const prBatchSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(20_000).optional(),
   token: z.string().max(500).optional(),
+  tokenId: uuidField.optional(),
+  analysisId: uuidField.optional(),
 });
 
 // ---- Helper ----

@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 import ThreatInput from "@/components/ThreatInput";
 import SkillInput, { type SkillEntry } from "@/components/SkillInput";
 import RepoInput from "@/components/RepoInput";
+import TokenPicker, { type TokenSelection } from "@/components/TokenPicker";
 import Collapsible from "@/components/Collapsible";
 import InfoTip from "@/components/InfoTip";
 import { apiPost, ApiError } from "@/lib/client";
@@ -40,7 +41,7 @@ export default function OnboardingPage() {
   const [systemDescription, setSystemDescription] = useState("");
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [repoUrl, setRepoUrl] = useState("");
-  const [token, setToken] = useState("");
+  const [tokenSel, setTokenSel] = useState<TokenSelection>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +57,10 @@ export default function OnboardingPage() {
         projectName: projectName.trim(),
         systemDescription: systemDescription.trim(),
         repoUrl: repoUrl.trim() || undefined,
-        token: token.trim() || undefined,
+        tokenId: tokenSel.tokenId || undefined,
+        token: tokenSel.token?.trim() || undefined,
+        saveToken: tokenSel.saveToken || undefined,
+        tokenName: tokenSel.tokenName?.trim() || undefined,
         skills: skills.filter((s) => s.content.trim()),
       });
       router.push(`/results/${id}`);
@@ -75,17 +79,6 @@ export default function OnboardingPage() {
           <p className="page-subtitle">
             Descreva o sistema e clique em iniciar — o StarGuard cuida das 4 fases.
           </p>
-        </div>
-        <div className="header-actions">
-          <InfoTip
-            side="bottom"
-            title="Modo demo ativo"
-            content="A análise roda ponta a ponta com dados de exemplo (fixtures), sem clonar repositório nem exigir chaves de IA. Para análise real, configure DEMO_MODE=false."
-          >
-            <span className="badge primary" style={{ cursor: "help" }}>
-              <span className="dot" /> Modo demo
-            </span>
-          </InfoTip>
         </div>
       </header>
 
@@ -125,12 +118,8 @@ export default function OnboardingPage() {
           icon={<IconRepo />}
         >
           <div style={{ display: "grid", gap: 20 }}>
-            <RepoInput
-              repoUrl={repoUrl}
-              token={token}
-              onRepoUrl={setRepoUrl}
-              onToken={setToken}
-            />
+            <RepoInput repoUrl={repoUrl} onRepoUrl={setRepoUrl} hideToken />
+            <TokenPicker value={tokenSel} onChange={setTokenSel} />
             <SkillInput skills={skills} onChange={setSkills} />
           </div>
         </Collapsible>

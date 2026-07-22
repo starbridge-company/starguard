@@ -1,10 +1,22 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
-import { validate, prSchema, parseGitHubRepo } from "@/lib/validation";
-import { DEMO_MODE } from "@/lib/config";
+import { validate, prSchema } from "@/lib/validation";
 import { audit } from "@/lib/auth";
+import * as prRepo from "@/lib/repos/pullRequests";
+import { getDecrypted } from "@/lib/repos/tokens";
+import { getAnalysisOwner } from "@/lib/jobs";
 
 export const runtime = "nodejs";
+
+/** Só linka a análise se ela pertencer a quem está abrindo o PR. */
+async function ownedAnalysisId(
+  analysisId: string | undefined,
+  userId: string
+): Promise<string | undefined> {
+  if (!analysisId) return undefined;
+  const owner = await getAnalysisOwner(analysisId);
+  return owner === userId ? analysisId : undefined;
+}
 
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
@@ -14,22 +26,14 @@ export async function POST(req: NextRequest) {
   const v = validate(prSchema, await readJson(req));
   if (!v.ok) return jsonError(400, v.message);
 
-  const ref = parseGitHubRepo(v.data.repoUrl)!;
-
-  if (DEMO_MODE) {
-    const number = 100 + (Date.now() % 900);
-    const branch = `starguard/fix-${Date.now().toString(36)}`;
-    audit("pr.open.demo", { userId: session.sub, repo: `${ref.owner}/${ref.repo}` });
-    return jsonOk({
-      number,
-      url: `https://github.com/${ref.owner}/${ref.repo}/pull/${number}`,
-      title: v.data.title,
-      branch,
-      demo: true,
-    });
-  }
+  const analysisId = await ownedAnalysisId(v.data.analysisId, session.sub);
 
   try {
+    // Token: por id salvo (decifra) ou inline.
+    let token = v.data.token;
+    if (v.data.tokenId) {
+      token = (await getDecrypted(session.sub, v.data.tokenId)) ?? undefined;
+    }
     const { openPullRequest } = await import("@/lib/github");
     const pr = await openPullRequest({
       repoUrl: v.data.repoUrl,
@@ -37,8 +41,19 @@ export async function POST(req: NextRequest) {
       fixedCode: v.data.fixedCode,
       title: v.data.title,
       body: v.data.body,
-      token: v.data.token,
+      token,
     });
+    await prRepo
+      .createPR({
+        analysisId,
+        userId: session.sub,
+        repoUrl: v.data.repoUrl,
+        number: pr.number,
+        url: pr.url,
+        title: pr.title,
+        branch: pr.branch,
+      })
+      .catch(() => {});
     audit("pr.open", { userId: session.sub, number: pr.number });
     return jsonOk(pr);
   } catch (e) {

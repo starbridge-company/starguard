@@ -1,39 +1,37 @@
 // ============================================================
-// Auth NODE-ONLY: Argon2id (hash/verify), user store, sessão,
-// blocklist de refresh e log de auditoria. NÃO importar no middleware
-// (edge) — use lib/jwt.ts lá.
+// Auth NODE-ONLY: Argon2id (hash/verify), usuários no Postgres, sessão,
+// blocklist de refresh (DB) e log de auditoria (DB). NÃO importar no
+// middleware (edge) — use lib/jwt.ts lá.
 // ============================================================
 import "server-only";
 import argon2, { type HashOptions } from "argon2";
 import type { NextRequest, NextResponse } from "next/server";
-import { ARGON, COOKIE, SESSION_SECURE, DEMO_USER } from "@/lib/config";
+import {
+  ARGON,
+  COOKIE,
+  SESSION_SECURE,
+  SEED_SUPERADMIN,
+  SEED_ADMIN,
+  type Role,
+} from "@/lib/config";
 import {
   signAccessToken,
   signRefreshToken,
   verifyToken,
   type SessionClaims,
 } from "@/lib/jwt";
+import * as usersRepo from "@/lib/repos/users";
+import * as revocations from "@/lib/repos/revocations";
+import * as auditRepo from "@/lib/repos/audit";
 
-// ---- User store (MVP: memória; troque por DB em prod) ----
+// Visão mínima de usuário usada pela sessão (compat com o restante do código).
 export interface User {
   id: string;
   email: string;
   role: string;
-  passwordHash: string;
+  name?: string;
+  passwordHash?: string;
 }
-
-interface AuthState {
-  users?: Map<string, User>;
-  revoked?: Set<string>; // jti de refresh revogados
-  audit?: { ts: number; event: string; meta: Record<string, unknown> }[];
-  seeded?: boolean;
-}
-
-const g = globalThis as unknown as { __sg_auth?: AuthState };
-g.__sg_auth ||= {};
-g.__sg_auth.users ||= new Map();
-g.__sg_auth.revoked ||= new Set();
-g.__sg_auth.audit ||= [];
 
 const ARGON_OPTS: HashOptions = {
   type: argon2.argon2id,
@@ -57,24 +55,45 @@ export async function verifyPassword(
   }
 }
 
-// Semeia o usuário demo (hash Argon2id derivado em runtime — nunca em texto puro).
+// ---- Seed idempotente dos usuários iniciais (uma vez por processo) ----
+const g = globalThis as unknown as { __sg_seed?: Promise<void> };
+
+async function seedOnce(): Promise<void> {
+  const seeds = [SEED_SUPERADMIN, SEED_ADMIN];
+  const withHashes = await Promise.all(
+    seeds.map(async (s) => ({
+      email: s.email,
+      name: s.name,
+      role: s.role as Role,
+      passwordHash: await hashPassword(s.password),
+    }))
+  );
+  await usersRepo.ensureSeed(withHashes);
+}
+
 async function ensureSeeded(): Promise<void> {
-  if (g.__sg_auth!.seeded) return;
-  const email = DEMO_USER.email.toLowerCase();
-  if (!g.__sg_auth!.users!.has(email)) {
-    g.__sg_auth!.users!.set(email, {
-      id: "u_demo",
-      email,
-      role: DEMO_USER.role,
-      passwordHash: await hashPassword(DEMO_USER.password),
+  if (!g.__sg_seed) {
+    g.__sg_seed = seedOnce().catch((e) => {
+      // Não fixa o flag em caso de falha (DB indisponível): tenta de novo depois.
+      g.__sg_seed = undefined;
+      throw e;
     });
   }
-  g.__sg_auth!.seeded = true;
+  return g.__sg_seed;
 }
 
 export async function findUser(email: string): Promise<User | undefined> {
   await ensureSeeded();
-  return g.__sg_auth!.users!.get(email.toLowerCase());
+  const row = await usersRepo.findByEmail(email);
+  return row
+    ? {
+        id: row.id,
+        email: row.email,
+        role: row.role,
+        name: row.name,
+        passwordHash: row.passwordHash,
+      }
+    : undefined;
 }
 
 /** Verifica credenciais. Retorna o usuário ou null (mensagem genérica no chamador). */
@@ -88,15 +107,22 @@ export async function authenticate(
     user?.passwordHash ||
     "$argon2id$v=19$m=19456,t=3,p=1$c29tZXNhbHRzb21lc2FsdA$0000000000000000000000000000000000000000000";
   const ok = await verifyPassword(hash, password);
-  return ok && user ? user : null;
+  if (ok && user) {
+    void usersRepo.updateLastLogin(user.id).catch(() => {});
+    return user;
+  }
+  return null;
 }
 
-// ---- Blocklist (revogação de refresh no logout) ----
-export function revokeRefresh(jti: string): void {
-  g.__sg_auth!.revoked!.add(jti);
+// ---- Blocklist (revogação de refresh no logout/rotação) — persistida ----
+export async function revokeRefresh(
+  jti: string,
+  opts?: { userId?: string; expiresAt?: Date }
+): Promise<void> {
+  await revocations.revoke(jti, opts?.userId, opts?.expiresAt);
 }
-export function isRefreshRevoked(jti: string): boolean {
-  return g.__sg_auth!.revoked!.has(jti);
+export async function isRefreshRevoked(jti: string): Promise<boolean> {
+  return revocations.isRevoked(jti);
 }
 
 // ---- Sessão / cookies ----
@@ -125,10 +151,7 @@ const baseCookie = {
   path: "/",
 };
 
-export function setSessionCookies(
-  res: NextResponse,
-  s: IssuedSession
-): void {
+export function setSessionCookies(res: NextResponse, s: IssuedSession): void {
   res.cookies.set(COOKIE.access, s.access, { ...baseCookie, maxAge: 60 * 15 });
   res.cookies.set(COOKIE.refresh, s.refresh, {
     ...baseCookie,
@@ -166,15 +189,18 @@ export function checkCsrf(req: NextRequest): boolean {
   return !!cookie && !!header && cookie === header;
 }
 
-// ---- Auditoria (sem dados sensíveis) ----
-export function audit(event: string, meta: Record<string, unknown> = {}): void {
-  const entry = { ts: Date.now(), event, meta };
-  g.__sg_auth!.audit!.push(entry);
-  if (g.__sg_auth!.audit!.length > 500) g.__sg_auth!.audit!.shift();
+// ---- Auditoria (persistida; best-effort, nunca lança) ----
+export function audit(
+  event: string,
+  meta: Record<string, unknown> = {},
+  userId?: string,
+  ipHash?: string
+): void {
   // Log estruturado, nunca senhas/tokens.
   console.log(`[audit] ${event}`, JSON.stringify(meta));
+  void auditRepo.log(event, meta, userId ?? (meta.userId as string | undefined), ipHash);
 }
 
-export function auditTrail() {
-  return g.__sg_auth!.audit!.slice(-100);
+export async function auditTrail() {
+  return auditRepo.recent(100);
 }

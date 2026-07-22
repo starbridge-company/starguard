@@ -83,8 +83,7 @@ export default function ReportPage() {
             </h2>
             <p className="muted">
               Projeto: {job.input.projectName}
-              {job.input.repoUrl ? ` · ${job.input.repoUrl}` : ""} ·{" "}
-              {job.demo ? "modo demo" : "análise real"}
+              {job.input.repoUrl ? ` · ${job.input.repoUrl}` : ""}
             </p>
           </div>
         </div>

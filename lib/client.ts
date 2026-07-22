@@ -47,3 +47,29 @@ export async function apiPost<T>(url: string, body?: unknown): Promise<T> {
   });
   return handle<T>(res);
 }
+
+export async function apiPatch<T>(url: string, body?: unknown): Promise<T> {
+  const csrf = getCookie("sg_csrf");
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      ...(csrf ? { "x-csrf-token": csrf } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handle<T>(res);
+}
+
+export async function apiDelete<T>(url: string): Promise<T> {
+  const csrf = getCookie("sg_csrf");
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      accept: "application/json",
+      ...(csrf ? { "x-csrf-token": csrf } : {}),
+    },
+  });
+  return handle<T>(res);
+}

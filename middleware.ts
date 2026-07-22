@@ -7,7 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyToken } from "@/lib/jwt";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
-import { API_RATE, LOGIN_RATE, COOKIE } from "@/lib/config";
+import { API_RATE, LOGIN_RATE, COOKIE, ROLES } from "@/lib/config";
 
 // Rotas públicas (não exigem sessão).
 const PUBLIC_PATHS = new Set<string>([
@@ -71,7 +71,16 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // RBAC mínimo (papel Superadmin no MVP).
+  // RBAC: a área de governança (/admin e /api/admin) é exclusiva do superadmin.
+  const isAdminArea =
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname.startsWith("/api/admin");
+  if (isAdminArea && claims!.role !== ROLES.superadmin) {
+    if (isApi) return json(403, { error: "Acesso restrito." });
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+
   const res = NextResponse.next();
   res.headers.set("x-sg-user", claims!.sub);
   return res;

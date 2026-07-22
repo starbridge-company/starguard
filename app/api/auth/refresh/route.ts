@@ -21,17 +21,19 @@ export async function POST(req: NextRequest) {
   if (!claims || claims.type !== "refresh" || !claims.jti) {
     return jsonError(401, "Sessão inválida.");
   }
-  if (isRefreshRevoked(claims.jti)) {
+  if (await isRefreshRevoked(claims.jti)) {
     return jsonError(401, "Sessão revogada.");
   }
 
   // Rotação: revoga o refresh atual e emite um novo par.
-  revokeRefresh(claims.jti);
+  await revokeRefresh(claims.jti, {
+    userId: claims.sub,
+    expiresAt: new Date(claims.exp * 1000),
+  });
   const user: User = {
     id: claims.sub,
     email: claims.email,
     role: claims.role,
-    passwordHash: "",
   };
   const session = await issueSession(user);
   const res = jsonOk({ ok: true, csrf: session.csrf });

@@ -26,7 +26,6 @@ interface BatchPR {
   url: string;
   branch: string;
   committed: number;
-  demo?: boolean;
 }
 
 const CONCURRENCY = 3;
@@ -59,10 +58,12 @@ function guessLang(file: string): string | undefined {
 export default function BatchFixModal({
   vulns,
   repoUrl,
+  analysisId,
   onClose,
 }: {
   vulns: Vulnerability[];
   repoUrl?: string;
+  analysisId?: string;
   onClose: () => void;
 }) {
   const [items, setItems] = useState<Record<string, ItemState>>(() =>
@@ -163,6 +164,7 @@ export default function BatchFixModal({
         files,
         title: `Correções de segurança StarGuard (${files.length})`,
         body,
+        analysisId,
       });
       setPr(result);
       setPrState("done");
@@ -265,8 +267,7 @@ export default function BatchFixModal({
           <div className="alert success">
             <IconCheckCircle />
             <span>
-              PR #{pr.number} aberto com {pr.committed} arquivo(s)
-              {pr.demo ? " (demo)" : ""}.{" "}
+              PR #{pr.number} aberto com {pr.committed} arquivo(s).{" "}
               <a
                 href={pr.url}
                 target="_blank"

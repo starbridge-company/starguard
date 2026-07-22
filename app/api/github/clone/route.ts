@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
-import { validate, cloneSchema, parseGitHubRepo } from "@/lib/validation";
-import { DEMO_MODE } from "@/lib/config";
+import { validate, cloneSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -13,19 +12,6 @@ export async function POST(req: NextRequest) {
 
   const v = validate(cloneSchema, await readJson(req));
   if (!v.ok) return jsonError(400, v.message);
-
-  const ref = parseGitHubRepo(v.data.repoUrl)!;
-
-  if (DEMO_MODE) {
-    return jsonOk({
-      fullName: `${ref.owner}/${ref.repo}`,
-      defaultBranch: "main",
-      private: false,
-      language: "JavaScript",
-      stars: 128,
-      demo: true,
-    });
-  }
 
   try {
     const { getRepoMeta } = await import("@/lib/github");

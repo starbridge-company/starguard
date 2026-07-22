@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, analyzeSchema } from "@/lib/validation";
-import { createJob, startJob } from "@/lib/jobs";
+import { createAnalysis, startJob } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 
@@ -13,14 +13,17 @@ export async function POST(req: NextRequest) {
   const v = validate(analyzeSchema, await readJson(req));
   if (!v.ok) return jsonError(400, v.message);
 
-  const job = createJob({
+  const id = await createAnalysis(session.sub, {
     projectName: v.data.projectName,
     systemDescription: v.data.systemDescription,
     repoUrl: v.data.repoUrl || undefined,
     token: v.data.token || undefined,
+    tokenId: v.data.tokenId || undefined,
+    saveToken: v.data.saveToken || undefined,
+    tokenName: v.data.tokenName || undefined,
     skills: v.data.skills || [],
   });
 
-  startJob(job.id);
-  return jsonOk({ id: job.id }, 201);
+  startJob(id);
+  return jsonOk({ id }, 201);
 }

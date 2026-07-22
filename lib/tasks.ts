@@ -1,15 +1,10 @@
 // ============================================================
-// Lógica de cada fase — decide entre fixtures (DEMO_MODE) e integração real.
-// As rotas e o orquestrador (lib/jobs) chamam estas funções. NODE-ONLY.
+// Lógica de cada fase (integração real). As rotas e o orquestrador (lib/jobs)
+// chamam estas funções. NODE-ONLY.
 // ============================================================
 import "server-only";
-import { DEMO_MODE, ENGINES } from "@/lib/config";
+import { ENGINES } from "@/lib/config";
 import { runAI, extractJSON } from "@/lib/ai";
-import {
-  demoThreatModel,
-  demoSkillValidations,
-  demoScanResult,
-} from "@/lib/fixtures";
 import type {
   ThreatModel,
   SkillValidation,
@@ -25,7 +20,6 @@ Formato: {"summary":"...","threats":[{"id":"T-01","category":"...","title":"..."
 export async function generateThreatModel(
   systemDescription: string
 ): Promise<ThreatModel> {
-  if (DEMO_MODE) return demoThreatModel(systemDescription);
   const text = await runAI("plan", {
     system: THREAT_SYSTEM,
     prompt: systemDescription.slice(0, 40000),
@@ -48,10 +42,23 @@ export async function generateThreatModel(
 export async function validateSkills(
   skills: { name: string; content: string }[]
 ): Promise<SkillValidation[]> {
-  if (DEMO_MODE) return demoSkillValidations(skills);
   if (!skills.length) return [];
   const { analyzeSkills } = await import("@/lib/skills");
   return analyzeSkills(skills);
+}
+
+// Sem repositório não há o que escanear: retorna um resultado vazio válido.
+function emptyScan(): ScanResult {
+  return {
+    sast: { engine: ENGINES.sast, ran: false, vulnerabilities: [] },
+    sca: { engine: ENGINES.sca, ran: false, dependencies: [] },
+    review: {
+      engine: "security-review",
+      ran: false,
+      findings: [],
+      note: "Nenhum repositório informado.",
+    },
+  };
 }
 
 export async function runScan(
@@ -59,7 +66,7 @@ export async function runScan(
   token: string | undefined,
   ctx?: { systemDescription?: string; requirements?: Requirement[] }
 ): Promise<ScanResult> {
-  if (DEMO_MODE || !repoUrl) return demoScanResult();
+  if (!repoUrl) return emptyScan();
 
   const { cloneRepo, cleanup } = await import("@/lib/github");
   const { runSast } = await import("@/lib/sast");
@@ -179,25 +186,6 @@ function buildFixPrompt(input: FixInput, wholeFile: string | null): string {
 }
 
 export async function generateFix(input: FixInput): Promise<FixResult> {
-  if (DEMO_MODE) {
-    const commentByLang = input.language === "python" ? "#" : "//";
-    const extra = input.userInstructions?.trim()
-      ? ` Considerando as instruções: "${input.userInstructions.trim().slice(0, 120)}".`
-      : "";
-    return {
-      vulnerabilityId: input.vulnerabilityId,
-      file: input.file,
-      language: input.language,
-      usedWholeFile: false,
-      originalCode: input.originalCode,
-      engine: "api",
-      fixedCode: `${commentByLang} StarGuard: correção de segurança aplicada — ${input.description}\n${input.suggestion || "// Trecho corrigido conforme boas práticas OWASP."}\n${input.originalCode}`,
-      explanation: `Correção proposta para "${input.description}".${extra} ${
-        input.suggestion || "Ajuste aplicado sem alterar a lógica de negócio."
-      } Revise o diff antes de abrir o PR.`,
-    };
-  }
-
   // Engine de AGENTE (Claude Code): lê o repo e edita os arquivos. Se falhar
   // (SDK ausente, sem rede, timeout), cai para o disparo único na API abaixo.
   if (ENGINES.fix === "agent" && input.repoUrl) {

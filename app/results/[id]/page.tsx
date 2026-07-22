@@ -31,11 +31,10 @@ import {
   IconSkills,
   IconScan,
   IconPackage,
-  IconShieldAlert,
   IconChevronRight,
 } from "@/lib/icons";
 
-type TabId = "overview" | "code" | "review" | "deps" | "threats" | "skills";
+type TabId = "overview" | "code" | "deps" | "threats" | "skills";
 
 const TERMINAL = new Set(["done", "error"]);
 
@@ -163,6 +162,7 @@ export default function ResultsPage() {
         fixedCode: fix.fixedCode,
         title: `Correção de segurança: ${selVuln?.title || fix.file}`,
         body: fix.explanation,
+        analysisId: job.id,
       });
       setPr(result);
       setPrState("done");
@@ -197,19 +197,27 @@ export default function ResultsPage() {
   const scan = job.phases.software.result;
   const refactor = job.phases.refactor.result;
 
-  const vulns = scan
-    ? [...scan.sast.vulnerabilities].sort(
-        (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-      )
-    : [];
+  const vulns = scan ? scan.sast.vulnerabilities : [];
   const deps = scan?.sca.dependencies || [];
   const review = scan?.review;
-  const reviewFindings = review
-    ? [...review.findings].sort(
-        (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-      )
-    : [];
-  const criticalCount = vulns.filter((v) => v.severity === "critical").length;
+  const reviewFindings = review?.findings || [];
+
+  // A revisão por IA deixa de ter aba própria: seus achados entram na lista de
+  // Correções, deduplicados contra o SAST (mesmo arquivo, linha ±3 e mesmo
+  // CWE/regra) — para não repetir uma correção que já está lá.
+  const normPath = (f: string) => f.replace(/\\/g, "/").toLowerCase();
+  const collidesWithSast = (r: Vulnerability) =>
+    vulns.some(
+      (v) =>
+        normPath(v.file) === normPath(r.file) &&
+        Math.abs((v.line || 0) - (r.line || 0)) <= 3 &&
+        ((!!v.cwe && v.cwe === r.cwe) || (!!v.ruleId && v.ruleId === r.ruleId))
+    );
+  const aiFindings = reviewFindings.filter((r) => !collidesWithSast(r));
+  const corrections = [...vulns, ...aiFindings].sort(
+    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
+  );
+  const criticalCount = corrections.filter((v) => v.severity === "critical").length;
   const skillsRejected = skills.filter((s) => s.verdict !== "approved").length;
 
   const stepMetrics = (key: PhaseKey) => {
@@ -226,8 +234,8 @@ export default function ResultsPage() {
     if (key === "software" && scan)
       return [
         { label: "SAST", value: vulns.length },
+        { label: "IA", value: aiFindings.length },
         { label: "SCA", value: deps.length },
-        { label: "IA", value: reviewFindings.length },
       ];
     if (key === "refactor" && refactor)
       return [
@@ -259,13 +267,14 @@ export default function ResultsPage() {
 
   const toggleAll = () =>
     setSelected((prev) =>
-      prev.size === vulns.length ? new Set() : new Set(vulns.map((v) => v.id))
+      prev.size === corrections.length
+        ? new Set()
+        : new Set(corrections.map((v) => v.id))
     );
 
   const sevCount = (s: Severity) =>
-    vulns.filter((v) => v.severity === s).length +
-    deps.filter((d) => d.severity === s).length +
-    reviewFindings.filter((v) => v.severity === s).length;
+    corrections.filter((v) => v.severity === s).length +
+    deps.filter((d) => d.severity === s).length;
 
   const statusText = (status: StepStatus) =>
     status === "running"
@@ -301,18 +310,8 @@ export default function ResultsPage() {
     {
       id: "code",
       label: "Correções",
-      count: vulns.length,
+      count: corrections.length,
       tone: criticalCount > 0 ? "danger" : "accent",
-    },
-    {
-      id: "review",
-      label: "Revisão IA",
-      count: reviewFindings.length,
-      tone: reviewFindings.some((v) => v.severity === "critical")
-        ? "danger"
-        : reviewFindings.some((v) => v.severity === "high")
-          ? "warning"
-          : "default",
     },
     {
       id: "deps",
@@ -330,19 +329,9 @@ export default function ResultsPage() {
     {
       id: "code" as TabId,
       Icon: IconScan,
-      label: "Código (SAST)",
+      label: "Correções de segurança",
       value: scan
-        ? `${vulns.length} vulnerabilidade(s)`
-        : statusText(job.phases.software.status),
-    },
-    {
-      id: "review" as TabId,
-      Icon: IconShieldAlert,
-      label: "Revisão IA · Regras de negócio",
-      value: scan
-        ? review?.ran
-          ? `${reviewFindings.length} achado(s)`
-          : "não executada"
+        ? `${corrections.length} correção(ões)`
         : statusText(job.phases.software.status),
     },
     {
@@ -427,11 +416,11 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {vulns.length > 0 && (
+          {corrections.length > 0 && (
             <div className="cta-banner">
               <div className="cta-text">
                 <strong>
-                  {vulns.length} vulnerabilidade(s) de código para corrigir
+                  {corrections.length} correção(ões) de segurança a aplicar
                 </strong>
                 <span className="muted">
                   {criticalCount} crítica(s). Gere correções com IA e abra um Pull
@@ -483,50 +472,57 @@ export default function ResultsPage() {
         </section>
       )}
 
-      {/* ---------- CORREÇÕES · CÓDIGO (SAST) ---------- */}
+      {/* ---------- CORREÇÕES (SAST + revisão por IA, deduplicadas) ---------- */}
       {tab === "code" && (
         <section className="panel" id="software">
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Correções · Código
+                Correções
                 <InfoTip
-                  title="Correções de código (SAST)"
-                  content="Vulnerabilidades encontradas no código-fonte. Selecione as que quer resolver e gere correções com IA — cada correção mostra o problema que resolve e pode virar um Pull Request."
+                  title="Correções de segurança"
+                  content="Reúne as vulnerabilidades do scanner (SAST) e os achados da revisão por IA (regra de negócio, IDOR/autorização, lógica multi-arquivo). Os achados da IA que repetiriam um do SAST são descartados. Selecione o que quer resolver e gere correções com IA — cada uma pode virar um Pull Request."
                 />
               </h2>
               <p className="muted">
-                Selecione as vulnerabilidades e aplique correções com IA.
+                Selecione os itens e aplique correções com IA.
+                {aiFindings.length > 0 ? (
+                  <>
+                    {" "}
+                    Inclui <strong>{aiFindings.length}</strong> achado(s) da revisão
+                    por IA.
+                  </>
+                ) : null}
               </p>
             </div>
           </div>
 
           {notReady("software", "Analisando o código-fonte…")}
 
-          {job.phases.software.status === "done" && vulns.length === 0 && (
+          {job.phases.software.status === "done" && corrections.length === 0 && (
             <div className="empty-state">
-              Nenhuma vulnerabilidade de código encontrada. 🎉
+              Nenhuma correção de segurança encontrada. 🎉
             </div>
           )}
 
-          {vulns.length > 0 && (
+          {corrections.length > 0 && (
             <>
               <div className="finding-toolbar">
                 <label className="check-inline">
                   <input
                     type="checkbox"
-                    checked={selected.size === vulns.length}
+                    checked={selected.size === corrections.length}
                     ref={(el) => {
                       if (el)
                         el.indeterminate =
-                          selected.size > 0 && selected.size < vulns.length;
+                          selected.size > 0 && selected.size < corrections.length;
                     }}
                     onChange={toggleAll}
                   />
                   Selecionar todas
                 </label>
                 <span className="muted">
-                  {selected.size} de {vulns.length} selecionadas
+                  {selected.size} de {corrections.length} selecionadas
                 </span>
                 <span style={{ flex: 1 }} />
                 <button
@@ -539,11 +535,11 @@ export default function ResultsPage() {
                 </button>
                 <InfoTip
                   title="Correção em lote"
-                  content="Selecione as vulnerabilidades e gere as correções de uma vez. No fim, você abre um único Pull Request com todas. Ou use “Corrigir com IA” em cada card para uma só."
+                  content="Selecione os achados e gere as correções de uma vez. No fim, você abre um único Pull Request com todas. Ou use “Corrigir com IA” em cada card para uma só."
                 />
               </div>
               <div className="finding-list">
-                {vulns.map((v) => (
+                {corrections.map((v) => (
                   <VulnerabilityCard
                     key={v.id}
                     vuln={v}
@@ -555,56 +551,6 @@ export default function ResultsPage() {
                 ))}
               </div>
             </>
-          )}
-        </section>
-      )}
-
-      {/* ---------- REVISÃO IA · REGRAS DE NEGÓCIO ---------- */}
-      {tab === "review" && (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title-row">
-                Revisão IA · Regras de negócio
-                <InfoTip
-                  title="Revisão por IA (skill security-review)"
-                  content="Complementa o SAST/SCA com o que scanners de padrão não pegam: violação de regra de negócio (validada contra o contexto do sistema), controle de acesso/IDOR e lógica multi-arquivo. Achados que repetiriam o SAST são descartados automaticamente."
-                />
-              </h2>
-              <p className="muted">
-                {review?.engine || "security-review (IA)"}
-                {review?.model ? ` · ${review.model}` : ""}
-              </p>
-            </div>
-          </div>
-
-          {notReady("software", "Revisando o código com IA…")}
-
-          {job.phases.software.status === "done" && review && !review.ran && (
-            <div className="alert info">{review.note || "Revisão por IA não executada."}</div>
-          )}
-
-          {job.phases.software.status === "done" &&
-            review?.ran &&
-            reviewFindings.length === 0 && (
-              <div className="empty-state">
-                Nenhum achado de regra de negócio ou autorização além do que o SAST já
-                cobriu. 🎉
-              </div>
-            )}
-
-          {reviewFindings.length > 0 && (
-            <div className="finding-list">
-              {reviewFindings.map((v) => (
-                <VulnerabilityCard key={v.id} vuln={v} onFix={openFix} />
-              ))}
-            </div>
-          )}
-
-          {review?.ran && review.note && reviewFindings.length > 0 && (
-            <p className="muted" style={{ marginTop: 4 }}>
-              {review.note}
-            </p>
           )}
 
           {review?.unverifiedRules && review.unverifiedRules.length > 0 && (
@@ -763,8 +709,9 @@ export default function ResultsPage() {
 
       {batchOpen && (
         <BatchFixModal
-          vulns={vulns.filter((v) => selected.has(v.id))}
+          vulns={corrections.filter((v) => selected.has(v.id))}
           repoUrl={job.input.repoUrl}
+          analysisId={job.id}
           onClose={() => setBatchOpen(false)}
         />
       )}

@@ -8,8 +8,8 @@ import { IconShield } from "@/lib/icons";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@starguard.local");
-  const [password, setPassword] = useState("StarGuard!2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,9 +90,7 @@ export default function LoginPage() {
         </div>
 
         <p className="auth-hint">
-          Ambiente de governança (MVP). Credenciais demo já preenchidas:
-          <br />
-          <code>admin@starguard.local</code> · <code>StarGuard!2026</code>
+          Acesso restrito. Use as credenciais fornecidas pelo administrador.
         </p>
       </form>
     </div>

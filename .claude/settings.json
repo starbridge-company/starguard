@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -Ev \"^$|^>\")",
+      "Bash(node _verify.mjs)",
+      "Bash(rm -f _verify.mjs)",
+      "Bash(node _cleanup.mjs)",
+      "Bash(rm -f _cleanup.mjs _smoke.mjs)",
+      "PowerShell($conns = Get-NetTCPConnection -LocalPort 3123 -State Listen -ErrorAction SilentlyContinue; if \\($conns\\) { $conns | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch { \"falha PID $_\" } } } else { \"nenhum processo escutando na 3123\" })",
+      "Bash(node _usertest.mjs)",
+      "Bash(rm -f _usertest.mjs)",
+      "Bash(node _cleanup2.mjs)",
+      "Bash(rm -f _cleanup2.mjs)",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3124 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3124\" })",
+      "Bash(curl -s -o /dev/null -w \"health: %{http_code}\\\\n\" http://localhost:3125/api/health)",
+      "Bash(node _proftest.mjs)",
+      "Bash(rm -f _proftest.mjs)",
+      "Bash(node _cleanup3.mjs)",
+      "Bash(rm -f _cleanup3.mjs)",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3125 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3125\" })",
+      "Bash(curl -s -o /dev/null -w \"health: %{http_code}\\\\n\" http://localhost:3126/api/health)",
+      "Bash(node _mgmttest.mjs)",
+      "Bash(rm -f _mgmttest.mjs)",
+      "Bash(node _cleanup4.mjs)",
+      "Bash(rm -f _cleanup4.mjs)",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3126 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3126\" })",
+      "Bash(node -e \"import\\('./scripts/load-env.mjs'\\).then\\(async\\(\\)=>{const pg=\\(await import\\('pg'\\)\\).default;const c=new pg.Client\\({connectionString:process.env.DATABASE_URL}\\);await c.connect\\(\\);const r=await c.query\\(\\\\\"select table_name, column_name from information_schema.columns where table_schema='starguard' and column_name='demo'\\\\\"\\);console.log\\('colunas demo restantes:', r.rowCount\\);await c.end\\(\\);}\\)\")",
+      "Bash(node _monitest.mjs)",
+      "Bash(rm -f _monitest.mjs)",
+      "Bash(node _cleanup5.mjs)",
+      "Bash(rm -f _cleanup5.mjs _probe.mjs _dbcheck.mjs _dbstate.mjs)",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3127 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3127\" })"
+    ]
+  }
+}

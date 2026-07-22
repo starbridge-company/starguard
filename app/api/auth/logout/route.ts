@@ -11,7 +11,10 @@ export async function POST(req: NextRequest) {
   if (token) {
     const claims = await verifyToken(token);
     if (claims?.jti) {
-      revokeRefresh(claims.jti); // blocklist
+      await revokeRefresh(claims.jti, {
+        userId: claims.sub,
+        expiresAt: new Date(claims.exp * 1000),
+      }); // blocklist
       audit("logout", { userId: claims.sub });
     }
   }

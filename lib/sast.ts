@@ -41,7 +41,7 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
     }
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
-        `Binário do SAST (${bin}) não encontrado no host. Instale-o ou use DEMO_MODE.`
+        `Binário do SAST (${bin}) não encontrado no host. Instale-o para habilitar o scan de código.`
       );
     }
     throw new ScanUnavailable(`Falha no SAST: ${(err.message || "").slice(0, 200)}`);

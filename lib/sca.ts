@@ -44,7 +44,7 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
     }
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
-        `Binário do SCA (${BIN.trivy}) não encontrado no host. Instale-o ou use DEMO_MODE.`
+        `Binário do SCA (${BIN.trivy}) não encontrado no host. Instale-o para habilitar a análise de dependências.`
       );
     }
     throw new ScanUnavailable(`Falha no SCA: ${(err.message || "").slice(0, 200)}`);

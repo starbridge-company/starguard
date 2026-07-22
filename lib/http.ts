@@ -5,6 +5,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession, checkCsrf } from "@/lib/auth";
 import type { SessionClaims } from "@/lib/jwt";
+import { ROLES, type Role } from "@/lib/config";
 
 function harden(res: NextResponse): NextResponse {
   res.headers.set("X-Content-Type-Options", "nosniff");
@@ -30,6 +31,32 @@ export async function requireSession(
 /** Valida CSRF (double-submit) para métodos que mudam estado. */
 export function requireCsrf(req: NextRequest): boolean {
   return checkCsrf(req);
+}
+
+/**
+ * Exige uma sessão com o papel informado. Superadmin passa em qualquer
+ * exigência (vê tudo). Retorna as claims ou null (o chamador responde 401/403).
+ */
+export async function requireRole(
+  req: NextRequest,
+  role: Role
+): Promise<SessionClaims | null> {
+  const s = await getSession(req);
+  if (!s) return null;
+  if (s.role === ROLES.superadmin || s.role === role) return s;
+  return null;
+}
+
+export function isSuperadmin(s: SessionClaims | null | undefined): boolean {
+  return s?.role === ROLES.superadmin;
+}
+
+/** Dono do recurso OU superadmin (que enxerga tudo de todos). */
+export function canAccess(
+  s: SessionClaims,
+  ownerId: string
+): boolean {
+  return s.role === ROLES.superadmin || s.sub === ownerId;
 }
 
 /** Lê e faz JSON.parse do body com limite defensivo. */

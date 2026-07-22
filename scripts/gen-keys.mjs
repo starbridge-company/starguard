@@ -50,6 +50,11 @@ if (FORCE || !present.COOKIE_SECRET) {
   additions.push(`COOKIE_SECRET=${randomBytes(32).toString("hex")}`);
 }
 
+// Chave AES-256-GCM (32 bytes em base64) para cifrar os tokens do GitHub.
+if (FORCE || !present.TOKEN_ENC_KEY) {
+  additions.push(`TOKEN_ENC_KEY=${randomBytes(32).toString("base64")}`);
+}
+
 if (additions.length === 0) {
   console.log("[gen-keys] chaves já presentes em .env.local — nada a fazer.");
   process.exit(0);

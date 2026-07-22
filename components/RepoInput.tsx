@@ -8,11 +8,13 @@ export default function RepoInput({
   token,
   onRepoUrl,
   onToken,
+  hideToken = false,
 }: {
   repoUrl: string;
-  token: string;
+  token?: string;
   onRepoUrl: (v: string) => void;
-  onToken: (v: string) => void;
+  onToken?: (v: string) => void;
+  hideToken?: boolean;
 }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -23,7 +25,7 @@ export default function RepoInput({
           </span>
           <InfoTip
             title="URL do repositório"
-            content="Somente github.com é aceito (allowlist anti-SSRF). Opcional em modo demo — sem repositório, a Fase 3 usa fixtures de exemplo."
+            content="Somente github.com é aceito (allowlist anti-SSRF). Sem repositório, a Fase 3 (scan de código) não roda — as demais fases seguem normalmente."
           />
         </label>
         <input
@@ -37,26 +39,28 @@ export default function RepoInput({
         />
       </div>
 
-      <div className="field">
-        <label htmlFor="repo-token" className="field-label-row">
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <IconKey /> Token de acesso
-          </span>
-          <InfoTip
-            title="Personal Access Token"
-            content="Necessário apenas para repositórios privados. O token vive só em memória durante o job e nunca é persistido nem devolvido ao cliente."
+      {!hideToken && (
+        <div className="field">
+          <label htmlFor="repo-token" className="field-label-row">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <IconKey /> Token de acesso
+            </span>
+            <InfoTip
+              title="Personal Access Token"
+              content="Necessário apenas para repositórios privados. O token vive só em memória durante o job e nunca é persistido nem devolvido ao cliente."
+            />
+          </label>
+          <input
+            id="repo-token"
+            className="input"
+            type="password"
+            autoComplete="off"
+            placeholder="ghp_… (opcional)"
+            value={token || ""}
+            onChange={(e) => onToken?.(e.target.value)}
           />
-        </label>
-        <input
-          id="repo-token"
-          className="input"
-          type="password"
-          autoComplete="off"
-          placeholder="ghp_… (opcional)"
-          value={token}
-          onChange={(e) => onToken(e.target.value)}
-        />
-      </div>
+        </div>
+      )}
     </div>
   );
 }

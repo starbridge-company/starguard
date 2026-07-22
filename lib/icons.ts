@@ -37,6 +37,17 @@ export {
   HiOutlineInformationCircle as IconInfo,
   HiOutlineChevronDown as IconChevronDown,
   HiOutlineQuestionMarkCircle as IconHelp,
+  HiOutlineUsers as IconUsers,
+  HiOutlineUserCircle as IconUser,
+  HiOutlineTrash as IconTrash,
+  HiOutlinePlus as IconPlus,
+  HiOutlineChartBar as IconChart,
+  HiOutlineClock as IconClock,
+  HiOutlineSearch as IconSearch,
+  HiOutlineCalendar as IconCalendar,
+  HiOutlineFilter as IconFilter,
+  HiOutlinePencil as IconPencil,
+  HiOutlineDesktopComputer as IconMonitor,
 } from "react-icons/hi";
 
 export { VscGitPullRequestCreate as IconPullRequest } from "react-icons/vsc";

@@ -184,7 +184,6 @@ export interface JobInputPublic {
 export interface Job {
   id: string;
   createdAt: number;
-  demo: boolean;
   input: JobInputPublic;
   progress: number; // 0..100
   phases: {

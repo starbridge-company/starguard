@@ -1,45 +1,44 @@
 // ============================================================
-// Orquestração das 4 fases + store em memória (MVP).
-// /api/analyze cria o job e dispara runJob (fire-and-forget); a Tela 2
-// faz polling em /api/status/[id]. Token do GitHub vive só em memória
-// durante o job e é apagado ao final.
+// Orquestração das 4 fases + persistência no Postgres.
+// /api/analyze cria a linha (status pending) e dispara runJob (fire-and-forget);
+// a Tela 2 faz polling em /api/status/[id] (lê do BD). Segredos (token do
+// GitHub decifrado + conteúdo das skills) vivem APENAS num mapa em memória
+// durante o job e são apagados no fim — nunca são persistidos.
 // ============================================================
 import "server-only";
-import { DEMO_MODE, AI_BY_PHASE, ENGINES, FIX_AGENT } from "@/lib/config";
+import { AI_BY_PHASE, ENGINES, FIX_AGENT, engineSummary } from "@/lib/config";
 import {
   generateThreatModel,
   validateSkills,
   runScan,
   generateFix,
 } from "@/lib/tasks";
-import { demoFixes } from "@/lib/fixtures";
 import { audit } from "@/lib/auth";
+import * as analysesRepo from "@/lib/repos/analyses";
+import * as tokensRepo from "@/lib/repos/tokens";
 import type {
   Job,
   JobInput,
+  JobInputPublic,
   PhaseKey,
   PhaseState,
   ScanResult,
+  Severity,
   Vulnerability,
 } from "@/types";
 import { SEVERITY_ORDER } from "@/types";
 
-interface Entry {
-  job: Job;
-  raw: JobInput;
+// Segredos transitórios (nunca vão ao BD).
+interface Transient {
+  systemDescription: string;
+  repoUrl?: string;
+  token?: string;
+  skills: { name: string; content: string }[];
 }
 
-const g = globalThis as unknown as { __sg_jobs?: Map<string, Entry> };
-g.__sg_jobs ||= new Map();
-const store = g.__sg_jobs!;
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const DEMO_DELAY: Record<PhaseKey, number> = {
-  plan: 1200,
-  skills: 1100,
-  software: 1800,
-  refactor: 1200,
-};
+const g = globalThis as unknown as { __sg_secrets?: Map<string, Transient> };
+g.__sg_secrets ||= new Map();
+const secrets = g.__sg_secrets!;
 
 function engineLabels(phase: PhaseKey): string[] {
   const ai = AI_BY_PHASE[phase];
@@ -59,55 +58,146 @@ function newPhase<T>(key: PhaseKey, label: string): PhaseState<T> {
   };
 }
 
-export function createJob(raw: JobInput): Job {
-  const id = `job_${crypto.randomUUID().slice(0, 8)}`;
-  const job: Job = {
-    id,
-    createdAt: Date.now(),
-    demo: DEMO_MODE,
-    input: {
-      projectName: raw.projectName,
-      systemDescription: raw.systemDescription,
-      repoUrl: raw.repoUrl,
-      hasToken: !!raw.token,
-      skillNames: (raw.skills || []).map((s) => s.name),
-    },
-    progress: 0,
-    phases: {
-      plan: newPhase("plan", "Plan · Modelagem de ameaças"),
-      skills: newPhase("skills", "Code · Validação de Skills"),
-      software: newPhase("software", "Code · Scan do software"),
-      refactor: newPhase("refactor", "Refactor · Correção"),
-    },
+function initialPhases(): Job["phases"] {
+  return {
+    plan: newPhase("plan", "Plan · Modelagem de ameaças"),
+    skills: newPhase("skills", "Code · Validação de Skills"),
+    software: newPhase("software", "Code · Scan do software"),
+    refactor: newPhase("refactor", "Refactor · Correção"),
   };
-  store.set(id, { job, raw });
-  return job;
 }
 
-export function getJob(id: string): Job | undefined {
-  return store.get(id)?.job;
+/**
+ * Resolve o token a usar: por id de token salvo (decifra) ou token inline.
+ * Se pediram para salvar um token novo, persiste cifrado (best-effort).
+ */
+async function resolveToken(
+  userId: string,
+  input: {
+    token?: string;
+    tokenId?: string;
+    saveToken?: boolean;
+    tokenName?: string;
+  }
+): Promise<string | undefined> {
+  if (input.tokenId) {
+    const plain = await tokensRepo.getDecrypted(userId, input.tokenId);
+    return plain ?? undefined;
+  }
+  if (input.token && input.saveToken && input.tokenName) {
+    try {
+      await tokensRepo.createToken(userId, input.tokenName, input.token);
+    } catch {
+      /* salvar o token não pode derrubar a análise */
+    }
+  }
+  return input.token || undefined;
+}
+
+export interface CreateAnalysisInput extends JobInput {
+  tokenId?: string;
+  saveToken?: boolean;
+  tokenName?: string;
+}
+
+/** Cria a análise no BD (status pending) e guarda os segredos em memória. */
+export async function createAnalysis(
+  userId: string,
+  input: CreateAnalysisInput
+): Promise<string> {
+  const token = await resolveToken(userId, input);
+  const id = await analysesRepo.createAnalysis({
+    userId,
+    projectName: input.projectName,
+    systemDescription: input.systemDescription,
+    repoUrl: input.repoUrl || null,
+    engineSummary: engineSummary() as unknown as Record<string, unknown>,
+    phases: initialPhases(),
+  });
+  secrets.set(id, {
+    systemDescription: input.systemDescription,
+    repoUrl: input.repoUrl || undefined,
+    token,
+    skills: input.skills || [],
+  });
+  return id;
+}
+
+/** Reconstrói o shape de Job (consumido por results/report) a partir da linha. */
+export async function getAnalysis(id: string): Promise<Job | undefined> {
+  const row = await analysesRepo.getById(id);
+  if (!row) return undefined;
+  const phases = (row.phases as Job["phases"]) ?? initialPhases();
+  const skillNames = phases.skills?.result?.map((s) => s.skillName) ?? [];
+  const input: JobInputPublic = {
+    projectName: row.projectName,
+    systemDescription: row.systemDescription,
+    repoUrl: row.repoUrl ?? undefined,
+    hasToken: false,
+    skillNames,
+  };
+  return {
+    id: row.id,
+    createdAt: row.createdAt.getTime(),
+    input,
+    progress: row.progress,
+    phases,
+  };
+}
+
+/** Retorna o dono da análise (para checagem de acesso na rota). */
+export async function getAnalysisOwner(id: string): Promise<string | undefined> {
+  const row = await analysesRepo.getById(id);
+  return row?.userId;
 }
 
 function topVulnerability(scan?: ScanResult): Vulnerability | undefined {
   if (!scan) return undefined;
-  // Considera SAST + revisão por IA: uma violação crítica de regra de negócio
-  // também pode virar a correção destacada da Fase 4.
   const pool = [...scan.sast.vulnerabilities, ...(scan.review?.findings || [])];
   return pool.sort(
     (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
   )[0];
 }
 
+function computeMetrics(phases: Job["phases"]): analysesRepo.AnalysisMetrics {
+  const scan = phases.software.result;
+  const refactor = phases.refactor.result;
+  const sast = scan?.sast.vulnerabilities ?? [];
+  const sca = scan?.sca.dependencies ?? [];
+  const review = scan?.review?.findings ?? [];
+  const sev = (s: Severity) =>
+    sast.filter((v) => v.severity === s).length +
+    review.filter((v) => v.severity === s).length +
+    sca.filter((d) => d.severity === s).length;
+  return {
+    criticalCount: sev("critical"),
+    highCount: sev("high"),
+    mediumCount: sev("medium"),
+    lowCount: sev("low"),
+    infoCount: sev("info"),
+    sastCount: sast.length,
+    scaCount: sca.length,
+    reviewCount: review.length,
+    fixesCount: refactor?.fixes.length ?? 0,
+    prsCount: refactor?.prs.length ?? 0,
+    totalFindings: sast.length + sca.length + review.length,
+  };
+}
+
 async function runPhase<T>(
-  job: Job,
+  phases: Job["phases"],
+  id: string,
   key: PhaseKey,
   fn: () => Promise<T>
 ): Promise<void> {
-  const ph = job.phases[key] as PhaseState<T>;
+  const ph = phases[key] as PhaseState<T>;
   ph.status = "running";
   ph.startedAt = Date.now();
+  // Persiste o "running" para o polling refletir o andamento em tempo real.
+  await analysesRepo
+    .patchAnalysis(id, { phases, status: "running" })
+    .catch(() => {});
   try {
-    if (job.demo) await sleep(DEMO_DELAY[key]);
     ph.result = await fn();
     ph.status = "done";
   } catch (e) {
@@ -119,32 +209,37 @@ async function runPhase<T>(
 }
 
 export async function runJob(id: string): Promise<void> {
-  const entry = store.get(id);
-  if (!entry) return;
-  const { job, raw } = entry;
-  audit("analyze.start", { jobId: id, demo: job.demo });
+  const raw = secrets.get(id);
+  if (!raw) return;
+  const phases = initialPhases();
+  audit("analyze.start", { jobId: id });
+
+  const persist = (progress: number) =>
+    analysesRepo.patchAnalysis(id, { phases, progress }).catch(() => {});
 
   try {
-    await runPhase(job, "plan", () =>
+    await analysesRepo
+      .patchAnalysis(id, { status: "running", startedAt: new Date() })
+      .catch(() => {});
+
+    await runPhase(phases, id, "plan", () =>
       generateThreatModel(raw.systemDescription)
     );
-    job.progress = 25;
+    await persist(25);
 
-    await runPhase(job, "skills", () => validateSkills(raw.skills || []));
-    job.progress = 50;
+    await runPhase(phases, id, "skills", () => validateSkills(raw.skills || []));
+    await persist(50);
 
-    await runPhase(job, "software", () =>
+    await runPhase(phases, id, "software", () =>
       runScan(raw.repoUrl, raw.token, {
         systemDescription: raw.systemDescription,
-        // Requisitos da Fase 1 alimentam a validação de regra de negócio.
-        requirements: job.phases.plan.result?.requirements,
+        requirements: phases.plan.result?.requirements,
       })
     );
-    job.progress = 80;
+    await persist(80);
 
-    await runPhase(job, "refactor", async () => {
-      if (job.demo) return demoFixes();
-      const scan = job.phases.software.result;
+    await runPhase(phases, id, "refactor", async () => {
+      const scan = phases.software.result;
       const top = topVulnerability(scan);
       const fixes = top?.codeSnippet
         ? [
@@ -159,11 +254,32 @@ export async function runJob(id: string): Promise<void> {
         : [];
       return { fixes, prs: [] };
     });
-    job.progress = 100;
+
+    const anyError = (Object.values(phases) as PhaseState[]).some(
+      (p) => p.status === "error"
+    );
+    await analysesRepo.patchAnalysis(id, {
+      phases,
+      progress: 100,
+      status: anyError ? "error" : "done",
+      finishedAt: new Date(),
+      metrics: computeMetrics(phases),
+    });
     audit("analyze.done", { jobId: id });
+  } catch (e) {
+    // Falha inesperada fora das fases: marca a análise como erro.
+    await analysesRepo
+      .patchAnalysis(id, {
+        phases,
+        status: "error",
+        finishedAt: new Date(),
+        metrics: computeMetrics(phases),
+      })
+      .catch(() => {});
+    console.error(`[job ${id}] erro inesperado`, e);
   } finally {
-    // Token só em memória durante o job.
-    raw.token = undefined;
+    // Token e skills só vivem em memória durante o job.
+    secrets.delete(id);
   }
 }
 

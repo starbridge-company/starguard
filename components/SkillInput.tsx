@@ -53,7 +53,7 @@ export default function SkillInput({
         </span>
         <InfoTip
           title="Validação de skills"
-          content="Envie SKILL.md, prompts ou templates para a Fase 2 checar prompt-injection, exfiltração de dados e desvio de política. Opcional — em modo demo, um exemplo com prompt-injection já é analisado mesmo sem envio."
+          content="Envie SKILL.md, prompts ou templates para a Fase 2 checar prompt-injection, exfiltração de dados e desvio de política. Opcional."
         />
       </label>
 
