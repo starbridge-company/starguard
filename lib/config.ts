@@ -93,9 +93,18 @@ export function parseRate(spec: string, fallback: RateSpec): RateSpec {
   return { max, windowMs: n * ms };
 }
 
-export const LOGIN_RATE = parseRate(process.env.LOGIN_RATE_LIMIT || "5/15m", {
-  max: 5,
-  windowMs: 15 * 60_000,
+// Cota de login por CONTA+IP, cobrada apenas em tentativa FALHA (a rota zera o
+// balde no sucesso). É o freio contra força bruta numa conta específica.
+export const LOGIN_RATE = parseRate(process.env.LOGIN_RATE_LIMIT || "10/10m", {
+  max: 10,
+  windowMs: 10 * 60_000,
+});
+
+// Cota por IP puro, bem mais larga: freia enumeração de contas (muitos e-mails
+// diferentes a partir do mesmo lugar) sem punir quem só está entrando de novo.
+export const LOGIN_IP_RATE = parseRate(process.env.LOGIN_IP_RATE_LIMIT || "30/10m", {
+  max: 30,
+  windowMs: 10 * 60_000,
 });
 
 export const API_RATE = parseRate(process.env.API_RATE_LIMIT || "100/1m", {

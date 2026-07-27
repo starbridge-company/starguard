@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, cloneSchema } from "@/lib/validation";
+import { redact } from "@/lib/redact";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     const meta = await getRepoMeta(v.data.repoUrl, v.data.token);
     return jsonOk(meta);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao acessar o repositório.";
+    const msg = e instanceof Error ? redact(e.message) : "Falha ao acessar o repositório.";
     return jsonError(502, msg);
   }
 }

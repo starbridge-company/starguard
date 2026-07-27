@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, prBatchSchema } from "@/lib/validation";
+import { redact } from "@/lib/redact";
 import { audit } from "@/lib/auth";
 import * as prRepo from "@/lib/repos/pullRequests";
 import { getDecrypted } from "@/lib/repos/tokens";
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
     });
     return jsonOk(pr);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao abrir o PR.";
+    const msg = e instanceof Error ? redact(e.message) : "Falha ao abrir o PR.";
     return jsonError(502, msg);
   }
 }

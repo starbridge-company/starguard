@@ -7,8 +7,10 @@ import {
   revokeRefresh,
   isRefreshRevoked,
   audit,
+  hashIp,
   type User,
 } from "@/lib/auth";
+import { clientIp } from "@/lib/ratelimit";
 import { COOKIE } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -38,6 +40,6 @@ export async function POST(req: NextRequest) {
   const session = await issueSession(user);
   const res = jsonOk({ ok: true, csrf: session.csrf });
   setSessionCookies(res, session);
-  audit("token.refresh", { userId: user.id });
+  audit("token.refresh", { userId: user.id }, user.id, hashIp(clientIp(req.headers)));
   return res;
 }

@@ -5,7 +5,8 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
 import NewUserModal from "@/components/NewUserModal";
-import { apiGet, apiPatch, apiDelete, ApiError } from "@/lib/client";
+import { apiGet, apiPatch, apiDelete, ApiError, isAbortError } from "@/lib/client";
+import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { useMe } from "@/lib/useMe";
 import { SearchBox, RoleSelect } from "@/components/filters";
@@ -37,22 +38,30 @@ export default function AdminUsersPage() {
   const [roleBusy, setRoleBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), pageSize: "20" });
-      if (q.trim()) params.set("q", q.trim());
-      setData(await apiGet<Paged<Row>>(`/api/admin/users?${params}`));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar os usuários.");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, q]);
+  const qDebounced = useDebounced(q);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: "20" });
+        if (qDebounced.trim()) params.set("q", qDebounced.trim());
+        setData(await apiGet<Paged<Row>>(`/api/admin/users?${params}`, { signal }));
+      } catch (e) {
+        if (isAbortError(e)) return;
+        setError(e instanceof ApiError ? e.message : "Falha ao carregar os usuários.");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [page, qDebounced]
+  );
 
   useEffect(() => {
-    load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   const changeRole = async (id: string, role: "admin" | "superadmin") => {

@@ -9,6 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGitHubRepo, type GitHubRepoRef } from "@/lib/validation";
+import { redactError } from "@/lib/redact";
 
 const pExecFile = promisify(execFile);
 
@@ -51,10 +52,25 @@ export async function cloneRepo(
       ],
       { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 }
     );
+
+    // `git clone https://token@host/...` grava a URL COM o token no
+    // .git/config do clone. O diretório sobrevive durante todo o job (e o
+    // agente da Fase 4 lê arquivos ali dentro) — então apagamos a credencial
+    // do remote assim que o clone termina. Ver AUDITORIA.md#SEC-01.
+    if (token) {
+      await pExecFile("git", ["remote", "set-url", "origin", `${ref.url}.git`], {
+        cwd: dir,
+        timeout: 15_000,
+      }).catch(() => {
+        /* sem remote (ou git antigo): o clone segue utilizável */
+      });
+    }
     return { dir, ref };
   } catch (e) {
     await cleanup(dir);
-    const msg = e instanceof Error ? e.message : String(e);
+    // A mensagem do git repete a URL do remote — que carrega o token. Redigir
+    // ANTES de propagar: este texto vai para o JSONB `phases` e para a tela.
+    const msg = redactError(e);
     if (/not found|command not found|ENOENT/i.test(msg)) {
       throw new ScanUnavailable("git não encontrado no host.");
     }

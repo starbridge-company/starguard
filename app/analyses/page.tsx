@@ -5,7 +5,8 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
 import { SearchBox, Segmented, DateRange } from "@/components/filters";
-import { apiGet, ApiError } from "@/lib/client";
+import { apiGet, ApiError, isAbortError } from "@/lib/client";
+import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { IconReport, IconBolt, IconExternal } from "@/lib/icons";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
@@ -44,25 +45,36 @@ export default function AnalysesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), pageSize: "20" });
-      if (q.trim()) params.set("q", q.trim());
-      if (status) params.set("status", status);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      setData(await apiGet<Paged<Row>>(`/api/analyses?${params}`));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar as análises.");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, q, status, from, to]);
+  // A busca só chega aqui depois que o usuário para de digitar.
+  const qDebounced = useDebounced(q);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: "20" });
+        if (qDebounced.trim()) params.set("q", qDebounced.trim());
+        if (status) params.set("status", status);
+        if (from) params.set("from", from);
+        if (to) params.set("to", to);
+        setData(await apiGet<Paged<Row>>(`/api/analyses?${params}`, { signal }));
+      } catch (e) {
+        if (isAbortError(e)) return; // substituída por uma busca mais nova
+        setError(e instanceof ApiError ? e.message : "Falha ao carregar as análises.");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [page, qDebounced, status, from, to]
+  );
 
   useEffect(() => {
-    load();
+    // Aborta a requisição anterior: evita que uma resposta atrasada
+    // sobrescreva o resultado do filtro atual.
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   // Busca reinicia para a página 1.

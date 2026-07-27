@@ -7,7 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyToken } from "@/lib/jwt";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
-import { API_RATE, LOGIN_RATE, COOKIE, ROLES } from "@/lib/config";
+import { API_RATE, COOKIE, ROLES } from "@/lib/config";
 
 // Rotas públicas (não exigem sessão).
 const PUBLIC_PATHS = new Set<string>([
@@ -19,6 +19,15 @@ const PUBLIC_PATHS = new Set<string>([
 
 function isPublic(path: string): boolean {
   return PUBLIC_PATHS.has(path);
+}
+
+// Rotas fora do balde global por IP:
+//  - /api/auth/login  -> cobrado na própria rota, só quando a tentativa falha.
+//  - /api/status/*    -> polling da tela de resultados (já com backoff no
+//                        cliente); o custo da UI não pode consumir a cota
+//                        anti-abuso e derrubar a própria tela.
+function isRateExempt(path: string): boolean {
+  return path === "/api/auth/login" || path.startsWith("/api/status/");
 }
 
 function json(status: number, body: unknown): NextResponse {
@@ -34,10 +43,14 @@ export async function middleware(req: NextRequest) {
   const ip = clientIp(req.headers);
 
   // ---- Rate limit ----
-  if (isApi) {
-    const spec = pathname === "/api/auth/login" ? LOGIN_RATE : API_RATE;
-    const keyPrefix = pathname === "/api/auth/login" ? "login" : "api";
-    const rl = rateLimit(`${keyPrefix}:${ip}`, spec);
+  // O login NÃO é cobrado aqui: só a rota conhece o e-mail e sabe se a
+  // tentativa falhou. Cobrar nos dois lugares gastava a cota em dobro e
+  // trancava quem só estava entrando de novo (com a sessão expirando em 15min,
+  // uma manhã de trabalho estourava o limite). Ver AUDITORIA.md#BUG-02.
+  // O polling da tela de resultados também fica de fora: é a própria interface
+  // conversando com o servidor, não abuso — ver AUDITORIA.md#BUG-03.
+  if (isApi && !isRateExempt(pathname)) {
+    const rl = rateLimit(`api:${ip}`, API_RATE);
     if (!rl.allowed) {
       const res = json(429, {
         error: "Muitas requisições. Tente novamente em instantes.",

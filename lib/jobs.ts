@@ -14,6 +14,7 @@ import {
   generateFix,
 } from "@/lib/tasks";
 import { audit } from "@/lib/auth";
+import { redactError } from "@/lib/redact";
 import * as analysesRepo from "@/lib/repos/analyses";
 import * as tokensRepo from "@/lib/repos/tokens";
 import type {
@@ -202,7 +203,9 @@ async function runPhase<T>(
     ph.status = "done";
   } catch (e) {
     ph.status = "error";
-    ph.error = e instanceof Error ? e.message : "Falha na etapa.";
+    // Redigido: este texto é PERSISTIDO no JSONB e exibido na tela; erros de
+    // ferramenta externa podem carregar credenciais (AUDITORIA.md#SEC-01).
+    ph.error = redactError(e) || "Falha na etapa.";
   } finally {
     ph.finishedAt = Date.now();
   }

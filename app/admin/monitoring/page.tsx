@@ -10,7 +10,8 @@ import {
   UserSelect,
   type UserOption,
 } from "@/components/filters";
-import { apiGet, ApiError } from "@/lib/client";
+import { apiGet, ApiError, isAbortError } from "@/lib/client";
+import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate, AuditBadge } from "@/components/listing";
 import { CATEGORY_META, CATEGORY_ORDER } from "@/lib/audit-events";
@@ -67,26 +68,34 @@ export default function MonitoringPage() {
     fn();
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), pageSize: "25" });
-      if (q.trim()) params.set("q", q.trim());
-      if (category) params.set("category", category);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
-      if (userId) params.set("userId", userId);
-      setData(await apiGet<Paged<Row>>(`/api/admin/audit?${params}`));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar os logs.");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, q, category, from, to, userId]);
+  const qDebounced = useDebounced(q);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: "25" });
+        if (qDebounced.trim()) params.set("q", qDebounced.trim());
+        if (category) params.set("category", category);
+        if (from) params.set("from", from);
+        if (to) params.set("to", to);
+        if (userId) params.set("userId", userId);
+        setData(await apiGet<Paged<Row>>(`/api/admin/audit?${params}`, { signal }));
+      } catch (e) {
+        if (isAbortError(e)) return;
+        setError(e instanceof ApiError ? e.message : "Falha ao carregar os logs.");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [page, qDebounced, category, from, to, userId]
+  );
 
   useEffect(() => {
-    load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   const rows = data?.items || [];
@@ -102,7 +111,7 @@ export default function MonitoringPage() {
           </p>
         </div>
         <div className="header-actions">
-          <button type="button" className="button ghost" onClick={load}>
+          <button type="button" className="button ghost" onClick={() => void load()}>
             <IconRefresh /> Atualizar
           </button>
         </div>

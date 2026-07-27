@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getTheme, toggleTheme, initTheme, type Theme } from "@/lib/theme";
 import { useMe, clearMe } from "@/lib/useMe";
+import { apiPost, refreshIfStale } from "@/lib/client";
 import {
   IconBolt,
   IconReport,
@@ -82,9 +83,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setThemeState(getTheme());
   }, []);
 
+  // Mantém a sessão viva enquanto a aba estiver em uso. O access token dura
+  // 15 min; renovamos a cada 5 (se já tiver mais de 10 de idade) e ao voltar
+  // para a aba, para que ninguém seja expulso no meio do trabalho.
+  // Ver AUDITORIA.md#BUG-01.
+  useEffect(() => {
+    const KEEPALIVE_MS = 5 * 60_000;
+    const MAX_AGE_MS = 10 * 60_000;
+
+    const tick = () => {
+      if (document.visibilityState === "visible") void refreshIfStale(MAX_AGE_MS);
+    };
+    const timer = setInterval(tick, KEEPALIVE_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await apiPost("/api/auth/logout");
     } catch {
       /* ignora: segue para o login de qualquer forma */
     }

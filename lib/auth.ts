@@ -4,6 +4,7 @@
 // middleware (edge) — use lib/jwt.ts lá.
 // ============================================================
 import "server-only";
+import { createHash } from "node:crypto";
 import argon2, { type HashOptions } from "argon2";
 import type { NextRequest, NextResponse } from "next/server";
 import {
@@ -187,6 +188,18 @@ export function checkCsrf(req: NextRequest): boolean {
   const cookie = req.cookies.get(COOKIE.csrf)?.value;
   const header = req.headers.get("x-csrf-token");
   return !!cookie && !!header && cookie === header;
+}
+
+/**
+ * Pseudonimiza o IP para a trilha de auditoria. IP é dado pessoal (LGPD) e não
+ * pode ser gravado em claro — mas ainda precisamos correlacionar eventos da
+ * mesma origem, então guardamos um hash com sal fixo do servidor.
+ * O sal NUNCA vai ao banco: sem ele o hash não volta a ser IP.
+ */
+export function hashIp(ip: string): string {
+  const salt =
+    process.env.AUDIT_IP_SALT || process.env.COOKIE_SECRET || "starguard-dev";
+  return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 16);
 }
 
 // ---- Auditoria (persistida; best-effort, nunca lança) ----

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
@@ -12,7 +12,8 @@ import SeverityBadge from "@/components/SeverityBadge";
 import FixModal from "@/components/FixModal";
 import BatchFixModal from "@/components/BatchFixModal";
 import InfoTip from "@/components/InfoTip";
-import { apiGet, apiPost, ApiError } from "@/lib/client";
+import { apiPost, ApiError } from "@/lib/client";
+import { useAnalysisPolling, allTerminal } from "@/lib/useAnalysisPolling";
 import { SEVERITY_ORDER, SEVERITY_LABEL_PT } from "@/types";
 import type {
   Job,
@@ -35,14 +36,6 @@ import {
 } from "@/lib/icons";
 
 type TabId = "overview" | "code" | "deps" | "threats" | "skills";
-
-const TERMINAL = new Set(["done", "error"]);
-
-function allTerminal(job: Job): boolean {
-  return (Object.values(job.phases) as { status: string }[]).every((p) =>
-    TERMINAL.has(p.status)
-  );
-}
 
 const SEV_TEXT: Record<Severity, string> = {
   critical: "danger",
@@ -76,9 +69,7 @@ function guessLang(file: string): string | undefined {
 
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
-  const [job, setJob] = useState<Job | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { job, error, degraded, retry } = useAnalysisPolling(id);
 
   const [tab, setTab] = useState<TabId>("overview");
 
@@ -93,25 +84,6 @@ export default function ResultsPage() {
   // Seleção para correção em lote.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
-
-  const poll = useCallback(async () => {
-    try {
-      const data = await apiGet<Job>(`/api/status/${id}`);
-      setJob(data);
-      if (!allTerminal(data)) {
-        timer.current = setTimeout(poll, 1400);
-      }
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha ao carregar a análise.");
-    }
-  }, [id]);
-
-  useEffect(() => {
-    poll();
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [poll]);
 
   // Abre o modal SEM gerar — o usuário pode ajustar as instruções antes.
   const openFix = (vuln: Vulnerability) => {
@@ -172,13 +144,21 @@ export default function ResultsPage() {
     }
   };
 
-  if (error) {
+  // Erro só toma a tela inteira quando nunca conseguimos carregar nada. Se a
+  // análise já apareceu uma vez, a falha vira aviso — o polling continua
+  // tentando sozinho por baixo (AUDITORIA.md#BUG-04).
+  if (error && !job) {
     return (
       <AppShell>
         <div className="alert error">{error}</div>
-        <Link href="/" className="button ghost" style={{ width: "fit-content" }}>
-          ← Nova análise
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="button primary" onClick={retry}>
+            <IconRefresh /> Tentar novamente
+          </button>
+          <Link href="/" className="button ghost">
+            ← Nova análise
+          </Link>
+        </div>
       </AppShell>
     );
   }
@@ -391,6 +371,23 @@ export default function ResultsPage() {
       {!done && (
         <div className="progress-track" aria-label="progresso">
           <div className="progress-fill" style={{ width: `${job.progress}%` }} />
+        </div>
+      )}
+
+      {degraded && (
+        <div className="alert info">
+          <span>
+            Conexão instável — o acompanhamento continua tentando sozinho.
+            {error ? ` (${error})` : ""}
+          </span>
+          <button
+            type="button"
+            className="button ghost small"
+            onClick={retry}
+            style={{ marginLeft: "auto" }}
+          >
+            <IconRefresh /> Atualizar agora
+          </button>
         </div>
       )}
 
