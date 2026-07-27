@@ -15,7 +15,9 @@ function getCookie(name: string): string | undefined {
 export class ApiError extends Error {
   constructor(
     message: string,
-    public status: number
+    public status: number,
+    /** Chave estável para tradução (AUDITORIA.md#PEND-17). */
+    public key?: string
   ) {
     super(message);
     this.name = "ApiError";
@@ -30,7 +32,8 @@ export function isAbortError(e: unknown): boolean {
 async function handle<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError((data as { error?: string })?.error || "Erro na requisição.", res.status);
+    const body = data as { error?: string; errorKey?: string };
+    throw new ApiError(body?.error || "Erro na requisição.", res.status, body?.errorKey);
   }
   return data as T;
 }

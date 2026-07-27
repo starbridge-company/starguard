@@ -231,7 +231,7 @@ export default function ResultsPage() {
             <IconRefresh /> {t("common.retry")}
           </button>
           <Link href="/" className="button ghost">
-            ← Nova análise
+            {t("results.newAnalysisLink")}
           </Link>
         </div>
       </AppShell>
@@ -393,9 +393,9 @@ export default function ResultsPage() {
         </div>
       );
     if (st === "pending")
-      return <div className="empty-state">Aguardando as fases anteriores…</div>;
+      return <div className="empty-state">{t("results.waitingPrevious")}</div>;
     if (st === "error")
-      return <div className="alert error">{job.phases[key].error || "Falha nesta fase."}</div>;
+      return <div className="alert error">{job.phases[key].error || t("results.phaseFailed")}</div>;
     return null;
   };
 
@@ -423,34 +423,34 @@ export default function ResultsPage() {
     {
       id: "code" as TabId,
       Icon: IconScan,
-      label: "Correções de segurança",
+      label: t("results.rowFixes"),
       value: scan
-        ? `${corrections.length} correção(ões)`
+        ? t("results.nFixes", { n: corrections.length })
         : statusText(job.phases.software.status),
     },
     {
       id: "deps" as TabId,
       Icon: IconPackage,
-      label: "Dependências (SCA)",
+      label: t("results.rowDeps"),
       value: scan
-        ? `${deps.length} com CVE`
+        ? t("results.nCves", { n: deps.length })
         : statusText(job.phases.software.status),
     },
     {
       id: "threats" as TabId,
       Icon: IconPlan,
-      label: "Ameaças",
+      label: t("results.rowThreats"),
       value: plan
-        ? `${plan.threats.length} ameaças · ${plan.requirements.length} requisitos`
+        ? t("results.nThreats", { threats: plan.threats.length, reqs: plan.requirements.length })
         : statusText(job.phases.plan.status),
     },
     {
       id: "skills" as TabId,
       Icon: IconSkills,
-      label: "Skills",
+      label: t("results.rowSkills"),
       value:
         job.phases.skills.status === "done"
-          ? `${skills.length} validada(s)`
+          ? t("results.nSkills", { n: skills.length })
           : statusText(job.phases.skills.status),
     },
   ];
@@ -517,12 +517,12 @@ export default function ResultsPage() {
               <h2 className="panel-title-row">
                 Visão geral
                 <InfoTip
-                  title="Visão geral"
-                  content="Resumo do que a análise encontrou. Comece pelas correções de código — é onde você resolve os problemas e abre um PR."
+                  title={t("help.overview")}
+                  content={t("help.overviewText")}
                 />
               </h2>
               <p className="muted">
-                {done ? "Análise concluída." : "Análise em andamento…"}
+                {done ? t("results.done") : t("results.inProgress")}
               </p>
             </div>
           </div>
@@ -531,11 +531,10 @@ export default function ResultsPage() {
             <div className="cta-banner">
               <div className="cta-text">
                 <strong>
-                  {corrections.length} correção(ões) de segurança a aplicar
+                  {t("results.ctaTitle", { n: corrections.length })}
                 </strong>
                 <span className="muted">
-                  {criticalCount} crítica(s). Gere correções com IA e abra um Pull
-                  Request.
+                  {t("results.ctaSub", { n: criticalCount })}
                 </span>
               </div>
               <button
@@ -543,13 +542,13 @@ export default function ResultsPage() {
                 className="button primary large"
                 onClick={() => setTab("code")}
               >
-                <IconRefactor /> Ir para correções
+                <IconRefactor /> {t("results.goToFixes")}
               </button>
             </div>
           )}
 
           <div>
-            <h3 className="section-subtitle">Achados por severidade</h3>
+            <h3 className="section-subtitle">{t("results.bySeverity")}</h3>
             <div className="sev-summary">
               {(["critical", "high", "medium", "low"] as Severity[]).map((s) => (
                 <div className="sev-tile" key={s}>
@@ -561,7 +560,7 @@ export default function ResultsPage() {
           </div>
 
           <div>
-            <h3 className="section-subtitle">Seções</h3>
+            <h3 className="section-subtitle">{t("results.sections")}</h3>
             <div className="overview-rows">
               {overviewRows.map((r) => (
                 <button
@@ -591,17 +590,16 @@ export default function ResultsPage() {
               <h2 className="panel-title-row">
                 Correções
                 <InfoTip
-                  title="Correções de segurança"
-                  content="Reúne as vulnerabilidades do scanner (SAST) e os achados da revisão por IA (regra de negócio, IDOR/autorização, lógica multi-arquivo). Os achados da IA que repetiriam um do SAST são descartados. Selecione o que quer resolver e gere correções com IA — cada uma pode virar um Pull Request."
+                  title={t("help.fixes")}
+                  content={t("help.fixesText")}
                 />
               </h2>
               <p className="muted">
-                Selecione os itens e aplique correções com IA.
+                {t("results.selectItems")}{" "}
                 {aiFindings.length > 0 ? (
                   <>
                     {" "}
-                    Inclui <strong>{aiFindings.length}</strong> achado(s) da revisão
-                    por IA.
+                    {t("results.includesAi", { n: aiFindings.length })}
                   </>
                 ) : null}
               </p>
@@ -646,7 +644,7 @@ export default function ResultsPage() {
               // diferentes num produto de segurança. Ver AUDITORIA.md#UX-15.
               <div className="alert error">
                 <span>
-                  <strong>Nenhum analisador de código rodou.</strong>{" "}
+                  <strong>{t("fixes.noScannerTitle")}</strong>{" "}
                   {scannersRan.reasons.join(" ")} Isto não significa que o
                   repositório esteja limpo — significa que ele não foi analisado.
                 </span>
@@ -741,8 +739,8 @@ export default function ResultsPage() {
                   <IconRefactor /> {t("fixes.fixWithAi", { n: selected.size || "" })}
                 </button>
                 <InfoTip
-                  title="Correção em lote"
-                  content="Selecione os achados e gere as correções de uma vez. No fim, você abre um único Pull Request com todas. Ou use “Corrigir com IA” em cada card para uma só."
+                  title={t("help.batch")}
+                  content={t("help.batchText")}
                 />
               </div>
               {visibleCorrections.length === 0 ? (
@@ -793,7 +791,7 @@ export default function ResultsPage() {
           {review?.unverifiedRules && review.unverifiedRules.length > 0 && (
             <div>
               <h3 className="section-subtitle">
-                Regras declaradas que não deu para verificar
+                {t("unverified.title")}
               </h3>
               <div className="report-req-list">
                 {review.unverifiedRules.map((r, i) => (
@@ -819,29 +817,29 @@ export default function ResultsPage() {
               <h2 className="panel-title-row">
                 Dependências · SCA
                 <InfoTip
-                  title="Dependências (SCA)"
-                  content="Pacotes com CVE conhecido detectados pela análise de composição de software. A correção é atualizar para a versão corrigida indicada."
+                  title={t("help.deps")}
+                  content={t("help.depsText")}
                 />
               </h2>
-              <p className="muted">Pacotes vulneráveis e a versão que corrige.</p>
+              <p className="muted">{t("deps.subtitle")}</p>
             </div>
           </div>
 
-          {notReady("software", "Escaneando as dependências…")}
+          {notReady("software", t("deps.scanning"))}
 
           {job.phases.software.status === "done" &&
             deps.length === 0 &&
             (scannersRan.deps ? (
               <div className="empty-state">
-                Nenhuma dependência vulnerável encontrada. 🎉
+                {t("deps.empty")}
               </div>
             ) : (
               <div className="alert error">
                 <span>
                   <strong>
-                    O SCA ({scan?.sca.engine || "trivy"}) não foi executado.
+                    {t("deps.notRun", { engine: scan?.sca.engine || "trivy" })}
                   </strong>{" "}
-                  {scan?.sca.note || "As dependências não foram verificadas."}
+                  {scan?.sca.note || t("deps.notRunHint")}
                 </span>
               </div>
             ))}
@@ -864,15 +862,15 @@ export default function ResultsPage() {
               <h2 className="panel-title-row">
                 Modelagem de ameaças
                 <InfoTip
-                  title="Modelagem de ameaças"
-                  content="A IA analisa o contexto do sistema e levanta ameaças plausíveis (STRIDE, LGPD, OWASP) e os requisitos técnicos que as mitigam."
+                  title={t("help.threats")}
+                  content={t("help.threatsText")}
                 />
               </h2>
               {plan?.summary && <p className="muted">{plan.summary}</p>}
             </div>
           </div>
 
-          {notReady("plan", "Modelando as ameaças…")}
+          {notReady("plan", t("threats.modeling"))}
 
           {plan && (
             <>
@@ -891,7 +889,7 @@ export default function ResultsPage() {
               </div>
 
               <div>
-                <h3 className="section-subtitle">Requisitos técnicos de segurança</h3>
+                <h3 className="section-subtitle">{t("threats.requirements")}</h3>
                 <div className="report-req-list">
                   {plan.requirements.map((r, i) => (
                     <div className="report-req" key={r.id}>
@@ -916,15 +914,15 @@ export default function ResultsPage() {
               <h2 className="panel-title-row">
                 Validação de skills
                 <InfoTip
-                  title="Validação de skills"
-                  content="Cada skill/prompt é checada contra prompt-injection, exfiltração de dados e desvio de política. O veredito indica se é seguro usá-la."
+                  title={t("help.skills")}
+                  content={t("help.skillsText")}
                 />
               </h2>
-              <p className="muted">Segurança de skills/prompts enviados.</p>
+              <p className="muted">{t("skills.subtitle")}</p>
             </div>
           </div>
 
-          {notReady("skills", "Validando as skills…")}
+          {notReady("skills", t("skills.validating"))}
 
           {job.phases.skills.status === "done" &&
             (skills.length ? (
@@ -934,7 +932,7 @@ export default function ResultsPage() {
                 ))}
               </div>
             ) : (
-              <div className="empty-state">Nenhuma skill enviada para validação.</div>
+              <div className="empty-state">{t("skills.empty")}</div>
             ))}
         </section>
       )}

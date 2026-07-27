@@ -52,7 +52,14 @@ export async function PATCH(req: NextRequest) {
     if (!ok) return jsonError(403, "Senha atual incorreta.");
   }
 
-  const patch: { name?: string; email?: string; passwordHash?: string } = {};
+  const patch: {
+    name?: string;
+    email?: string;
+    passwordHash?: string;
+    locale?: string;
+  } = {};
+  // Idioma é preferência, não credencial: não exige senha atual.
+  if (v.data.locale && v.data.locale !== user.locale) patch.locale = v.data.locale;
   if (v.data.name !== undefined && v.data.name !== user.name) {
     patch.name = v.data.name;
   }
@@ -92,6 +99,7 @@ export async function PATCH(req: NextRequest) {
   });
 
   const profile = {
+    locale: patch.locale ?? user.locale ?? null,
     id: user.id,
     email: patch.email ?? user.email,
     name: patch.name ?? user.name,

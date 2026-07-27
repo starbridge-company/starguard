@@ -90,15 +90,15 @@ export default function FixModal({
         <label htmlFor="fix-instructions" className="field-label-row">
           {t("fix.instructions")}
           <InfoTip
-            title="Personalize a correção"
-            content="Oriente a IA: biblioteca a usar, manter a assinatura de uma função, seguir um padrão do projeto, etc. A IA recebe o arquivo inteiro + o contexto do erro e corrige só o problema de segurança, sem mudar a lógica de negócio."
+            title={t("help.customizeFix")}
+            content={t("help.customizeFixText")}
           />
         </label>
         <textarea
           id="fix-instructions"
           className="textarea"
           style={{ minHeight: 80 }}
-          placeholder="Ex.: use consultas parametrizadas do driver pg, mantenha a assinatura da função e o estilo do arquivo. Não altere as outras rotas."
+          placeholder={t("fix.instructionsPlaceholder")}
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
         />

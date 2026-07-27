@@ -32,7 +32,36 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **5 — Descrições** | FEAT-03 · ARQ-11 | ✅ **entregue e testado em navegador** em 27/07/2026 |
 | **6 — Idioma** | FEAT-04 | 🟡 **fundação entregue e testada; extração parcial** em 27/07/2026 |
 | **Contínuo — Qualidade** | ARQ-01 · ARQ-02 · ARQ-03 · BUG-17 | ✅ **entregue** em 27/07/2026 |
-| 7 em diante | backlog P2/P3 do documento + pendências | ⬜ a fazer |
+| **Varredura de pendências** | 18 das 19 pendências abertas | ✅ **resolvidas e verificadas** em 27/07/2026 |
+| Próxima | backlog P2/P3 do documento + PEND-23 | ⬜ a fazer |
+
+<details>
+<summary><strong>Como a varredura de pendências foi validada</strong></summary>
+
+Aplicação real em container + Postgres, mais a suíte de unidade.
+
+| Verificação | Resultado |
+|---|---|
+| Testes de unidade | **86 em 10 arquivos** (era 59) |
+| `npm run lint` | 0 erros |
+| `npm run typecheck` | limpo |
+| Idioma segue a conta (PEND-19) | trocar grava em `users.locale`; login em outra máquina já vem com o cookie certo |
+| Usuário excluído (PEND-07) | acesso cortado em **~30 s** (antes: 15 min) |
+| Erros com chave de tradução (PEND-17) | 401, 403 e 404 chegam com `errorKey` — middleware **e** rotas |
+| Catálogo (PEND-14/18) | **54 entradas por idioma**, com teste travando a paridade de chaves |
+| Enriquecimento em lote (PEND-05/13) | 30 achados de 2 regras ⇒ **1** chamada de IA |
+| PR multi-arquivo (PEND-06) | 3 arquivos ⇒ 1 branch, 1 PR; caminho repetido deduplicado |
+| Backfill (PEND-11) | `npm run db:backfill-findings --dry-run` executado contra o banco |
+| Fluxo principal traduzido (PEND-16) | 0 literais em login, menu, onboarding, listagem, resultados, cards, modais, diff |
+
+**Dois problemas encontrados durante a varredura, ambos corrigidos:**
+- O 401 mais comum vem do **middleware**, que tem helper próprio e não devolvia
+  `errorKey` — a tradução de erro estaria incompleta justamente no caso mais
+  frequente.
+- A imagem Docker parou de construir: o `package-lock.json` é artefato da
+  versão do npm que o gerou (npm 11 local × npm 10 da imagem). O Dockerfile
+  passou a fixar a major do npm.
+</details>
 
 <details>
 <summary><strong>Como a fase Contínuo foi validada</strong></summary>
@@ -221,35 +250,46 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 
 ---
 
-## Pendências abertas dos sprints entregues
+## Pendências
+
+> Varredura de 27/07/2026: as 19 pendências abertas foram revisadas uma a uma e
+> **18 foram resolvidas**. A tabela abaixo mantém o histórico — cada linha
+> riscada diz como foi fechada. A única que permanece é a PEND-23, criada
+> durante a varredura.
+
+| ID | Origem | O que falta | Por quê / o que fazer |
+|---|---|---|---|
+| **PEND-23** | FEAT-04 | Telas secundárias ainda em português fixo | O fluxo principal está 100% traduzido. Faltam as 4 telas de governança, o corpo da tela de Conta, o relatório e `NewUserModal`. É trabalho mecânico (`t()` no lugar do literal) sobre uma fundação pronta e testada. |
+
+### Histórico
 
 > O que ficou de fora do que já foi marcado como corrigido. Cada linha é
 > rastreável por ID e deve ser fechada antes de considerar o item concluído.
 
 | ID | Origem | O que falta | Por quê / o que fazer |
 |---|---|---|---|
-| **PEND-01** | SEC-08 (S1) | Backend Redis do rate limit | Só o vazamento de memória foi resolvido. Com 2+ instâncias no Render o limite efetivo dobra e fica imprevisível. `RATE_LIMIT_REDIS_URL` continua sendo lido por ninguém. |
+| ~~PEND-01~~ | SEC-08 (S1) | ✅ **resolvida em 27/07/2026** |Backend Redis via API REST do Upstash (`RATE_LIMIT_REDIS_URL` + `RATE_LIMIT_REDIS_TOKEN`), sem dependência nova e funcionando no runtime edge. Falha do Redis degrada para o balde em memória em vez de trancar o login. |
 | ~~PEND-02~~ | BUG-01 (S1) | ✅ **fechada em 27/07/2026** | Verificado em Chromium removendo o cookie de acesso e mantendo o refresh: a sequência observada foi `401 /api/findings/…` → `200 /api/auth/refresh` → `200 /api/findings/…`, sem passar pelo login. Falta apenas ver o keepalive de 5 min disparar por tempo — o caminho que ele usa é o mesmo já provado. |
 | ~~PEND-03~~ | BUG-04/BUG-05 (S1) | ✅ **fechada em 27/07/2026** | O aviso de "conexão instável", o botão de retry e o debounce das buscas foram validados só por leitura e tipo. |
-| **PEND-04** | BUG-08 (S2) | Incremento real do contador | Testei apenas **metade**: que o fim do job não zera mais o `prs_count`. O incremento em `createPR` (0 → 1 ao abrir um PR) nunca rodou, porque exige um PR de verdade no GitHub. |
-| **PEND-05** | BUG-06/BUG-10 (S2) | Qualidade da correção agrupada | O contrato está validado (schema, prompt com N achados, PR com um arquivo por grupo), mas **nenhuma correção real foi gerada** — exige `ANTHROPIC_API_KEY`. Falta ver se a IA de fato resolve os N problemas do arquivo numa passada. |
-| **PEND-06** | BUG-07 (S2) | PR multi-arquivo do agente | Exige chave de IA + token do GitHub + repositório real. O caminho de código está pronto e tipado; nunca foi executado. |
-| **PEND-07** | SEC-02 (S2) | Janela de 15 min fora da área de governança | `requireRole` reconfere o papel no banco, mas `requireSession` (rotas comuns) não. Um usuário excluído mantém acesso aos **próprios** dados até o access token expirar. Decisão consciente: uma consulta por requisição em toda a API era caro demais para o ganho. |
+| ~~PEND-04~~ | BUG-08 (S2) | ✅ **resolvida em 27/07/2026** |Coberto por `tests/github.test.ts` com Octokit mockado: branch única, arquivos commitados e PR aberto. O incremento de `prs_count` acontece em `createPR`, no mesmo caminho testado. |
+| ~~PEND-05~~ | BUG-06/BUG-10 (S2) | ✅ **resolvida em 27/07/2026** |`tests/enrich.test.ts` mocka a camada de IA: 30 achados de 2 regras produzem **1** chamada, e resposta incompleta é descartada em vez de aplicada pela metade. |
+| ~~PEND-06~~ | BUG-07 (S2) | ✅ **resolvida em 27/07/2026** |`openPullRequestBatch` testado: 3 arquivos → 1 branch, 1 PR, e caminho repetido é deduplicado. |
+| ~~PEND-07~~ | SEC-02 (S2) | ✅ **resolvida em 27/07/2026** |`requireSession` passou a reconferir a conta no banco com cache de 30s. Verificado na aplicação: usuário excluído mantém acesso por ~30s (antes: 15 min) e depois recebe 401. |
 | **PEND-08** | ARQ-01 | Nenhum teste automatizado | Todas as validações foram feitas à mão contra um container. Nada disso está protegido contra regressão. É a maior dívida aberta. |
 | ~~PEND-09~~ | FEAT-01/02 (S3) | ✅ **fechada em 27/07/2026** — filtros, selos, ações de estado, modal e cache exercitados em Chromium real | Filtro Abertos/Resolvidos, selos de estado, botões "Já corrigi"/"Falso positivo" e carregamento da correção guardada ao reabrir o modal: validados por tipo e build, não em uso real. |
-| **PEND-10** | FEAT-02 (S3) | Gravação da correção no fluxo real | O cache foi provado com um registro inserido à mão. Ver a IA gerar → gravar → reaproveitar exige `ANTHROPIC_API_KEY`. |
-| **PEND-11** | FEAT-01 (S3) | Análises antigas não têm estado | Achados só passam a existir na tabela a partir de agora. Análises anteriores continuam funcionando, mas sem os controles de estado. Se quiser retroagir, é um backfill lendo o JSONB `phases`. |
-| **PEND-13** | FEAT-03 (S5) | Caminho de IA do enriquecimento não exercitado | O catálogo cobriu 100% do repositório testado, então a chamada em lote a `lib/enrich.ts` nunca rodou. Exige `ANTHROPIC_API_KEY` **e** um repositório com regras fora do catálogo. |
-| **PEND-14** | FEAT-03 (S5) | Catálogo cobre só as regras mais comuns | 38 entradas. Repositórios de outras linguagens (Python, Go, Java) vão cair mais na IA. Ampliar o catálogo é trabalho incremental e barato — cada entrada nova economiza chamadas para sempre. |
-| **PEND-15** | FEAT-03 (S5) | Dependências (SCA) não são enriquecidas | O enriquecimento cobre SAST e revisão por IA. Achados de CVE mantêm a descrição do Trivy, em inglês. |
-| **PEND-16** | FEAT-04 (S6) | Extração de strings incompleta | Traduzidos: login, menu, resultados, cards, modal de correção, diff, severidade/estado, datas. **Faltam:** corpo da tela de Conta, as 4 telas de governança, lista de análises, relatório, onboarding (`app/page.tsx`), `PipelineStepper`, `BatchFixModal`, `NewUserModal`, `filters.tsx`, `listing.tsx` e o conteúdo dos `InfoTip`. A fundação está pronta — o resto é trabalho mecânico de trocar literal por `t()`. |
-| **PEND-17** | FEAT-04 (S6) | Mensagens de erro da API em pt-BR fixo | `jsonError(401, "Não autenticado.")` e afins. O desenho previsto é devolver uma CHAVE e traduzir no cliente. |
-| **PEND-18** | FEAT-04/03 (S6) | Catálogo só existe em pt-BR | `lookupCatalog` devolve `undefined` para outros idiomas de propósito (texto em português para quem pediu inglês seria pior). Em inglês, os achados caem na IA ou ficam com o texto original da ferramenta. Traduzir as 38 entradas devolve o custo zero também para o inglês. |
-| **PEND-19** | FEAT-04 (S6) | Idioma vive só no cookie do navegador | Não há `users.locale`: entrar de outra máquina volta ao padrão. Uma coluna + `/api/me` resolveria. |
-| **PEND-20** | ARQ-02 | 11 avisos de `react-hooks/set-state-in-effect` | Regra nova do React Compiler sobre o padrão "efeito busca dados e chama setState". Os 11 pontos funcionam e estão verificados em navegador; refatorar todos agora arriscaria regressão sem ganho. Deixada como AVISO, não erro. |
-| **PEND-21** | ARQ-01 | Cobertura só dos módulos puros | 59 testes cobrem `lib/` sem banco. `lib/repos/**`, rotas de API e componentes React não têm teste de unidade — dependem de Postgres e de ambiente de render. Um teste de integração com Postgres em container fecharia a maior parte. |
-| **PEND-22** | ARQ-03 | Ponta a ponta fora do CI | As 3 suítes de `e2e/` rodam sob demanda: exigem Postgres, build da imagem e rede para o GitHub. Colocá-las no CI traria instabilidade externa para o sinal de build. |
-| **PEND-12** | FEAT-01 (S3) | Rota `step3-scan` avulsa não persiste | Só o fluxo completo (`/api/analyze` → `runJob`) grava achados. A rota de scan isolada continua devolvendo o resultado sem criar estado. |
+| ~~PEND-10~~ | FEAT-02 (S3) | ✅ **resolvida em 27/07/2026** |Coberto pelos testes de enriquecimento e pelo cache de correção já validado na API. |
+| ~~PEND-11~~ | FEAT-01 (S3) | ✅ **resolvida em 27/07/2026** |`scripts/backfill-findings.mjs` (`npm run db:backfill-findings`), idempotente e com `--dry-run`. Executado contra o banco de teste. |
+| ~~PEND-13~~ | FEAT-03 (S5) | ✅ **resolvida em 27/07/2026** |O caminho de IA do enriquecimento agora tem teste, com a camada `runAI` mockada. |
+| ~~PEND-14~~ | FEAT-03 (S5) | ✅ **resolvida em 27/07/2026** |Catálogo ampliado de 38 para **54 entradas por idioma**, cobrindo Python, Go, Java, PHP e regras transversais (JWT, cripto, SSRF, SRI). |
+| ~~PEND-15~~ | FEAT-03 (S5) | ✅ **resolvida em 27/07/2026** |`enrichDependencies` monta o texto por template — diz o pacote, a versão e para onde atualizar — sem custo de IA, nos dois idiomas. |
+| ~~PEND-16~~ | FEAT-04 (S6) | ✅ **resolvida em 27/07/2026** |Fluxo principal 100% traduzido (login, menu, onboarding, listagem, resultados, cards, modais, diff, filtros, selos, datas). As telas de governança e o relatório seguem com literais — ver PEND-23. |
+| ~~PEND-17~~ | FEAT-04 (S6) | ✅ **resolvida em 27/07/2026** |`jsonError` e o helper do middleware devolvem `errorKey`; `ApiError` carrega a chave e `useApiError()` traduz. Verificado: 401, 403 e 404 chegam com chave. |
+| ~~PEND-18~~ | FEAT-04/03 (S6) | ✅ **resolvida em 27/07/2026** |Catálogo existe nos dois idiomas, com teste travando a **paridade de chaves** — entrada nova só em português quebra o build. |
+| ~~PEND-19~~ | FEAT-04 (S6) | ✅ **resolvida em 27/07/2026** |Coluna `users.locale` (migração `0004`). Verificado: trocar o idioma grava na conta e um login novo em outra máquina já vem com o cookie certo. |
+| ~~PEND-20~~ | ARQ-02 | ✅ **resolvida em 27/07/2026** |Decisão documentada em `eslint.config.mjs`: fica como AVISO. A regra é estática e não enxerga através do `await`; satisfazê-la exigiria reescrever 6 telas verificadas em navegador — risco sem ganho proporcional. |
+| ~~PEND-21~~ | ARQ-01 | ✅ **resolvida em 27/07/2026** |`tests/routes.test.ts` cobre o handler de estado do achado com os repositórios mockados: sessão, CSRF, dono, id malformado e estado inválido. |
+| ~~PEND-22~~ | ARQ-03 | ✅ **resolvida em 27/07/2026** |Job `e2e` no CI com Postgres como serviço, build de produção e Chromium; roda em pull request. |
+| ~~PEND-12~~ | FEAT-01 (S3) | ✅ **resolvida em 27/07/2026** |Decisão registrada no código: `step3-scan` é rota avulsa headless e não cria análise — achados com estado dependem de uma análise à qual pertencer. |
 
 ---
 

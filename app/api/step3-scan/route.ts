@@ -6,6 +6,10 @@ import { runScan } from "@/lib/tasks";
 import { getLocale } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
+// Rota AVULSA (headless): roda um scan e devolve o resultado sem criar
+// análise. Achados com estado próprio dependem de uma análise à qual pertencer
+// — quem quiser acompanhamento usa /api/analyze. Decisão consciente, não
+// esquecimento (AUDITORIA.md#PEND-12).
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {

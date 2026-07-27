@@ -14,32 +14,32 @@ function limpar() {
 describe("rateLimit · BUG-02", () => {
   beforeEach(limpar);
 
-  it("peek NÃO consome cota", () => {
+  it("peek NÃO consome cota", async () => {
     for (let i = 0; i < 10; i++) {
-      expect(peekRateLimit("k", SPEC).allowed).toBe(true);
+      expect((await peekRateLimit("k", SPEC)).allowed).toBe(true);
     }
   });
 
-  it("só o consumo explícito gasta, e bloqueia no limite", () => {
-    expect(rateLimit("k", SPEC).allowed).toBe(true);
-    expect(rateLimit("k", SPEC).allowed).toBe(true);
-    expect(rateLimit("k", SPEC).allowed).toBe(true);
-    expect(rateLimit("k", SPEC).allowed).toBe(false);
+  it("só o consumo explícito gasta, e bloqueia no limite", async () => {
+    expect((await rateLimit("k", SPEC)).allowed).toBe(true);
+    expect((await rateLimit("k", SPEC)).allowed).toBe(true);
+    expect((await rateLimit("k", SPEC)).allowed).toBe(true);
+    expect((await rateLimit("k", SPEC)).allowed).toBe(false);
   });
 
-  it("reset zera o histórico de falhas (login que dá certo)", () => {
-    rateLimit("k", SPEC);
-    rateLimit("k", SPEC);
-    resetRateLimit("k");
-    expect(peekRateLimit("k", SPEC).remaining).toBe(SPEC.max);
+  it("reset zera o histórico de falhas (login que dá certo)", async () => {
+    await rateLimit("k", SPEC);
+    await rateLimit("k", SPEC);
+    await resetRateLimit("k");
+    expect((await peekRateLimit("k", SPEC)).remaining).toBe(SPEC.max);
   });
 
-  it("baldes de chaves diferentes não se misturam", () => {
-    rateLimit("a", SPEC);
-    rateLimit("a", SPEC);
-    rateLimit("a", SPEC);
-    expect(rateLimit("a", SPEC).allowed).toBe(false);
-    expect(rateLimit("b", SPEC).allowed).toBe(true);
+  it("baldes de chaves diferentes não se misturam", async () => {
+    await rateLimit("a", SPEC);
+    await rateLimit("a", SPEC);
+    await rateLimit("a", SPEC);
+    expect((await rateLimit("a", SPEC)).allowed).toBe(false);
+    expect((await rateLimit("b", SPEC)).allowed).toBe(true);
   });
 });
 

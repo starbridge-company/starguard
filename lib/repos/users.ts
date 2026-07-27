@@ -63,12 +63,13 @@ export async function updateLastLogin(id: string): Promise<void> {
 /** Atualiza o próprio perfil (nome, e-mail/login e/ou hash de senha). */
 export async function updateProfile(
   id: string,
-  patch: { name?: string; email?: string; passwordHash?: string }
+  patch: { name?: string; email?: string; passwordHash?: string; locale?: string }
 ): Promise<UserRow | undefined> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.email !== undefined) set.email = patch.email.toLowerCase();
   if (patch.passwordHash !== undefined) set.passwordHash = patch.passwordHash;
+  if (patch.locale !== undefined) set.locale = patch.locale;
   const [row] = await db
     .update(users)
     .set(set)
@@ -93,6 +94,14 @@ export async function ensureSeed(
       }))
     )
     .onConflictDoNothing({ target: users.email });
+}
+
+/** Grava o idioma preferido da conta. */
+export async function updateLocale(id: string, locale: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ locale, updatedAt: new Date() })
+    .where(eq(users.id, id));
 }
 
 /**

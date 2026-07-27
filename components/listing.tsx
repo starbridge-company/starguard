@@ -1,6 +1,7 @@
 "use client";
 
 import { eventCategory, eventLabel } from "@/lib/audit-events";
+import { useT, type MessageKey } from "@/lib/i18n";
 import { LOCALE_COOKIE, normalizeLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 
 /** Idioma ativo lido do cookie — `fmtDate` é chamada fora de componentes. */
@@ -26,14 +27,11 @@ export function fmtDate(iso: string | null | undefined): string {
   });
 }
 
-const STATUS_META: Record<
-  string,
-  { label: string; tone: string }
-> = {
-  done: { label: "Concluída", tone: "ok" },
-  running: { label: "Rodando", tone: "run" },
-  error: { label: "Erro", tone: "err" },
-  pending: { label: "Na fila", tone: "wait" },
+const STATUS_META: Record<string, { key: MessageKey; tone: string }> = {
+  done: { key: "filter.done", tone: "ok" },
+  running: { key: "filter.running", tone: "run" },
+  error: { key: "filter.error", tone: "err" },
+  pending: { key: "filter.queued", tone: "wait" },
 };
 
 export function StatusPill({
@@ -43,11 +41,12 @@ export function StatusPill({
   status: string;
   progress?: number;
 }) {
-  const meta = STATUS_META[status] || { label: status, tone: "wait" };
+  const t = useT();
+  const meta = STATUS_META[status];
   return (
-    <span className={`status-pill status-${meta.tone}`}>
+    <span className={`status-pill status-${meta?.tone ?? "wait"}`}>
       <span className="dot" />
-      {meta.label}
+      {meta ? t(meta.key) : status}
       {status === "running" && typeof progress === "number"
         ? ` ${progress}%`
         : ""}
@@ -66,11 +65,12 @@ export function SevChips({
   medium: number;
   low: number;
 }) {
+  const t = useT();
   const chips: { k: string; n: number; cls: string; label: string }[] = [
-    { k: "c", n: critical, cls: "sev-critical", label: "crítica(s)" },
-    { k: "h", n: high, cls: "sev-high", label: "alta(s)" },
-    { k: "m", n: medium, cls: "sev-medium", label: "média(s)" },
-    { k: "l", n: low, cls: "sev-low", label: "baixa(s)" },
+    { k: "c", n: critical, cls: "sev-critical", label: t("severity.critical") },
+    { k: "h", n: high, cls: "sev-high", label: t("severity.high") },
+    { k: "m", n: medium, cls: "sev-medium", label: t("severity.medium") },
+    { k: "l", n: low, cls: "sev-low", label: t("severity.low") },
   ].filter((c) => c.n > 0);
 
   if (chips.length === 0) return <span className="muted">—</span>;
@@ -87,10 +87,11 @@ export function SevChips({
 }
 
 export function RoleBadge({ role }: { role: string }) {
+  const t = useT();
   const isSuper = role === "superadmin";
   return (
     <span className={`role-badge ${isSuper ? "role-super" : "role-admin"}`}>
-      {isSuper ? "Superadmin" : "Admin"}
+      {t(isSuper ? "role.superadmin" : "role.admin")}
     </span>
   );
 }

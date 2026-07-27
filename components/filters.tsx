@@ -13,6 +13,7 @@ import {
   IconCheck,
 } from "@/lib/icons";
 import { RoleBadge } from "@/components/listing";
+import { useT } from "@/lib/i18n";
 
 // ---- Hook de dropdown (abre/fecha, clique-fora, ESC) ----
 export function useDropdown() {
@@ -44,12 +45,13 @@ export function SearchBox({
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const t = useT();
   return (
     <div className="flt-search">
       <IconSearch />
       <input
         className="flt-search-input"
-        placeholder={placeholder || "Buscar…"}
+        placeholder={placeholder || t("filter.search")}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -57,7 +59,7 @@ export function SearchBox({
         <button
           type="button"
           className="flt-search-clear"
-          aria-label="Limpar busca"
+          aria-label={t("filter.clearSearch")}
           onClick={() => onChange("")}
         >
           <IconX />
@@ -125,11 +127,12 @@ export function DateRange({
   to: string;
   onChange: (from: string, to: string) => void;
 }) {
+  const t = useT();
   const { open, setOpen, ref } = useDropdown();
 
   const label =
     !from && !to
-      ? "Qualquer data"
+      ? t("filter.anyDate")
       : from && to
         ? from === to
           ? short(from)
@@ -139,10 +142,10 @@ export function DateRange({
           : `até ${short(to)}`;
 
   const presets: { label: string; get: () => [string, string] }[] = [
-    { label: "Qualquer data", get: () => ["", ""] },
-    { label: "Hoje", get: () => [ymd(new Date()), ymd(new Date())] },
-    { label: "Últimos 7 dias", get: () => [ymd(daysAgo(6)), ymd(new Date())] },
-    { label: "Últimos 30 dias", get: () => [ymd(daysAgo(29)), ymd(new Date())] },
+    { label: t("filter.anyDate"), get: (): [string, string] => ["", ""] },
+    { label: t("filter.today"), get: (): [string, string] => [ymd(new Date()), ymd(new Date())] },
+    { label: t("filter.last7"), get: (): [string, string] => [ymd(daysAgo(6)), ymd(new Date())] },
+    { label: t("filter.last30"), get: (): [string, string] => [ymd(daysAgo(29)), ymd(new Date())] },
   ];
 
   const active = !!from || !!to;
@@ -161,7 +164,7 @@ export function DateRange({
       </button>
       {open && (
         <div className="flt-pop">
-          <div className="flt-pop-title">Período</div>
+          <div className="flt-pop-title">{t("filter.period")}</div>
           <div className="date-presets">
             {presets.map((p) => {
               const [pf, pt] = p.get();
@@ -184,7 +187,7 @@ export function DateRange({
           <div className="flt-pop-sep" />
           <div className="date-custom">
             <label>
-              <span>De</span>
+              <span>{t("filter.from")}</span>
               <input
                 type="date"
                 className="input date-input"
@@ -194,7 +197,7 @@ export function DateRange({
               />
             </label>
             <label>
-              <span>Até</span>
+              <span>{t("filter.to")}</span>
               <input
                 type="date"
                 className="input date-input"
@@ -225,6 +228,7 @@ export function UserSelect({
   value: string;
   onChange: (id: string) => void;
 }) {
+  const t = useT();
   const { open, setOpen, ref } = useDropdown();
   const [q, setQ] = useState("");
   const selected = users.find((u) => u.id === value);
@@ -246,7 +250,7 @@ export function UserSelect({
       >
         <IconUser />
         <span className="flt-trigger-label">
-          {selected ? selected.name : "Todos os usuários"}
+          {selected ? selected.name : t("filter.allUsers")}
         </span>
         <IconChevronDown className="flt-caret" />
       </button>
@@ -256,7 +260,7 @@ export function UserSelect({
             <IconSearch />
             <input
               className="flt-search-input"
-              placeholder="Filtrar usuários…"
+              placeholder={t("filter.filterUsers")}
               value={q}
               autoFocus
               onChange={(e) => setQ(e.target.value)}
@@ -271,7 +275,7 @@ export function UserSelect({
                 setOpen(false);
               }}
             >
-              <span className="flt-option-main">Todos os usuários</span>
+              <span className="flt-option-main">{t("filter.allUsers")}</span>
               {!value && <IconCheck />}
             </button>
             {filtered.map((u) => (
@@ -292,7 +296,7 @@ export function UserSelect({
               </button>
             ))}
             {filtered.length === 0 && (
-              <div className="flt-empty">Nenhum usuário.</div>
+              <div className="flt-empty">{t("filter.noUsers")}</div>
             )}
           </div>
         </div>

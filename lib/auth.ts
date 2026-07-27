@@ -32,6 +32,7 @@ export interface User {
   role: string;
   name?: string;
   passwordHash?: string;
+  locale?: string | null;
 }
 
 const ARGON_OPTS: HashOptions = {
@@ -93,6 +94,7 @@ export async function findUser(email: string): Promise<User | undefined> {
         role: row.role,
         name: row.name,
         passwordHash: row.passwordHash,
+        locale: row.locale,
       }
     : undefined;
 }

@@ -10,6 +10,7 @@ export interface Me {
   email: string;
   name: string;
   role: "superadmin" | "admin";
+  locale?: string | null;
 }
 
 let cached: Me | null = null;
@@ -39,12 +40,11 @@ export function useMe(): { me: Me | null; loading: boolean } {
   const [loading, setLoading] = useState(!cached);
 
   useEffect(() => {
+    // O estado já nasce com o cache (useState(cached)); reatribuí-lo aqui era
+    // render em cascata sem ganho — e o que o react-hooks apontava.
+    // Ver AUDITORIA.md#PEND-20.
+    if (cached) return;
     let active = true;
-    if (cached) {
-      setMe(cached);
-      setLoading(false);
-      return;
-    }
     loadMe()
       .then((m) => {
         if (active) setMe(m);

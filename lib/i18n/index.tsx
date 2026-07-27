@@ -81,6 +81,26 @@ export function useT(): Ctx["t"] {
   return useI18n().t;
 }
 
+/**
+ * Mensagem de erro de API no idioma do usuário. Prefere a CHAVE (traduzida);
+ * cai no texto que o servidor mandou quando a chave é desconhecida — assim
+ * mensagens específicas de rota não somem. Ver AUDITORIA.md#PEND-17.
+ */
+export function useApiError() {
+  const { locale } = useI18n();
+  return useCallback(
+    (e: unknown, fallbackKey: MessageKey = "err.server"): string => {
+      const err = e as { key?: string; message?: string } | null;
+      if (err?.key && err.key in PT_BR) {
+        return translate(locale, err.key as MessageKey);
+      }
+      if (err?.message) return err.message;
+      return translate(locale, fallbackKey);
+    },
+    [locale]
+  );
+}
+
 /** Formatação de data no idioma ativo (antes era `pt-BR` fixo). */
 export function useFormatDate() {
   const { locale } = useI18n();

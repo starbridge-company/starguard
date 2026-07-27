@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lookupCatalog, CATALOG_SIZE } from "@/lib/catalog";
+import { lookupCatalog, CATALOG_SIZE, catalogKeys } from "@/lib/catalog";
 import { isGenericSuggestion, FIX_GUIDE } from "@/lib/constants";
 import { translate } from "@/lib/i18n";
 
@@ -25,11 +25,23 @@ describe("catálogo · FEAT-03", () => {
     expect(lookupCatalog("regra-nova", "CWE-99999")).toBeUndefined();
   });
 
-  // AUDITORIA.md#PEND-18 — devolver português para quem pediu inglês seria
-  // pior que não traduzir: o achado cai na IA ou fica com o texto original.
-  it("NÃO entrega texto em português para idioma sem catálogo", () => {
-    expect(lookupCatalog("detect-child-process", undefined, "en")).toBeUndefined();
-    expect(lookupCatalog("detect-child-process", undefined, "pt-BR")).toBeDefined();
+  // AUDITORIA.md#PEND-18 — o catálogo passou a existir nos dois idiomas.
+  it("responde no idioma pedido", () => {
+    const pt = lookupCatalog("detect-child-process", undefined, "pt-BR");
+    const en = lookupCatalog("detect-child-process", undefined, "en");
+    expect(pt?.whatItIs).toMatch(/comandos do sistema/i);
+    expect(en?.whatItIs).toMatch(/operating-system commands/i);
+    expect(pt?.whatItIs).not.toBe(en?.whatItIs);
+  });
+
+  it("os dois idiomas cobrem exatamente as MESMAS regras e CWEs", () => {
+    // Sem isto, uma entrada nova em português deixaria o inglês cair na IA
+    // silenciosamente — e o custo voltaria sem ninguém perceber.
+    expect(catalogKeys("en")).toEqual(catalogKeys("pt-BR"));
+  });
+
+  it("idioma desconhecido cai no padrão em vez de quebrar", () => {
+    expect(lookupCatalog("detect-child-process", undefined, "klingon")).toBeDefined();
   });
 
   it("tem entradas suficientes para valer a pena", () => {

@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-const BASE = "http://127.0.0.1:3020";
+const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
 const OUT = "C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/shots";
 let falhas = 0;
 const check = (c, m) => { if (!c) falhas++; console.log(`  ${c ? "✓" : "✗ FALHOU"}  ${m}`); };

@@ -17,15 +17,77 @@ export function jsonOk<T>(data: T, status = 200): NextResponse {
   return harden(NextResponse.json(data, { status }));
 }
 
-export function jsonError(status: number, message: string): NextResponse {
-  return harden(NextResponse.json({ error: message }, { status }));
+/**
+ * Erro de API. Devolve `error` (texto pronto, compatível com o que já existia)
+ * e `errorKey` — uma chave estável que o cliente traduz para o idioma do
+ * usuário. Sem a chave, toda mensagem ficaria presa em pt-BR.
+ * Ver AUDITORIA.md#PEND-17.
+ */
+export function jsonError(
+  status: number,
+  message: string,
+  errorKey?: string
+): NextResponse {
+  return harden(
+    NextResponse.json({ error: message, errorKey: errorKey ?? keyFor(status) }, { status })
+  );
+}
+
+/** Chave genérica por status, quando a rota não informa uma específica. */
+function keyFor(status: number): string {
+  if (status === 401) return "err.unauthenticated";
+  if (status === 403) return "err.forbidden";
+  if (status === 404) return "err.notFound";
+  if (status === 409) return "err.conflict";
+  if (status === 429) return "err.tooManyRequests";
+  if (status >= 500) return "err.server";
+  return "err.badRequest";
+}
+
+/**
+ * Cache curto de contas ainda válidas.
+ *
+ * `requireSession` roda em TODA rota da API; consultar o banco a cada
+ * requisição era caro demais, e por isso um usuário excluído mantinha acesso
+ * pelos 15 min de validade do access token (AUDITORIA.md#PEND-07). Com 30s de
+ * cache, a janela cai de 15 minutos para meio minuto ao custo de ~2 consultas
+ * por minuto por usuário ativo.
+ */
+const VALIDITY_TTL_MS = 30_000;
+const g = globalThis as unknown as {
+  __sg_valid?: Map<string, { until: number; ok: boolean }>;
+};
+g.__sg_valid ||= new Map();
+
+async function accountStillValid(userId: string, iat?: number): Promise<boolean> {
+  const now = Date.now();
+  const hit = g.__sg_valid!.get(userId);
+  if (hit && hit.until > now) return hit.ok;
+
+  const { findById } = await import("@/lib/repos/users");
+  const fresh = await findById(userId).catch(() => undefined); // já filtra deletedAt
+  // Corte de sessão (troca de papel/senha) invalida tokens antigos — mesma
+  // regra do refresh, em segundos para casar com a precisão do `iat`.
+  const cutoff = fresh?.sessionsInvalidatedAt
+    ? Math.floor(fresh.sessionsInvalidatedAt.getTime() / 1000)
+    : 0;
+  const ok = !!fresh && (!iat || !cutoff || iat >= cutoff);
+
+  g.__sg_valid!.set(userId, { until: now + VALIDITY_TTL_MS, ok });
+  if (g.__sg_valid!.size > 5000) {
+    for (const [k, v] of g.__sg_valid!) if (v.until <= now) g.__sg_valid!.delete(k);
+  }
+  return ok;
 }
 
 /** Lê a sessão; retorna claims ou null. Middleware já barra, isto é defesa extra. */
 export async function requireSession(
   req: NextRequest
 ): Promise<SessionClaims | null> {
-  return getSession(req);
+  const s = await getSession(req);
+  if (!s) return null;
+  const iat = (s as SessionClaims & { iat?: number }).iat;
+  return (await accountStillValid(s.sub, iat)) ? s : null;
 }
 
 /** Valida CSRF (double-submit) para métodos que mudam estado. */

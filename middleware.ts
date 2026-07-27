@@ -30,7 +30,7 @@ function isRateExempt(path: string): boolean {
   return path === "/api/auth/login" || path.startsWith("/api/status/");
 }
 
-function json(status: number, body: unknown): NextResponse {
+function json(status: number, body: Record<string, unknown>): NextResponse {
   const res = NextResponse.json(body, { status });
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -50,10 +50,11 @@ export async function middleware(req: NextRequest) {
   // O polling da tela de resultados também fica de fora: é a própria interface
   // conversando com o servidor, não abuso — ver AUDITORIA.md#BUG-03.
   if (isApi && !isRateExempt(pathname)) {
-    const rl = rateLimit(`api:${ip}`, API_RATE);
+    const rl = await rateLimit(`api:${ip}`, API_RATE);
     if (!rl.allowed) {
       const res = json(429, {
         error: "Muitas requisições. Tente novamente em instantes.",
+        errorKey: "err.tooManyRequests",
       });
       res.headers.set("Retry-After", String(Math.ceil(rl.resetMs / 1000)));
       return res;
@@ -77,7 +78,10 @@ export async function middleware(req: NextRequest) {
   // Default-deny.
   if (!authed) {
     if (isApi) {
-      return json(401, { error: "Não autenticado." });
+      return json(401, {
+        error: "Não autenticado.",
+        errorKey: "err.unauthenticated",
+      });
     }
     const url = new URL("/login", req.url);
     url.searchParams.set("next", pathname);
@@ -90,7 +94,9 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/admin/") ||
     pathname.startsWith("/api/admin");
   if (isAdminArea && claims!.role !== ROLES.superadmin) {
-    if (isApi) return json(403, { error: "Acesso restrito." });
+    if (isApi) {
+      return json(403, { error: "Acesso restrito.", errorKey: "err.forbidden" });
+    }
     return NextResponse.redirect(new URL("/", req.url));
   }
 

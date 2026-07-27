@@ -209,7 +209,13 @@ export default function AccountPage() {
         <Segmented
           options={LOCALES.map((l) => ({ value: l, label: LOCALE_LABEL[l] }))}
           value={locale}
-          onChange={(v) => setLocale(v as (typeof LOCALES)[number])}
+          onChange={(v) => {
+            // Grava na CONTA antes de recarregar: assim a preferência
+            // acompanha o usuário em qualquer máquina (AUDITORIA.md#PEND-19).
+            // Falha aqui não impede a troca local — o cookie já resolve a sessão.
+            void apiPatch("/api/account/profile", { locale: v }).catch(() => {});
+            setLocale(v as (typeof LOCALES)[number]);
+          }}
           ariaLabel={t("common.language")}
         />
       </section>

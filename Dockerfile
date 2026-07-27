@@ -30,7 +30,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+
+# O package-lock.json é artefato da versão do npm que o gerou: o npm 10 que vem
+# na imagem resolve a árvore de forma diferente do npm 11 e recusa o lock com
+# "can only install packages when package.json and package-lock.json are in
+# sync". Fixar a major aqui mantém o build reprodutível.
+ARG NPM_VERSION=11
+RUN npm i -g npm@${NPM_VERSION} --no-fund \
+ && npm ci --no-audit --no-fund
 
 # ---------- 2. Build ----------
 FROM ${NODE_IMAGE} AS builder

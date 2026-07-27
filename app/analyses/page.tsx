@@ -9,6 +9,7 @@ import { apiGet, ApiError, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { IconReport, IconBolt, IconExternal } from "@/lib/icons";
+import { useT } from "@/lib/i18n";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
 
 interface Row {
@@ -28,14 +29,15 @@ interface Row {
 }
 
 const STATUS_SEG = [
-  { value: "", label: "Todas" },
-  { value: "done", label: "Concluídas" },
-  { value: "running", label: "Rodando" },
-  { value: "error", label: "Erro" },
-  { value: "pending", label: "Fila" },
-];
+  { value: "", key: "filter.all" },
+  { value: "done", key: "filter.done" },
+  { value: "running", key: "filter.running" },
+  { value: "error", key: "filter.error" },
+  { value: "pending", key: "filter.queued" },
+] as const;
 
 export default function AnalysesPage() {
+  const t = useT();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -61,7 +63,7 @@ export default function AnalysesPage() {
         setData(await apiGet<Paged<Row>>(`/api/analyses?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return; // substituída por uma busca mais nova
-        setError(e instanceof ApiError ? e.message : "Falha ao carregar as análises.");
+        setError(e instanceof ApiError ? e.message : t("list.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
@@ -89,13 +91,13 @@ export default function AnalysesPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Histórico</span>
-          <h1>Análises</h1>
-          <p className="page-subtitle">Suas análises de segurança, da mais recente à mais antiga.</p>
+          <span className="page-kicker">{t("list.historyKicker")}</span>
+          <h1>{t("list.analysesTitle")}</h1>
+          <p className="page-subtitle">{t("list.analysesSubtitle")}</p>
         </div>
         <div className="header-actions">
           <Link href="/" className="button primary">
-            <IconBolt /> Nova análise
+            <IconBolt /> {t("nav.newAnalysis")}
           </Link>
         </div>
       </header>
@@ -105,13 +107,13 @@ export default function AnalysesPage() {
           <SearchBox
             value={q}
             onChange={(v) => onFilter(() => setQ(v))}
-            placeholder="Buscar por projeto ou repositório…"
+            placeholder={t("list.searchAnalyses")}
           />
           <Segmented
-            options={STATUS_SEG}
+            options={STATUS_SEG.map((s) => ({ value: s.value, label: t(s.key) }))}
             value={status}
             onChange={(v) => onFilter(() => setStatus(v))}
-            ariaLabel="Status"
+            ariaLabel={t("list.colStatus")}
           />
           <DateRange
             from={from}
@@ -131,9 +133,9 @@ export default function AnalysesPage() {
           <div className="skeleton" style={{ height: 220 }} />
         ) : rows.length === 0 ? (
           <div className="empty-state">
-            Nenhuma análise ainda.{" "}
+            {t("list.empty")}{" "}
             <Link href="/" className="link">
-              Inicie a primeira
+              {t("list.startFirst")}
             </Link>
             .
           </div>
@@ -142,11 +144,11 @@ export default function AnalysesPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Projeto</th>
-                  <th>Severidades</th>
-                  <th>Achados</th>
-                  <th>Status</th>
-                  <th>Criada</th>
+                  <th>{t("list.colProject")}</th>
+                  <th>{t("list.colSeverities")}</th>
+                  <th>{t("list.colFindings")}</th>
+                  <th>{t("list.colStatus")}</th>
+                  <th>{t("list.colCreated")}</th>
                   <th />
                 </tr>
               </thead>
@@ -174,7 +176,7 @@ export default function AnalysesPage() {
                     <td>
                       <span className="num">{r.totalFindings}</span>
                       {r.prsCount > 0 && (
-                        <span className="cell-sub">{r.prsCount} PR(s)</span>
+                        <span className="cell-sub">{t("list.prs", { n: r.prsCount })}</span>
                       )}
                     </td>
                     <td>
@@ -183,9 +185,9 @@ export default function AnalysesPage() {
                     <td className="muted">{fmtDate(r.createdAt)}</td>
                     <td className="row-actions">
                       <Link href={`/results/${r.id}`} className="button ghost small">
-                        Abrir
+                        {t("common.open")}
                       </Link>
-                      <Link href={`/report/${r.id}`} className="icon-btn" title="Relatório">
+                      <Link href={`/report/${r.id}`} className="icon-btn" title={t("common.report")}>
                         <IconReport />
                       </Link>
                       {r.repoUrl && (
@@ -194,7 +196,7 @@ export default function AnalysesPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="icon-btn"
-                          title="Abrir repositório"
+                          title={t("list.openRepo")}
                         >
                           <IconExternal />
                         </a>

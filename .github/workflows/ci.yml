@@ -43,6 +43,52 @@ jobs:
         # download dos scanners e o filtro do ruleset.
         run: docker build -t starguard:ci .
 
+  # Ponta a ponta com navegador real. Sobe Postgres como serviço e a app em
+  # modo produção. Roda só em pull request: leva alguns minutos e depende de
+  # rede externa (clone de repositório). Ver AUDITORIA.md#PEND-22.
+  e2e:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: sgtest
+          POSTGRES_DB: starguard
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:sgtest@localhost:5433/starguard
+      SESSION_SECURE: "false"
+      PORT: "3020"
+      E2E_BASE_URL: http://127.0.0.1:3020
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run setup           # gera as chaves JWT/cookie
+      - run: npm run db:migrate:prod
+      - run: npm run db:seed
+      - run: npm run build
+
+      - name: Navegador
+        run: npx playwright install --with-deps chromium
+
+      - name: Subir a app e rodar as suítes
+        run: |
+          npm start &
+          for i in $(seq 1 60); do
+            curl -sf "$E2E_BASE_URL/api/health" >/dev/null && break
+            sleep 2
+          done
+          npm run test:e2e
+
   # Dogfooding: o StarGuard analisando o próprio repositório. Só roda quando há
   # chave configurada; sem ela o passo é pulado em vez de falhar.
   dogfooding:

@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-const BASE = "http://127.0.0.1:3020";
+const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
 const ID = "8a9feefe-cd91-4dcf-9584-d4773905678c";
 let falhas = 0;
 const check = (c, m) => { if (!c) falhas++; console.log(`  ${c ? "✓" : "✗ FALHOU"}  ${m}`); };

@@ -15,6 +15,7 @@ import {
   clientIp,
 } from "@/lib/ratelimit";
 import { LOGIN_RATE, LOGIN_IP_RATE } from "@/lib/config";
+import { LOCALE_COOKIE, isLocale } from "@/lib/i18n/config";
 
 export const runtime = "nodejs";
 
@@ -41,12 +42,12 @@ export async function POST(req: NextRequest) {
 
   // Cota consultada SEM consumir: login que dá certo não pode gastar cota —
   // era isso que trancava o usuário legítimo fora (AUDITORIA.md#BUG-02).
-  const account = peekRateLimit(accountKey, LOGIN_RATE);
+  const account = await peekRateLimit(accountKey, LOGIN_RATE);
   if (!account.allowed) {
     audit("login.ratelimited", { scope: "account" }, undefined, hashIp(ip));
     return tooMany(account.resetMs);
   }
-  const perIp = peekRateLimit(ipKey, LOGIN_IP_RATE);
+  const perIp = await peekRateLimit(ipKey, LOGIN_IP_RATE);
   if (!perIp.allowed) {
     audit("login.ratelimited", { scope: "ip" }, undefined, hashIp(ip));
     return tooMany(perIp.resetMs);
@@ -55,8 +56,8 @@ export async function POST(req: NextRequest) {
   const user = await authenticate(v.data.email, v.data.password);
   if (!user) {
     // Só a FALHA consome cota — nos dois baldes.
-    rateLimit(accountKey, LOGIN_RATE);
-    rateLimit(ipKey, LOGIN_IP_RATE);
+    await rateLimit(accountKey, LOGIN_RATE);
+    await rateLimit(ipKey, LOGIN_IP_RATE);
     audit(
       "login.fail",
       { emailDomain: email.split("@")[1] },
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   // Sucesso limpa o histórico de falhas da conta: quem lembrou a senha não
   // deve arrastar as tentativas anteriores.
-  resetRateLimit(accountKey);
+  await resetRateLimit(accountKey);
 
   const session = await issueSession(user);
   const res = jsonOk({
@@ -77,6 +78,15 @@ export async function POST(req: NextRequest) {
     csrf: session.csrf,
   });
   setSessionCookies(res, session);
+  // A preferência de idioma acompanha a CONTA, não o navegador
+  // (AUDITORIA.md#PEND-19).
+  if (isLocale(user.locale)) {
+    res.cookies.set(LOCALE_COOKIE, user.locale, {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: "strict",
+    });
+  }
   audit("login.success", { userId: user.id }, user.id, hashIp(ip));
   return res;
 }

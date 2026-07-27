@@ -17,5 +17,6 @@ export async function GET(req: NextRequest) {
     email: user.email,
     name: user.name,
     role: user.role,
+    locale: user.locale ?? null,
   });
 }

@@ -150,7 +150,7 @@ export async function runScan(
     // Descrições legíveis, no idioma do sistema. Catálogo local resolve a
     // maioria sem custo; a IA entra em lote só no que sobra. Nunca lança.
     // Ver AUDITORIA.md#FEAT-03.
-    const { enrichFindings } = await import("@/lib/enrich");
+    const { enrichFindings, enrichDependencies } = await import("@/lib/enrich");
     const [sastExplained, reviewExplained] = await Promise.all([
       enrichFindings(sast.vulnerabilities, ctx?.locale),
       enrichFindings(review.findings, ctx?.locale),
@@ -158,7 +158,11 @@ export async function runScan(
 
     return {
       sast: { ...sast, vulnerabilities: sastExplained },
-      sca,
+      // Dependências não passam por IA: o texto é montado por template.
+      sca: {
+        ...sca,
+        dependencies: enrichDependencies(sca.dependencies, ctx?.locale),
+      },
       review: { ...review, findings: reviewExplained },
     };
   } finally {

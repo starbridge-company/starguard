@@ -152,6 +152,174 @@ export const PT_BR = {
   "diff.noChange": "nenhuma alteração",
   "diff.unchangedLines": "{n} linhas inalteradas",
 
+
+  // ---- Onboarding (nova análise) ----
+  "onb.kicker": "Nova análise",
+  "onb.title": "Vamos analisar seu projeto",
+  "onb.subtitle":
+    "Descreva o sistema e clique em iniciar — o StarGuard cuida das 4 fases.",
+  "onb.phases": "As 4 fases",
+  "onb.projectName": "Nome do projeto",
+  "onb.projectPlaceholder": "Ex.: Portal do Paciente",
+  "onb.optional": "Repositório e skills",
+  "onb.optionalHint": "Opcional — conecte o GitHub e envie skills para validar",
+  "onb.submit": "Iniciar análise",
+  "onb.failed": "Falha ao iniciar a análise.",
+  "phase1.label": "Ameaças",
+  "phase1.desc":
+    "Fase 1 · Modela ameaças e requisitos de segurança a partir do seu contexto.",
+  "phase2.label": "Skills",
+  "phase2.desc": "Fase 2 · Valida skills/prompts contra injeção e exfiltração.",
+  "phase3.label": "Software",
+  "phase3.desc":
+    "Fase 3 · SAST + SCA sobre o repositório, priorizados por severidade.",
+  "phase4.label": "Correção",
+  "phase4.desc": "Fase 4 · Gera a correção e abre o Pull Request no GitHub.",
+
+  // ---- Listagens e filtros ----
+  "list.historyKicker": "Histórico",
+  "list.analysesTitle": "Análises",
+  "list.analysesSubtitle":
+    "Suas análises de segurança, da mais recente à mais antiga.",
+  "list.searchAnalyses": "Buscar por projeto ou repositório…",
+  "list.colProject": "Projeto",
+  "list.colSeverities": "Severidades",
+  "list.colFindings": "Achados",
+  "list.colStatus": "Status",
+  "list.colCreated": "Criada",
+  "list.empty": "Nenhuma análise ainda.",
+  "list.startFirst": "Inicie a primeira",
+  "list.loadFailed": "Falha ao carregar as análises.",
+  "list.prs": "{n} PR(s)",
+  "list.openRepo": "Abrir repositório",
+  "filter.all": "Todas",
+  "filter.done": "Concluídas",
+  "filter.running": "Rodando",
+  "filter.error": "Erro",
+  "filter.queued": "Fila",
+  "filter.anyDate": "Qualquer data",
+  "filter.today": "Hoje",
+  "filter.last7": "Últimos 7 dias",
+  "filter.last30": "Últimos 30 dias",
+  "filter.period": "Período",
+  "filter.from": "De",
+  "filter.to": "Até",
+  "filter.search": "Buscar…",
+  "filter.clearSearch": "Limpar busca",
+  "filter.allUsers": "Todos os usuários",
+  "filter.filterUsers": "Filtrar usuários…",
+  "filter.noUsers": "Nenhum usuário.",
+
+  // ---- Correção em lote ----
+  "batch.title": "Corrigir em lote",
+  "batch.whatHappens": "O que vai acontecer",
+  "batch.plan":
+    "{findings} achado(s) em {files} arquivo(s) ⇒ {calls} chamada(s) de IA.",
+  "batch.grouped":
+    "Achados do mesmo arquivo são corrigidos juntos, numa chamada só.",
+  "batch.costHint":
+    "Cada chamada consome tokens do provedor configurado. Com o engine de agente, cada uma também clona o repositório — o que leva alguns minutos por arquivo.",
+  "batch.start": "Gerar {n} correção(ões)",
+  "batch.generating": "Gerando correções… {done}/{total}",
+  "batch.summary": "{done} pronta(s) de {total}",
+  "batch.cancel": "Cancelar geração",
+  "batch.cancelHint": "O que já ficou pronto continua salvo.",
+  "batch.confirmClose":
+    "As correções ainda estão sendo geradas. Fechar agora cancela o que falta. Continuar?",
+  "batch.statusQueued": "Na fila",
+  "batch.statusRunning": "Gerando…",
+  "batch.statusDone": "Pronta",
+  "batch.statusError": "Erro",
+  "batch.statusCancelled": "Cancelada",
+  "batch.groupedWith":
+    "Corrigida junto com {n} outro(s) achado(s) deste mesmo arquivo, numa única alteração.",
+  "batch.noChangeItem":
+    "A IA não propôs alteração neste arquivo — ele fica de fora do PR.",
+  "batch.noChangeCount":
+    "{n} arquivo(s) sem alteração proposta pela IA — não entram no PR.",
+  "batch.openPr": "Abrir 1 PR com {n} arquivo(s)",
+  "batch.waiting": "Aguarde as correções…",
+  "batch.prOpened": "PR #{number} aberto com {files} arquivo(s).",
+  "batch.nFindings": "{n} achado(s)",
+
+
+  // ---- Ajuda contextual e seções da tela de resultados ----
+  "help.overview": "Visão geral",
+  "help.overviewText":
+    "Resumo do que a análise encontrou. Comece pelas correções de código — é onde você resolve os problemas e abre um PR.",
+  "help.fixes": "Correções de segurança",
+  "help.fixesText":
+    "Reúne as vulnerabilidades do scanner (SAST) e os achados da revisão por IA (regra de negócio, IDOR/autorização, lógica multi-arquivo). Os achados da IA que repetiriam um do SAST são descartados. Selecione o que quer resolver e gere correções com IA — cada uma pode virar um Pull Request.",
+  "help.batch": "Correção em lote",
+  "help.batchText":
+    "Selecione os achados e gere as correções de uma vez. No fim, você abre um único Pull Request com todas. Ou use “Corrigir com IA” em cada card para uma só.",
+  "help.deps": "Dependências (SCA)",
+  "help.depsText":
+    "Pacotes com CVE conhecido detectados pela análise de composição de software. A correção é atualizar para a versão corrigida indicada.",
+  "help.threats": "Modelagem de ameaças",
+  "help.threatsText":
+    "A IA analisa o contexto do sistema e levanta ameaças plausíveis (STRIDE, LGPD, OWASP) e os requisitos técnicos que as mitigam.",
+  "help.skills": "Validação de skills",
+  "help.skillsText":
+    "Cada skill/prompt é checada contra prompt-injection, exfiltração de dados e desvio de política. O veredito indica se é seguro usá-la.",
+  "help.batchModal": "Como funciona",
+  "help.batchModalText":
+    "Os achados são agrupados por arquivo: cada arquivo recebe UMA correção que resolve todos os problemas dele de uma vez — assim uma correção não sobrescreve a outra. Ao final, você abre um único Pull Request com todos os arquivos.",
+  "help.customizeFix": "Personalize a correção",
+  "help.customizeFixText":
+    "Oriente a IA: biblioteca a usar, manter a assinatura de uma função, seguir um padrão do projeto, etc. A IA recebe o arquivo inteiro + o contexto do erro e corrige só o problema de segurança, sem mudar a lógica de negócio.",
+  "fix.instructionsPlaceholder":
+    "Ex.: use consultas parametrizadas do driver pg, mantenha a assinatura da função e o estilo do arquivo. Não altere as outras rotas.",
+
+  "results.done": "Análise concluída.",
+  "results.inProgress": "Análise em andamento…",
+  "results.sections": "Seções",
+  "results.bySeverity": "Achados por severidade",
+  "results.ctaTitle": "{n} correção(ões) de segurança a aplicar",
+  "results.ctaSub":
+    "{n} crítica(s). Gere correções com IA e abra um Pull Request.",
+  "results.goToFixes": "Ir para correções",
+  "results.rowFixes": "Correções de segurança",
+  "results.rowDeps": "Dependências (SCA)",
+  "results.rowThreats": "Ameaças",
+  "results.rowSkills": "Skills",
+  "results.nFixes": "{n} correção(ões)",
+  "results.nCves": "{n} com CVE",
+  "results.nThreats": "{threats} ameaças · {reqs} requisitos",
+  "results.nSkills": "{n} validada(s)",
+  "results.selectItems": "Selecione os itens e aplique correções com IA.",
+  "results.includesAi": "Inclui {n} achado(s) da revisão por IA.",
+  "results.waitingPrevious": "Aguardando as fases anteriores…",
+  "results.phaseFailed": "Falha nesta fase.",
+  "results.newAnalysisLink": "← Nova análise",
+
+  "deps.subtitle": "Pacotes vulneráveis e a versão que corrige.",
+  "deps.scanning": "Escaneando as dependências…",
+  "deps.empty": "Nenhuma dependência vulnerável encontrada. 🎉",
+  "deps.notRun": "O SCA ({engine}) não foi executado.",
+  "deps.notRunHint": "As dependências não foram verificadas.",
+
+  "threats.modeling": "Modelando as ameaças…",
+  "threats.requirements": "Requisitos técnicos de segurança",
+  "unverified.title": "Regras declaradas que não deu para verificar",
+
+  "skills.subtitle": "Segurança de skills/prompts enviados.",
+  "skills.validating": "Validando as skills…",
+  "skills.empty": "Nenhuma skill enviada para validação.",
+
+  "fixes.noScannerTitle": "Nenhum analisador de código rodou.",
+  "card.businessRule": "Regra de negócio",
+
+  // ---- Erros de API (chaves devolvidas em errorKey) ----
+  "err.unauthenticated": "Sessão expirada. Entre novamente.",
+  "err.forbidden": "Você não tem permissão para esta ação.",
+  "err.notFound": "Não encontrado.",
+  "err.conflict": "Conflito com um registro existente.",
+  "err.tooManyRequests": "Muitas requisições. Aguarde alguns instantes.",
+  "err.server": "Erro no servidor. Tente novamente.",
+  "err.badRequest": "Dados inválidos.",
+  "err.network": "Sem conexão com o servidor.",
+
   // ---- Conta ----
   "account.language": "Idioma da interface",
   "account.languageHint":
@@ -292,6 +460,168 @@ const EN: Partial<Record<MessageKey, string>> = {
   "diff.viewDiff": "View diff",
   "diff.noChange": "no changes",
   "diff.unchangedLines": "{n} unchanged lines",
+
+
+  "onb.kicker": "New analysis",
+  "onb.title": "Let us analyze your project",
+  "onb.subtitle":
+    "Describe the system and hit start — StarGuard handles the 4 phases.",
+  "onb.phases": "The 4 phases",
+  "onb.projectName": "Project name",
+  "onb.projectPlaceholder": "e.g. Patient Portal",
+  "onb.optional": "Repository and skills",
+  "onb.optionalHint": "Optional — connect GitHub and submit skills to validate",
+  "onb.submit": "Start analysis",
+  "onb.failed": "Could not start the analysis.",
+  "phase1.label": "Threats",
+  "phase1.desc":
+    "Phase 1 · Models threats and security requirements from your context.",
+  "phase2.label": "Skills",
+  "phase2.desc":
+    "Phase 2 · Validates skills/prompts against injection and exfiltration.",
+  "phase3.label": "Software",
+  "phase3.desc":
+    "Phase 3 · SAST + SCA over the repository, ranked by severity.",
+  "phase4.label": "Fix",
+  "phase4.desc":
+    "Phase 4 · Generates the fix and opens the Pull Request on GitHub.",
+
+  "list.historyKicker": "History",
+  "list.analysesTitle": "Analyses",
+  "list.analysesSubtitle": "Your security analyses, newest first.",
+  "list.searchAnalyses": "Search by project or repository…",
+  "list.colProject": "Project",
+  "list.colSeverities": "Severities",
+  "list.colFindings": "Findings",
+  "list.colStatus": "Status",
+  "list.colCreated": "Created",
+  "list.empty": "No analyses yet.",
+  "list.startFirst": "Start the first one",
+  "list.loadFailed": "Failed to load the analyses.",
+  "list.prs": "{n} PR(s)",
+  "list.openRepo": "Open repository",
+  "filter.all": "All",
+  "filter.done": "Done",
+  "filter.running": "Running",
+  "filter.error": "Error",
+  "filter.queued": "Queued",
+  "filter.anyDate": "Any date",
+  "filter.today": "Today",
+  "filter.last7": "Last 7 days",
+  "filter.last30": "Last 30 days",
+  "filter.period": "Period",
+  "filter.from": "From",
+  "filter.to": "To",
+  "filter.search": "Search…",
+  "filter.clearSearch": "Clear search",
+  "filter.allUsers": "All users",
+  "filter.filterUsers": "Filter users…",
+  "filter.noUsers": "No users.",
+
+  "batch.title": "Batch fix",
+  "batch.whatHappens": "What will happen",
+  "batch.plan": "{findings} finding(s) across {files} file(s) ⇒ {calls} AI call(s).",
+  "batch.grouped":
+    "Findings in the same file are fixed together, in a single call.",
+  "batch.costHint":
+    "Each call consumes tokens from the configured provider. With the agent engine, each one also clones the repository — which takes a few minutes per file.",
+  "batch.start": "Generate {n} fix(es)",
+  "batch.generating": "Generating fixes… {done}/{total}",
+  "batch.summary": "{done} ready of {total}",
+  "batch.cancel": "Cancel generation",
+  "batch.cancelHint": "Whatever is already done stays saved.",
+  "batch.confirmClose":
+    "Fixes are still being generated. Closing now cancels what is left. Continue?",
+  "batch.statusQueued": "Queued",
+  "batch.statusRunning": "Generating…",
+  "batch.statusDone": "Ready",
+  "batch.statusError": "Error",
+  "batch.statusCancelled": "Cancelled",
+  "batch.groupedWith":
+    "Fixed together with {n} other finding(s) in this same file, in a single change.",
+  "batch.noChangeItem":
+    "The AI proposed no change to this file — it stays out of the PR.",
+  "batch.noChangeCount":
+    "{n} file(s) with no change proposed by the AI — not included in the PR.",
+  "batch.openPr": "Open 1 PR with {n} file(s)",
+  "batch.waiting": "Waiting for the fixes…",
+  "batch.prOpened": "PR #{number} opened with {files} file(s).",
+  "batch.nFindings": "{n} finding(s)",
+
+
+  "help.overview": "Overview",
+  "help.overviewText":
+    "A summary of what the analysis found. Start with the code fixes — that is where you solve the problems and open a PR.",
+  "help.fixes": "Security fixes",
+  "help.fixesText":
+    "Combines scanner findings (SAST) with the AI review (business rules, IDOR/authorization, multi-file logic). AI findings that would repeat a SAST one are dropped. Select what you want to solve and generate fixes with AI — each one can become a Pull Request.",
+  "help.batch": "Batch fix",
+  "help.batchText":
+    "Select the findings and generate the fixes at once. At the end you open a single Pull Request with all of them. Or use “Fix with AI” on each card for a single one.",
+  "help.deps": "Dependencies (SCA)",
+  "help.depsText":
+    "Packages with a known CVE detected by software composition analysis. The fix is upgrading to the indicated fixed version.",
+  "help.threats": "Threat modeling",
+  "help.threatsText":
+    "The AI analyzes the system context and raises plausible threats (STRIDE, LGPD, OWASP) and the technical requirements that mitigate them.",
+  "help.skills": "Skill validation",
+  "help.skillsText":
+    "Each skill/prompt is checked against prompt injection, data exfiltration and policy bypass. The verdict tells whether it is safe to use.",
+  "help.batchModal": "How it works",
+  "help.batchModalText":
+    "Findings are grouped by file: each file gets ONE fix that solves all of its problems at once — so one fix never overwrites another. At the end you open a single Pull Request with every file.",
+  "help.customizeFix": "Customize the fix",
+  "help.customizeFixText":
+    "Guide the AI: which library to use, keep a function signature, follow a project pattern, and so on. The AI receives the whole file plus the error context and fixes only the security problem, without changing business logic.",
+  "fix.instructionsPlaceholder":
+    "e.g. use parameterized queries from the pg driver, keep the function signature and the file style. Do not touch the other routes.",
+
+  "results.done": "Analysis complete.",
+  "results.inProgress": "Analysis in progress…",
+  "results.sections": "Sections",
+  "results.bySeverity": "Findings by severity",
+  "results.ctaTitle": "{n} security fix(es) to apply",
+  "results.ctaSub": "{n} critical. Generate fixes with AI and open a Pull Request.",
+  "results.goToFixes": "Go to fixes",
+  "results.rowFixes": "Security fixes",
+  "results.rowDeps": "Dependencies (SCA)",
+  "results.rowThreats": "Threats",
+  "results.rowSkills": "Skills",
+  "results.nFixes": "{n} fix(es)",
+  "results.nCves": "{n} with CVE",
+  "results.nThreats": "{threats} threats · {reqs} requirements",
+  "results.nSkills": "{n} validated",
+  "results.selectItems": "Select the items and apply fixes with AI.",
+  "results.includesAi": "Includes {n} finding(s) from the AI review.",
+  "results.waitingPrevious": "Waiting for the previous phases…",
+  "results.phaseFailed": "This phase failed.",
+  "results.newAnalysisLink": "← New analysis",
+
+  "deps.subtitle": "Vulnerable packages and the version that fixes them.",
+  "deps.scanning": "Scanning dependencies…",
+  "deps.empty": "No vulnerable dependencies found. 🎉",
+  "deps.notRun": "SCA ({engine}) did not run.",
+  "deps.notRunHint": "Dependencies were not checked.",
+
+  "threats.modeling": "Modeling the threats…",
+  "threats.requirements": "Technical security requirements",
+  "unverified.title": "Declared rules that could not be verified",
+
+  "skills.subtitle": "Security of the submitted skills/prompts.",
+  "skills.validating": "Validating the skills…",
+  "skills.empty": "No skills submitted for validation.",
+
+  "fixes.noScannerTitle": "No code analyzer ran.",
+  "card.businessRule": "Business rule",
+
+  "err.unauthenticated": "Session expired. Please sign in again.",
+  "err.forbidden": "You do not have permission for this action.",
+  "err.notFound": "Not found.",
+  "err.conflict": "Conflict with an existing record.",
+  "err.tooManyRequests": "Too many requests. Please wait a moment.",
+  "err.server": "Server error. Please try again.",
+  "err.badRequest": "Invalid data.",
+  "err.network": "No connection to the server.",
 
   "account.language": "Interface language",
   "account.languageHint":

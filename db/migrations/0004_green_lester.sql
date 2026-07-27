@@ -1,0 +1,1 @@
+ALTER TABLE "starguard"."users" ADD COLUMN "locale" text;

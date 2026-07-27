@@ -133,6 +133,8 @@ export interface DependencyVuln {
   cve: string;
   title: string;
   description: string;
+  /** Descrição enriquecida no idioma do sistema (lib/enrich.ts). */
+  explain?: FindingExplain;
 }
 
 export interface ScanResult {

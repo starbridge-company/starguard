@@ -18,7 +18,7 @@ import "server-only";
 import { runAI, extractJSON } from "@/lib/ai";
 import { lookupCatalog } from "@/lib/catalog";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
-import type { FindingExplain, Vulnerability } from "@/types";
+import type { FindingExplain, Vulnerability, DependencyVuln } from "@/types";
 
 /** Teto de regras distintas enviadas à IA numa passada. */
 const MAX_RULES_PER_CALL = 25;
@@ -47,6 +47,46 @@ interface RuleGroup {
 
 function ruleKeyOf(v: Vulnerability): string {
   return `${v.ruleId || "sem-regra"}|${v.cwe || ""}`;
+}
+
+/**
+ * Dependência vulnerável não precisa de IA: o que importa é o pacote, a versão
+ * e para onde atualizar — tudo já vem estruturado do Trivy. Montamos o texto
+ * por template, no idioma do sistema, com custo zero.
+ * Ver AUDITORIA.md#PEND-15.
+ */
+export function enrichDependencies(
+  deps: DependencyVuln[],
+  locale: Locale = DEFAULT_LOCALE
+): DependencyVuln[] {
+  const pt = locale === "pt-BR";
+  return deps.map((d) => {
+    const versao = `${d.package}@${d.installedVersion}`;
+    const howToFix = d.fixedVersion
+      ? pt
+        ? `Atualize \`${d.package}\` para ${d.fixedVersion} ou superior. Se for dependência transitiva, force a resolução no lockfile.`
+        : `Upgrade \`${d.package}\` to ${d.fixedVersion} or later. If it is a transitive dependency, force the resolution in the lockfile.`
+      : pt
+        ? `Ainda não há versão corrigida. Avalie substituir a dependência, isolar o uso dela, ou acompanhar o avanço do ${d.cve}.`
+        : `No fixed version yet. Consider replacing the dependency, isolating its use, or tracking progress on ${d.cve}.`;
+
+    return {
+      ...d,
+      explain: {
+        title: pt
+          ? `Dependência vulnerável: ${d.package}`
+          : `Vulnerable dependency: ${d.package}`,
+        whatItIs: pt
+          ? `A versão em uso (${versao}) tem uma vulnerabilidade conhecida, registrada como ${d.cve}.`
+          : `The version in use (${versao}) has a known vulnerability, tracked as ${d.cve}.`,
+        whyItMatters: pt
+          ? "Código de terceiro roda com os mesmos privilégios do seu. Vulnerabilidade com CVE público já tem exploit conhecido e varredores automáticos procuram por ela."
+          : "Third-party code runs with the same privileges as yours. A vulnerability with a public CVE already has a known exploit, and automated scanners look for it.",
+        howToFix,
+        source: "catalog",
+      },
+    };
+  });
 }
 
 /**

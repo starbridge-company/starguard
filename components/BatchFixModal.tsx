@@ -7,6 +7,7 @@ import InfoTip from "@/components/InfoTip";
 import Modal from "@/components/Modal";
 import CodeDiff from "@/components/CodeDiff";
 import { apiPost, ApiError, isAbortError } from "@/lib/client";
+import { useT, type MessageKey } from "@/lib/i18n";
 import {
   IconX,
   IconCheck,
@@ -35,12 +36,12 @@ interface BatchPR {
 
 const CONCURRENCY = 3;
 
-const STATUS_LABEL: Record<ItemStatus, string> = {
-  queued: "Na fila",
-  running: "Gerando…",
-  done: "Pronta",
-  error: "Erro",
-  cancelled: "Cancelada",
+const STATUS_KEY: Record<ItemStatus, MessageKey> = {
+  queued: "batch.statusQueued",
+  running: "batch.statusRunning",
+  done: "batch.statusDone",
+  error: "batch.statusError",
+  cancelled: "batch.statusCancelled",
 };
 
 const EXT_LANG: Record<string, string> = {
@@ -84,6 +85,7 @@ export default function BatchFixModal({
 }) {
   // Nada começa sozinho: gerar N correções custa dinheiro e tempo, então o
   // usuário confirma antes. Ver AUDITORIA.md#UX-05.
+  const t = useT();
   const [phase, setPhase] = useState<"confirm" | "working">("confirm");
   const [items, setItems] = useState<Record<string, ItemState>>(() =>
     Object.fromEntries(vulns.map((v) => [v.id, { status: "queued" as ItemStatus }]))
@@ -271,22 +273,17 @@ export default function BatchFixModal({
   // ---------- Tela de confirmação ----------
   if (phase === "confirm") {
     return (
-      <Modal title="Corrigir em lote" onClose={onClose}>
+      <Modal title={t("batch.title")} onClose={onClose}>
         <div className="vuln-suggestion">
-          <span className="label">O que vai acontecer</span>
-          <strong>{total}</strong> achado(s) em <strong>{groups.length}</strong>{" "}
-          arquivo(s) ⇒ <strong>{groups.length}</strong> chamada(s) de IA
-          {groups.length !== total && (
-            <>
-              {" "}
-              (achados do mesmo arquivo são corrigidos juntos, numa chamada só)
-            </>
-          )}
-          .
+          <span className="label">{t("batch.whatHappens")}</span>
+          {t("batch.plan", {
+            findings: total,
+            files: groups.length,
+            calls: groups.length,
+          })}
+          {groups.length !== total && <> {t("batch.grouped")}</>}
           <div className="field-hint" style={{ marginTop: 8 }}>
-            Cada chamada consome tokens do provedor configurado. Com o engine de
-            agente, cada uma também clona o repositório — o que leva alguns
-            minutos por arquivo.
+            {t("batch.costHint")}
           </div>
         </div>
 
@@ -295,9 +292,7 @@ export default function BatchFixModal({
             <div className="batch-item" key={g[0]!.id}>
               <div className="batch-item-head">
                 <span className="muted mono batch-item-loc">{g[0]!.file}</span>
-                <span className="badge">
-                  {g.length} achado{g.length > 1 ? "s" : ""}
-                </span>
+                <span className="badge">{t("batch.nFindings", { n: g.length })}</span>
               </div>
             </div>
           ))}
@@ -305,15 +300,14 @@ export default function BatchFixModal({
 
         <div className="batch-footer">
           <button type="button" className="button ghost" onClick={onClose}>
-            Cancelar
+            {t("common.cancel")}
           </button>
           <button
             type="button"
             className="button primary"
             onClick={() => setPhase("working")}
           >
-            <IconRefactor /> Gerar {groups.length} correção
-            {groups.length > 1 ? "ões" : ""}
+            <IconRefactor /> {t("batch.start", { n: groups.length })}
           </button>
         </div>
       </Modal>
@@ -323,26 +317,20 @@ export default function BatchFixModal({
   // ---------- Geração + PR ----------
   return (
     <Modal
-      title="Corrigir em lote"
+      title={t("batch.title")}
       onClose={onClose}
-      confirmClose={() =>
-        generating
-          ? "As correções ainda estão sendo geradas. Fechar agora cancela o que falta. Continuar?"
-          : null
-      }
+      confirmClose={() => (generating ? t("batch.confirmClose") : null)}
       titleExtra={
         <InfoTip
-          title="Como funciona"
-          content="Os achados são agrupados por arquivo: cada arquivo recebe UMA correção que resolve todos os problemas dele de uma vez — assim uma correção não sobrescreve a outra. Ao final, você abre um único Pull Request com todos os arquivos."
+          title={t("help.batchModal")}
+          content={t("help.batchModalText")}
         />
       }
     >
       <p className="muted">
         {generating
-          ? `Gerando correções… ${doneCount}/${total}`
-          : `${doneCount} pronta(s)${errorCount ? ` · ${errorCount} com erro` : ""}${
-              cancelledCount ? ` · ${cancelledCount} cancelada(s)` : ""
-            } de ${total}`}
+          ? t("batch.generating", { done: doneCount, total })
+          : t("batch.summary", { done: doneCount, total })}
         {groups.length !== total && (
           <>
             {" · "}
@@ -351,7 +339,7 @@ export default function BatchFixModal({
         )}
       </p>
 
-      <div className="progress-track" aria-label="progresso das correções">
+      <div className="progress-track" aria-label={t("batch.generating", { done: doneCount, total })}>
         <div className="progress-fill" style={{ width: `${pct}%` }} />
       </div>
 
@@ -362,11 +350,9 @@ export default function BatchFixModal({
             className="button ghost small"
             onClick={() => abortRef.current?.abort()}
           >
-            <IconX /> Cancelar geração
+            <IconX /> {t("batch.cancel")}
           </button>
-          <span className="field-hint">
-            O que já ficou pronto continua salvo.
-          </span>
+          <span className="field-hint">{t("batch.cancelHint")}</span>
         </div>
       )}
 
@@ -387,7 +373,7 @@ export default function BatchFixModal({
                   ) : (
                     <span className="dot" />
                   )}
-                  {STATUS_LABEL[s?.status ?? "queued"]}
+                  {t(STATUS_KEY[s?.status ?? "queued"])}
                 </span>
                 <SeverityBadge severity={v.severity} />
                 <span className="batch-item-title">{v.title}</span>
@@ -400,7 +386,7 @@ export default function BatchFixModal({
                     className={`batch-toggle ${isOpen ? "is-open" : ""}`}
                     onClick={() => toggle(v.id)}
                   >
-                    ver diff <IconChevronDown />
+                    {t("diff.viewDiff")} <IconChevronDown />
                   </button>
                 )}
               </div>
@@ -409,14 +395,13 @@ export default function BatchFixModal({
 
               {s?.status === "done" && (s.groupSize ?? 1) > 1 && (
                 <p className="batch-item-desc muted">
-                  Corrigida junto com {(s.groupSize ?? 1) - 1} outro(s) achado(s)
-                  deste mesmo arquivo, numa única alteração.
+                  {t("batch.groupedWith", { n: (s.groupSize ?? 1) - 1 })}
                 </p>
               )}
 
               {s?.status === "done" && s.fix?.noChange && (
                 <div className="batch-item-error">
-                  A IA não propôs alteração neste arquivo — ele fica de fora do PR.
+                  {t("batch.noChangeItem")}
                 </div>
               )}
 
@@ -432,7 +417,7 @@ export default function BatchFixModal({
                     maxHeight={280}
                   />
                   <div className="vuln-suggestion">
-                    <span className="label">O que mudou</span>
+                    <span className="label">{t("fix.whatChanged")}</span>
                     {s.fix.explanation}
                   </div>
                 </div>
@@ -446,7 +431,7 @@ export default function BatchFixModal({
         <div className="alert success">
           <IconCheckCircle />
           <span>
-            PR #{pr.number} aberto com {pr.committed} arquivo(s).{" "}
+            {t("batch.prOpened", { number: pr.number, files: pr.committed })}{" "}
             <a
               href={pr.url}
               target="_blank"
@@ -454,7 +439,7 @@ export default function BatchFixModal({
               className="link"
               style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
             >
-              Ver no GitHub <IconExternal />
+              {t("fix.viewOnGithub")} <IconExternal />
             </a>
           </span>
         </div>
@@ -463,8 +448,7 @@ export default function BatchFixModal({
           {prError && <div className="alert error">{prError}</div>}
           {noChangeCount > 0 && !generating && (
             <div className="alert info">
-              {noChangeCount} arquivo(s) sem alteração proposta pela IA — não
-              entram no PR.
+              {t("batch.noChangeCount", { n: noChangeCount })}
             </div>
           )}
           {repoUrl ? (
@@ -481,13 +465,12 @@ export default function BatchFixModal({
                 <IconPullRequest />
               )}
               {generating
-                ? "Aguarde as correções…"
-                : `Abrir 1 PR com ${prFiles.length} arquivo(s)`}
+                ? t("batch.waiting")
+                : t("batch.openPr", { n: prFiles.length })}
             </button>
           ) : (
             <span className="field-hint">
-              Informe a URL do repositório na Tela 1 para abrir o PR. As
-              correções acima já podem ser revisadas.
+              {t("fix.needRepo")}
             </span>
           )}
         </div>

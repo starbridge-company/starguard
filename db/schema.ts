@@ -48,6 +48,9 @@ export const users = starguard.table(
     passwordHash: text("password_hash").notNull(),
     role: roleEnum("role").notNull().default("admin"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    // Idioma preferido. Sem isto o idioma vivia só no cookie e entrar de
+    // outra máquina voltava ao padrão. Ver AUDITORIA.md#PEND-19.
+    locale: text("locale"),
     // Corte de sessão: todo refresh token emitido ANTES deste instante é
     // recusado. É como um papel alterado, uma exclusão ou uma troca de senha
     // derrubam sessões em aberto sem precisar listar jti a jti.

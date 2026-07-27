@@ -110,12 +110,14 @@ export const profileUpdateSchema = z
     email: emailField.optional(),
     currentPassword: z.string().max(200).optional(),
     newPassword: z.string().min(8).max(200).optional(),
+    locale: z.enum(["pt-BR", "en"]).optional(),
   })
   .refine(
     (d) =>
       d.name !== undefined ||
       d.email !== undefined ||
-      d.newPassword !== undefined,
+      d.newPassword !== undefined ||
+      d.locale !== undefined,
     "nada para atualizar"
   );
 

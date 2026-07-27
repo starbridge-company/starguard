@@ -11,32 +11,34 @@ import Collapsible from "@/components/Collapsible";
 import InfoTip from "@/components/InfoTip";
 import { apiPost, ApiError } from "@/lib/client";
 import { IconPlan, IconSkills, IconScan, IconRefactor, IconRepo } from "@/lib/icons";
+import { useT, type MessageKey } from "@/lib/i18n";
 
 const PHASES = [
   {
     Icon: IconPlan,
-    label: "Ameaças",
-    desc: "Fase 1 · Modela ameaças e requisitos de segurança a partir do seu contexto.",
+    labelKey: "phase1.label" as MessageKey,
+    descKey: "phase1.desc" as MessageKey,
   },
   {
     Icon: IconSkills,
-    label: "Skills",
-    desc: "Fase 2 · Valida skills/prompts contra injeção e exfiltração.",
+    labelKey: "phase2.label" as MessageKey,
+    descKey: "phase2.desc" as MessageKey,
   },
   {
     Icon: IconScan,
-    label: "Software",
-    desc: "Fase 3 · SAST + SCA sobre o repositório, priorizados por severidade.",
+    labelKey: "phase3.label" as MessageKey,
+    descKey: "phase3.desc" as MessageKey,
   },
   {
     Icon: IconRefactor,
-    label: "Correção",
-    desc: "Fase 4 · Gera a correção e abre o Pull Request no GitHub.",
+    labelKey: "phase4.label" as MessageKey,
+    descKey: "phase4.desc" as MessageKey,
   },
 ];
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const t = useT();
   const [projectName, setProjectName] = useState("");
   const [systemDescription, setSystemDescription] = useState("");
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -65,7 +67,7 @@ export default function OnboardingPage() {
       });
       router.push(`/results/${id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha ao iniciar a análise.");
+      setError(err instanceof ApiError ? err.message : t("onb.failed"));
       setLoading(false);
     }
   };
@@ -74,22 +76,22 @@ export default function OnboardingPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Nova análise</span>
-          <h1>Vamos analisar seu projeto</h1>
+          <span className="page-kicker">{t("onb.kicker")}</span>
+          <h1>{t("onb.title")}</h1>
           <p className="page-subtitle">
-            Descreva o sistema e clique em iniciar — o StarGuard cuida das 4 fases.
+            {t("onb.subtitle")}
           </p>
         </div>
       </header>
 
       {/* Pipeline compacto — cada fase explica-se num toque, sem poluir a tela */}
-      <div className="mini-pipeline" aria-label="As 4 fases">
+      <div className="mini-pipeline" aria-label={t("onb.phases")}>
         {PHASES.map((p, i) => (
-          <InfoTip key={p.label} side="bottom" content={p.desc}>
+          <InfoTip key={p.labelKey} side="bottom" content={t(p.descKey)}>
             <span className="mini-step">
               <span className="mini-step-num">{i + 1}</span>
               <p.Icon />
-              <span className="mini-step-label">{p.label}</span>
+              <span className="mini-step-label">{t(p.labelKey)}</span>
             </span>
           </InfoTip>
         ))}
@@ -99,11 +101,11 @@ export default function OnboardingPage() {
         {error && <div className="alert error">{error}</div>}
 
         <div className="field">
-          <label htmlFor="project-name">Nome do projeto</label>
+          <label htmlFor="project-name">{t("onb.projectName")}</label>
           <input
             id="project-name"
             className="input"
-            placeholder="Ex.: Portal do Paciente"
+            placeholder={t("onb.projectPlaceholder")}
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             required
@@ -113,8 +115,8 @@ export default function OnboardingPage() {
         <ThreatInput value={systemDescription} onChange={setSystemDescription} />
 
         <Collapsible
-          title="Repositório e skills"
-          hint="Opcional — conecte o GitHub e envie skills para validar"
+          title={t("onb.optional")}
+          hint={t("onb.optionalHint")}
           icon={<IconRepo />}
         >
           <div style={{ display: "grid", gap: 20 }}>
@@ -132,7 +134,7 @@ export default function OnboardingPage() {
             aria-busy={loading}
           >
             {loading ? <span className="button-spinner" /> : null}
-            Iniciar análise
+            {t("onb.submit")}
           </button>
         </div>
       </form>

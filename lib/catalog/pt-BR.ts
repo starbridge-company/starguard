@@ -1,19 +1,130 @@
 // ============================================================
-// Catálogo de explicações — o que cada classe de achado significa.
-//
-// Cobre as regras e CWEs mais frequentes SEM chamar IA: resposta instantânea,
-// custo zero e disponível mesmo sem chave configurada. A IA (lib/enrich.ts) só
-// entra no que não está aqui. Ver AUDITORIA.md#FEAT-03.
-//
-// Estruturado por locale desde já para não precisar reescrever no i18n
-// (FEAT-04) — hoje só existe pt-BR.
+// Catálogo em PORTUGUÊS. Ver lib/catalog/index.ts para como é consultado.
 // ============================================================
-import type { FindingExplain } from "@/types";
-
-type Entry = Omit<FindingExplain, "source">;
+import type { Entry } from "./types";
 
 /** Casa pelo FIM do check_id (as regras vêm com o caminho inteiro em pontos). */
-const RULES_PT: Record<string, Entry> = {
+export const RULES: Record<string, Entry> = {
+  "avoid-pickle": {
+    title: "Desserialização com pickle",
+    whatItIs: "Uso de `pickle` para desserializar dados.",
+    whyItMatters:
+      "`pickle` executa código durante a desserialização: um payload manipulado vira execução remota no processo Python.",
+    attackScenario:
+      "Um objeto pickle com `__reduce__` dispara `os.system` ao ser carregado.",
+    howToFix:
+      "Use `json` para dados. Se precisar de binário, prefira formatos sem execução (msgpack, protobuf) e valide o schema.",
+  },
+  "dangerous-subprocess-use": {
+    title: "Subprocesso com shell",
+    whatItIs: "Chamada de subprocesso com `shell=True` ou string montada.",
+    whyItMatters:
+      "O shell interpreta `;`, `|` e `&&` — qualquer entrada externa vira execução de comando arbitrário.",
+    howToFix:
+      "Passe a lista de argumentos e mantenha `shell=False` (padrão). Valide a entrada contra uma lista do permitido.",
+  },
+  "dangerous-system-call": {
+    title: "Chamada direta ao sistema",
+    whatItIs: "Uso de `os.system` / `popen` com string.",
+    whyItMatters:
+      "Sempre passa pelo shell, então concatenar entrada é injeção de comando direta.",
+    howToFix: "Troque por `subprocess.run` com lista de argumentos.",
+  },
+  "sqlalchemy-execute-raw-query": {
+    title: "SQL cru no SQLAlchemy",
+    whatItIs: "Consulta SQL montada por concatenação ou f-string.",
+    whyItMatters:
+      "É injeção de SQL: o atacante altera a consulta e alcança dados de outros usuários.",
+    howToFix:
+      "Use `text()` com parâmetros nomeados (`:id`) ou a API de query do ORM.",
+  },
+  "flask-wtf-missing-csrf-protection": {
+    title: "Flask sem proteção CSRF",
+    whatItIs: "Aplicação Flask sem CSRFProtect configurado.",
+    whyItMatters:
+      "Sem token, outro site consegue disparar ações autenticadas no navegador da vítima.",
+    howToFix: "Ative `CSRFProtect(app)` e inclua o token nos formulários.",
+  },
+  "django-secret-key": {
+    title: "SECRET_KEY no código",
+    whatItIs: "A SECRET_KEY do Django está fixa no código.",
+    whyItMatters:
+      "Com ela é possível forjar sessões e tokens assinados — equivale a virar qualquer usuário.",
+    howToFix:
+      "Mova para variável de ambiente e ROTACIONE a chave exposta (as sessões atuais caem, o que é o esperado).",
+  },
+  "math-random-used": {
+    title: "Aleatoriedade não criptográfica",
+    whatItIs: "Uso de gerador pseudoaleatório comum para valor de segurança.",
+    whyItMatters:
+      "`Math.random`/`random` são previsíveis: token de sessão ou de recuperação gerado assim pode ser adivinhado.",
+    howToFix:
+      "Use `crypto.randomUUID()`/`crypto.getRandomValues` (JS) ou `secrets` (Python).",
+  },
+  "jwt-python-none-algorithm": {
+    title: "JWT aceitando algoritmo none",
+    whatItIs: "Verificação de JWT que aceita o algoritmo `none`.",
+    whyItMatters:
+      "O atacante remove a assinatura e forja qualquer conteúdo do token, inclusive o papel de admin.",
+    howToFix:
+      "Fixe os algoritmos aceitos (`algorithms=[\"RS256\"]`) e nunca confie no cabeçalho do token.",
+  },
+  "jwt-hardcode": {
+    title: "Segredo de JWT no código",
+    whatItIs: "A chave de assinatura do JWT está no código.",
+    whyItMatters: "Quem lê o repositório assina tokens válidos para qualquer usuário.",
+    howToFix: "Mova para variável de ambiente e rotacione a chave exposta.",
+  },
+  "gorilla-csrf-not-configured": {
+    title: "Go: CSRF não configurado",
+    whatItIs: "Servidor Go sem middleware de CSRF nas rotas que mudam estado.",
+    whyItMatters:
+      "Outro site consegue disparar ações autenticadas usando o cookie da vítima.",
+    howToFix: "Aplique o middleware de CSRF e valide o token nas rotas mutantes.",
+  },
+  "formatted-sql-query": {
+    title: "SQL montado por formatação",
+    whatItIs: "Consulta SQL construída com formatação de string.",
+    whyItMatters:
+      "É o caminho clássico de injeção de SQL, independente da linguagem.",
+    howToFix: "Use parâmetros do driver; nunca interpole valor na string.",
+  },
+  "insecure-cipher-algorithm": {
+    title: "Cifra insegura",
+    whatItIs: "Uso de algoritmo de cifra quebrado (DES, RC4, ECB).",
+    whyItMatters:
+      "O dado é recuperável na prática — a criptografia dá falsa sensação de proteção.",
+    howToFix: "Use AES-GCM (ou ChaCha20-Poly1305) com IV aleatório por mensagem.",
+  },
+  "insecure-hash-function": {
+    title: "Hash inseguro",
+    whatItIs: "Uso de MD5 ou SHA-1.",
+    whyItMatters:
+      "São vulneráveis a colisão; para senha, além disso, são rápidos demais e caem em ataque de dicionário.",
+    howToFix:
+      "SHA-256+ para integridade; Argon2id ou bcrypt para senha.",
+  },
+  "tainted-sql-string": {
+    title: "SQL com entrada não confiável",
+    whatItIs: "Entrada externa alcança a montagem de uma consulta SQL.",
+    whyItMatters: "Injeção de SQL com caminho de ataque já rastreado pela ferramenta.",
+    howToFix: "Parametrize a consulta e valide o tipo da entrada.",
+  },
+  "ssrf-requests": {
+    title: "Requisição para URL não confiável",
+    whatItIs: "URL de destino vem de entrada externa.",
+    whyItMatters:
+      "O servidor passa a buscar o que o atacante mandar, incluindo serviços internos e metadados de nuvem (169.254.169.254).",
+    howToFix:
+      "Valide contra allowlist de domínios e bloqueie faixas privadas, inclusive após redirecionamento.",
+  },
+  "missing-integrity": {
+    title: "Script externo sem integridade",
+    whatItIs: "Tag `<script>`/`<link>` externa sem atributo `integrity`.",
+    whyItMatters:
+      "Se o CDN for comprometido, o script alterado executa na sua página com acesso total à sessão.",
+    howToFix: "Adicione `integrity` com o hash e `crossorigin=\"anonymous\"`.",
+  },
   "detect-child-process": {
     title: "Execução de comando do sistema",
     whatItIs:
@@ -225,7 +336,7 @@ const RULES_PT: Record<string, Entry> = {
 };
 
 /** Fallback por CWE quando a regra específica não está no catálogo. */
-const CWES_PT: Record<string, Entry> = {
+export const CWES: Record<string, Entry> = {
   "CWE-78": {
     title: "Injeção de comando do sistema",
     whatItIs: "Injeção de comando do sistema operacional.",
@@ -331,45 +442,3 @@ const CWES_PT: Record<string, Entry> = {
     howToFix: "Fixe a versão por digest/SHA e revise as atualizações.",
   },
 };
-
-function norm(s: string | undefined): string {
-  return (s || "").trim().toLowerCase();
-}
-
-/** Só o último segmento do check_id ("…javascript.lang.security.detect-x"). */
-function ruleKey(ruleId: string | undefined): string {
-  const seg = norm(ruleId).split(/[.\\/]/).filter(Boolean).pop();
-  return seg || "";
-}
-
-/** Primeiro identificador CWE presente no texto ("CWE-79: ..."). */
-function cweKey(cwe: string | undefined): string {
-  const m = /CWE-\d+/i.exec(cwe || "");
-  return m ? m[0].toUpperCase() : "";
-}
-
-/** Idiomas que o catálogo já tem redigidos. */
-const CATALOG_LOCALES = new Set(["pt-BR"]);
-
-/**
- * Procura no catálogo por regra e, se não achar, por CWE.
- * Retorna undefined quando nada casa — aí entra a IA (lib/enrich.ts).
- *
- * Idioma sem catálogo redigido devolve undefined DE PROPÓSITO: entregar texto
- * em português para quem escolheu inglês seria pior que cair na IA (ou, sem
- * chave, manter o texto original da ferramenta — que já é inglês).
- */
-export function lookupCatalog(
-  ruleId: string | undefined,
-  cwe: string | undefined,
-  locale = "pt-BR"
-): FindingExplain | undefined {
-  if (!CATALOG_LOCALES.has(locale)) return undefined;
-  const byRule = RULES_PT[ruleKey(ruleId)];
-  if (byRule) return { ...byRule, source: "catalog" };
-  const byCwe = CWES_PT[cweKey(cwe)];
-  if (byCwe) return { ...byCwe, source: "catalog" };
-  return undefined;
-}
-
-export const CATALOG_SIZE = Object.keys(RULES_PT).length + Object.keys(CWES_PT).length;
