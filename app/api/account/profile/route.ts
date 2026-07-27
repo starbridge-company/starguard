@@ -28,10 +28,10 @@ export const dynamic = "force-dynamic";
 export async function PATCH(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(profileUpdateSchema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   const user = await usersRepo.findById(session.sub);
   if (!user) return jsonError(404, "Usuário não encontrado.");
@@ -43,13 +43,13 @@ export async function PATCH(req: NextRequest) {
   // Operações sensíveis exigem a senha atual.
   if (emailChanged || wantsPassword) {
     if (!v.data.currentPassword) {
-      return jsonError(400, "Informe a senha atual para alterar e-mail ou senha.");
+      return jsonError(400, "Informe a senha atual para alterar e-mail ou senha.", "err.currentPasswordRequired");
     }
     const ok = await verifyPassword(
       user.passwordHash,
       v.data.currentPassword
     );
-    if (!ok) return jsonError(403, "Senha atual incorreta.");
+    if (!ok) return jsonError(403, "Senha atual incorreta.", "err.wrongCurrentPassword");
   }
 
   const patch: {
@@ -65,7 +65,7 @@ export async function PATCH(req: NextRequest) {
   }
   if (emailChanged) {
     if (await usersRepo.existsByEmail(v.data.email!)) {
-      return jsonError(409, "Já existe um usuário com este e-mail.");
+      return jsonError(409, "Já existe um usuário com este e-mail.", "err.emailTaken");
     }
     patch.email = v.data.email!.toLowerCase();
   }
@@ -87,10 +87,10 @@ export async function PATCH(req: NextRequest) {
     await usersRepo.updateProfile(user.id, patch);
   } catch (e) {
     if ((e as { code?: string })?.code === "23505") {
-      return jsonError(409, "Já existe um usuário com este e-mail.");
+      return jsonError(409, "Já existe um usuário com este e-mail.", "err.emailTaken");
     }
     const msg = e instanceof Error ? e.message : "Falha ao atualizar o perfil.";
-    return jsonError(500, msg);
+    return jsonError(500, msg, null);
   }
 
   audit("account.update", {

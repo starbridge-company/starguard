@@ -6,17 +6,21 @@
 // entra no que não está aqui. Ver AUDITORIA.md#FEAT-03.
 //
 // Um dicionário por idioma — antes só existia português, e um usuário em
-// inglês recebia explicação em português (AUDITORIA.md#PEND-18).
+// inglês recebia explicação em português (AUDITORIA.md#PEND-18). Hoje são
+// três; o teste garante que as CHAVES não divergem entre eles, senão um
+// idioma cairia na IA em silêncio e o custo voltaria sem ninguém perceber.
 // ============================================================
 import type { FindingExplain } from "@/types";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "@/lib/i18n/config";
 import * as ptBR from "./pt-BR";
 import * as en from "./en";
+import * as es from "./es";
 import type { Entry } from "./types";
 
 const BY_LOCALE: Record<Locale, { RULES: Record<string, Entry>; CWES: Record<string, Entry> }> = {
   "pt-BR": { RULES: ptBR.RULES, CWES: ptBR.CWES },
   en: { RULES: en.RULES, CWES: en.CWES },
+  es: { RULES: es.RULES, CWES: es.CWES },
 };
 
 function norm(s: string | undefined): string {

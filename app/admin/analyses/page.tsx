@@ -11,11 +11,11 @@ import {
   UserSelect,
   type UserOption,
 } from "@/components/filters";
-import { apiGet, ApiError } from "@/lib/client";
+import { apiGet } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
 import { IconReport } from "@/lib/icons";
-import { useT } from "@/lib/i18n";
+import { useApiError, useT } from "@/lib/i18n";
 
 interface Row {
   id: string;
@@ -45,6 +45,7 @@ const STATUS_SEG = [
 
 export default function AdminAnalysesPage() {
   const t = useT();
+  const apiError = useApiError();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -84,11 +85,11 @@ export default function AdminAnalysesPage() {
       if (userId) params.set("userId", userId);
       setData(await apiGet<Paged<Row>>(`/api/admin/analyses?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("list.loadFailed"));
+      setError(apiError(e, "list.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, q, status, from, to, userId, t]);
+  }, [page, q, status, from, to, userId, apiError]);
 
   useEffect(() => {
     load();
@@ -151,7 +152,7 @@ export default function AdminAnalysesPage() {
                   <th>{t("adminUsers.colUser")}</th>
                   <th>{t("list.colSeverities")}</th>
                   <th>{t("list.colStatus")}</th>
-                  <th>Criada</th>
+                  <th>{t("list.colCreated")}</th>
                   <th />
                 </tr>
               </thead>
@@ -186,9 +187,13 @@ export default function AdminAnalysesPage() {
                     <td className="muted">{fmtDate(r.createdAt)}</td>
                     <td className="row-actions">
                       <Link href={`/results/${r.id}`} className="button ghost small">
-                        Abrir
+                        {t("common.open")}
                       </Link>
-                      <Link href={`/report/${r.id}`} className="icon-btn" title="Relatório">
+                      <Link
+                        href={`/report/${r.id}`}
+                        className="icon-btn"
+                        title={t("common.report")}
+                      >
                         <IconReport />
                       </Link>
                     </td>

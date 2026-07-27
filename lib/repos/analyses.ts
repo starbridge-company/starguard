@@ -142,8 +142,15 @@ export async function patchIfUntouchedSince(
  * parada é exatamente a que perdeu o processo (deploy, restart, crash).
  */
 export async function listStale(olderThanMs: number, cutoff = new Date(Date.now() - olderThanMs)) {
+  // `userId` vem junto para que a mensagem de encerramento seja escrita no
+  // idioma do dono — ela fica GRAVADA no JSONB e é lida assim para sempre.
   return db
-    .select({ id: analyses.id, phases: analyses.phases, progress: analyses.progress })
+    .select({
+      id: analyses.id,
+      userId: analyses.userId,
+      phases: analyses.phases,
+      progress: analyses.progress,
+    })
     .from(analyses)
     .where(
       and(

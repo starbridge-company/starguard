@@ -7,7 +7,7 @@ import InfoTip from "@/components/InfoTip";
 import Modal from "@/components/Modal";
 import CodeDiff from "@/components/CodeDiff";
 import TokenPrompt, { type TokenChoice } from "@/components/TokenPrompt";
-import { FIX_GUIDE, isGenericSuggestion } from "@/lib/constants";
+import { isGenericSuggestion } from "@/lib/constants";
 import { useT } from "@/lib/i18n";
 import {
   IconPullRequest,
@@ -18,14 +18,17 @@ import {
 
 // Instrução default já escrita na textarea ao abrir: a sugestão do scanner
 // (só quando é específica) + a linha-guia, que entra uma única vez.
-function defaultInstructions(vuln: FixTarget): string {
+//
+// A linha-guia vem do dicionário, não de `lib/constants`: ela é EDITADA pelo
+// usuário na textarea, então precisa nascer no idioma dele.
+function defaultInstructions(vuln: FixTarget, guide: string): string {
   const sug = vuln.suggestion?.trim();
   // A recomendação enriquecida é sempre mais útil que a do scanner.
   const melhor = vuln.explain?.howToFix?.trim() || sug;
   if (melhor && !isGenericSuggestion(melhor)) {
-    return `${melhor}\n${FIX_GUIDE}`;
+    return `${melhor}\n${guide}`;
   }
-  return FIX_GUIDE;
+  return guide;
 }
 
 export default function FixModal({
@@ -60,14 +63,17 @@ export default function FixModal({
   repoIsPrivate?: boolean | null;
 }) {
   const t = useT();
-  const [instructions, setInstructions] = useState(() => defaultInstructions(vuln));
+  const guide = t("fix.guide");
+  const [instructions, setInstructions] = useState(() =>
+    defaultInstructions(vuln, guide)
+  );
 
   // Clicar fora não pode custar trabalho. A correção em si já não se perde —
   // o FEAT-02 a guarda no banco e ela volta ao reabrir o modal. O que ainda
   // some é o que o usuário DIGITOU e não chegou a usar: instruções alteradas
   // e nunca enviadas. Só nesse caso perguntamos. Ver AUDITORIA.md#UX-03.
   const instructionsDirty =
-    instructions.trim() !== defaultInstructions(vuln).trim();
+    instructions.trim() !== defaultInstructions(vuln, guide).trim();
   const confirmClose = () =>
     instructionsDirty && !fix ? t("fix.confirmDiscard") : null;
 

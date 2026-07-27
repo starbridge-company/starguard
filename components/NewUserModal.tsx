@@ -4,8 +4,8 @@ import { useState } from "react";
 import InfoTip from "@/components/InfoTip";
 import Modal from "@/components/Modal";
 import { Picker } from "@/components/filters";
-import { apiPost, ApiError } from "@/lib/client";
-import { useT } from "@/lib/i18n";
+import { apiPost } from "@/lib/client";
+import { useApiError, useT } from "@/lib/i18n";
 import { IconUser } from "@/lib/icons";
 
 export default function NewUserModal({
@@ -16,6 +16,7 @@ export default function NewUserModal({
   onCreated: () => void;
 }) {
   const t = useT();
+  const apiError = useApiError();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +41,7 @@ export default function NewUserModal({
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("newUser.failed"));
+      setError(apiError(err, "newUser.failed"));
       setSaving(false);
     }
   };

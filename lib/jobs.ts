@@ -14,7 +14,8 @@ import { log, timed } from "@/lib/logger";
 import * as analysesRepo from "@/lib/repos/analyses";
 import * as tokensRepo from "@/lib/repos/tokens";
 import * as findingsRepo from "@/lib/repos/findings";
-import type { Locale } from "@/lib/i18n/config";
+import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "@/lib/i18n/config";
+import { translate } from "@/lib/i18n/translate";
 import type {
   Job,
   JobInput,
@@ -198,7 +199,8 @@ async function runPhase<T>(
   phases: Job["phases"],
   id: string,
   key: PhaseKey,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
+  locale: Locale = DEFAULT_LOCALE
 ): Promise<void> {
   const ph = phases[key] as PhaseState<T>;
   ph.status = "running";
@@ -216,7 +218,7 @@ async function runPhase<T>(
     ph.status = "error";
     // Redigido: este texto é PERSISTIDO no JSONB e exibido na tela; erros de
     // ferramenta externa podem carregar credenciais (AUDITORIA.md#SEC-01).
-    ph.error = redactError(e) || "Falha na etapa.";
+    ph.error = redactError(e) || translate(locale, "job.phaseFailed");
   } finally {
     ph.finishedAt = Date.now();
   }
@@ -239,10 +241,25 @@ export function failUnfinishedPhases(
   return phases;
 }
 
-const ORPHAN_MSG =
-  "A análise foi interrompida antes de começar (o servidor reiniciou). Rode de novo — nada foi perdido no repositório.";
-const STALE_MSG =
-  "A análise não deu sinal de vida por tempo demais e foi encerrada (provável reinício do servidor durante o processamento).";
+/**
+ * Idioma do dono da análise.
+ *
+ * As mensagens de encerramento (órfã/abandonada) são gravadas no JSONB e lidas
+ * depois direto do banco — não passam mais pelo `t()` de ninguém. Quando o job
+ * já morreu, o `locale` que veio na criação não existe mais em memória, então a
+ * única fonte que resta é a preferência salva na conta. Falha aqui não pode
+ * derrubar a varredura: cai no padrão.
+ */
+async function ownerLocale(userId: string | null | undefined): Promise<Locale> {
+  if (!userId) return DEFAULT_LOCALE;
+  try {
+    const { findById } = await import("@/lib/repos/users");
+    const user = await findById(userId);
+    return normalizeLocale(user?.locale);
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
 
 /** Sem sinal por este tempo, a análise é dada como perdida. */
 const STALE_AFTER_MS = Number(process.env.ANALYSIS_STALE_MS || 20 * 60_000);
@@ -264,7 +281,7 @@ export async function expireStaleAnalyses(): Promise<number> {
   for (const row of stale) {
     const phases = failUnfinishedPhases(
       (row.phases as Job["phases"]) ?? initialPhases(),
-      STALE_MSG
+      translate(await ownerLocale(row.userId), "job.stale")
     );
     await analysesRepo
       .patchIfUntouchedSince(row.id, cutoff, {
@@ -297,7 +314,14 @@ export async function runJob(id: string): Promise<void> {
   // Segredos ausentes = o processo que criou a análise morreu antes de rodar.
   // Retornar em silêncio deixava a linha `pending` para sempre (#BUG-11).
   if (!raw) {
-    const phases = failUnfinishedPhases(initialPhases(), ORPHAN_MSG);
+    const dono = await analysesRepo
+      .getById(id)
+      .then((r) => r?.userId)
+      .catch(() => undefined);
+    const phases = failUnfinishedPhases(
+      initialPhases(),
+      translate(await ownerLocale(dono), "job.orphan")
+    );
     await analysesRepo
       .patchAnalysis(id, {
         phases,
@@ -310,6 +334,7 @@ export async function runJob(id: string): Promise<void> {
     return;
   }
   const phases = initialPhases();
+  const locale = raw.locale || DEFAULT_LOCALE;
   audit("analyze.start", { jobId: id });
 
   // O progresso é derivado das fases concluídas, nunca cravado à mão: era
@@ -324,20 +349,35 @@ export async function runJob(id: string): Promise<void> {
       .patchAnalysis(id, { status: "running", startedAt: new Date() })
       .catch(() => {});
 
-    await runPhase(phases, id, "plan", () =>
-      generateThreatModel(raw.systemDescription, raw.locale)
+    await runPhase(
+      phases,
+      id,
+      "plan",
+      () => generateThreatModel(raw.systemDescription, locale),
+      locale
     );
     await persist();
 
-    await runPhase(phases, id, "skills", () => validateSkills(raw.skills || []));
+    await runPhase(
+      phases,
+      id,
+      "skills",
+      () => validateSkills(raw.skills || [], locale),
+      locale
+    );
     await persist();
 
-    await runPhase(phases, id, "software", () =>
-      runScan(raw.repoUrl, raw.token, {
-        systemDescription: raw.systemDescription,
-        requirements: phases.plan.result?.requirements,
-        locale: raw.locale,
-      })
+    await runPhase(
+      phases,
+      id,
+      "software",
+      () =>
+        runScan(raw.repoUrl, raw.token, {
+          systemDescription: raw.systemDescription,
+          requirements: phases.plan.result?.requirements,
+          locale,
+        }),
+      locale
     );
 
     // Cada achado vira uma linha com estado próprio, herdando o que já foi
@@ -372,7 +412,13 @@ export async function runJob(id: string): Promise<void> {
     // toda análise custava um clone do repositório e até 4,5 min de agente que
     // ninguém pediu, contra o princípio já adotado em UX-05 e o cache do
     // FEAT-02. Correção agora é sempre sob demanda. Ver AUDITORIA.md#BUG-16.
-    await runPhase(phases, id, "refactor", async () => ({ fixes: [], prs: [] }));
+    await runPhase(
+      phases,
+      id,
+      "refactor",
+      async () => ({ fixes: [], prs: [] }),
+      locale
+    );
 
     const anyError = (Object.values(phases) as PhaseState[]).some(
       (p) => p.status === "error"
@@ -389,7 +435,10 @@ export async function runJob(id: string): Promise<void> {
     // Falha inesperada fora das fases: marca a análise como erro — e as fases
     // que ficaram no meio do caminho recebem o motivo, senão a tela mostra
     // "erro" sem dizer onde (#BUG-11).
-    failUnfinishedPhases(phases, redactError(e) || "Falha inesperada na análise.");
+    failUnfinishedPhases(
+      phases,
+      redactError(e) || translate(locale, "job.unexpected")
+    );
     await analysesRepo
       .patchAnalysis(id, {
         phases,

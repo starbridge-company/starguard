@@ -6,14 +6,20 @@
 import "server-only";
 import { phaseMaxTokens } from "@/lib/config";
 import { runAI, extractJSON } from "@/lib/ai";
+import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
+import { translate, type MessageKey } from "@/lib/i18n/translate";
 import type { SkillFinding, SkillValidation, Severity, SkillVerdict } from "@/types";
 
+// As heurísticas são DETERMINÍSTICAS: título e recomendação são texto nosso,
+// não da IA. Guardamos a CHAVE de tradução junto do texto — a chave é a fonte
+// para a tela, o texto continua gravado para quem consome o JSONB sem o
+// dicionário (exportação SARIF/CSV, análises antigas). Ver AUDITORIA.md#FEAT-04.
 interface Heuristic {
   type: SkillFinding["type"];
   severity: Severity;
   re: RegExp;
-  title: string;
-  recommendation: string;
+  titleKey: MessageKey;
+  recommendationKey: MessageKey;
 }
 
 const HEURISTICS: Heuristic[] = [
@@ -21,38 +27,34 @@ const HEURISTICS: Heuristic[] = [
     type: "prompt-injection",
     severity: "critical",
     re: /ignore\s+(the\s+)?(previous|above|prior|as)\s+(instru|rules|prompt)|disregard\s+.{0,20}(instru|rules)|esque[çc]a\s+as\s+instru/i,
-    title: "Instrução de sobreposição de política (prompt injection)",
-    recommendation:
-      "Remover instruções que peçam ao modelo ignorar regras do sistema; skills não devem sobrepor a política.",
+    titleKey: "skillFinding.promptInjection.title",
+    recommendationKey: "skillFinding.promptInjection.fix",
   },
   {
     type: "data-exfiltration",
     severity: "high",
     re: /(curl|wget|fetch)\s+https?:\/\/|exfil|\.env\b|base64\s+-|process\.env/i,
-    title: "Possível exfiltração de dados/segredos",
-    recommendation:
-      "Proibir leitura de segredos e chamadas de rede dentro de skills; aplicar allowlist de operações.",
+    titleKey: "skillFinding.dataExfiltration.title",
+    recommendationKey: "skillFinding.dataExfiltration.fix",
   },
   {
     type: "backdoor",
     severity: "high",
     re: /\beval\s*\(|child_process|\bexec\s*\(|require\(['"]child_process/i,
-    title: "Execução de código/comando embutida",
-    recommendation:
-      "Skills não devem executar comandos ou avaliar código arbitrário. Remover o trecho.",
+    titleKey: "skillFinding.backdoor.title",
+    recommendationKey: "skillFinding.backdoor.fix",
   },
   {
     type: "policy-bypass",
     severity: "medium",
     re: /jailbreak|DAN mode|developer mode|sem restri[çc][õo]es|no restrictions/i,
-    title: "Tentativa de desvio de política",
-    recommendation:
-      "Remover linguagem que tente desabilitar salvaguardas do modelo.",
+    titleKey: "skillFinding.policyBypass.title",
+    recommendationKey: "skillFinding.policyBypass.fix",
   },
 ];
 
-const REQUIRED_CONTENT: { label: string; re: RegExp }[] = [
-  { label: "Contém objetivo/escopo declarado", re: /objetivo|escopo|goal|purpose|##/i },
+const REQUIRED_CONTENT: { labelKey: MessageKey; re: RegExp }[] = [
+  { labelKey: "skillCheck.scope", re: /objetivo|escopo|goal|purpose|objetivo|alcance|##/i },
 ];
 
 function verdictFrom(findings: SkillFinding[]): SkillVerdict {
@@ -66,7 +68,7 @@ function lineOf(content: string, index: number): number {
   return content.slice(0, index).split(/\r?\n/).length;
 }
 
-function heuristicFindings(content: string): SkillFinding[] {
+function heuristicFindings(content: string, locale: Locale): SkillFinding[] {
   const out: SkillFinding[] = [];
   HEURISTICS.forEach((h, hi) => {
     const m = h.re.exec(content);
@@ -76,11 +78,15 @@ function heuristicFindings(content: string): SkillFinding[] {
         id: `H-${hi}`,
         type: h.type,
         severity: h.severity,
-        title: h.title,
-        description: `Padrão suspeito detectado por heurística: "${m[0].slice(0, 80)}".`,
+        titleKey: h.titleKey,
+        title: translate(locale, h.titleKey),
+        description: translate(locale, "skillFinding.heuristicDesc", {
+          match: m[0].slice(0, 80),
+        }),
         snippet: content.slice(Math.max(0, idx - 20), idx + 80).trim(),
         line: lineOf(content, idx),
-        recommendation: h.recommendation,
+        recommendationKey: h.recommendationKey,
+        recommendation: translate(locale, h.recommendationKey),
       });
     }
   });
@@ -93,10 +99,18 @@ prompt injection, exfiltração de dados, backdoors, desvio de política ou cont
 que a skill deveria conter. Responda APENAS com JSON no formato:
 {"findings":[{"type":"prompt-injection|data-exfiltration|backdoor|policy-bypass|missing-content|suspicious-pattern","severity":"critical|high|medium|low","title":"...","description":"...","snippet":"...","recommendation":"..."}]}`;
 
-async function aiFindings(name: string, content: string): Promise<SkillFinding[]> {
+async function aiFindings(
+  name: string,
+  content: string,
+  locale: Locale
+): Promise<SkillFinding[]> {
   try {
     const text = await runAI("skills", {
-      system: SKILL_SYSTEM_PROMPT,
+      // O achado da IA é texto livre e vai direto para a tela: sem esta linha
+      // ele sairia sempre em português, ao lado das heurísticas traduzidas.
+      system: `${SKILL_SYSTEM_PROMPT}
+
+Escreva "title", "description" e "recommendation" em ${LOCALE_AI_NAME[locale]}.`,
       prompt: `Skill: ${name}\n\n---\n${content.slice(0, 20000)}\n---`,
       maxTokens: phaseMaxTokens(2),
     });
@@ -105,10 +119,12 @@ async function aiFindings(name: string, content: string): Promise<SkillFinding[]
       id: `AI-${i}`,
       type: (f.type as SkillFinding["type"]) || "suspicious-pattern",
       severity: (f.severity as Severity) || "medium",
-      title: f.title || "Achado da IA",
+      // Sem chave: o texto já nasce no idioma do usuário, vindo do modelo.
+      title: f.title || translate(locale, "skillFinding.aiTitle"),
       description: f.description || "",
       snippet: f.snippet,
-      recommendation: f.recommendation || "Revisar o trecho apontado.",
+      recommendation:
+        f.recommendation || translate(locale, "skillFinding.aiRecommendation"),
     }));
   } catch {
     // Sem API key ou falha de IA: seguimos só com heurísticas.
@@ -116,12 +132,12 @@ async function aiFindings(name: string, content: string): Promise<SkillFinding[]
   }
 }
 
-export async function analyzeSkill(skill: {
-  name: string;
-  content: string;
-}): Promise<SkillValidation> {
-  const heur = heuristicFindings(skill.content);
-  const ai = await aiFindings(skill.name, skill.content);
+export async function analyzeSkill(
+  skill: { name: string; content: string },
+  locale: Locale = DEFAULT_LOCALE
+): Promise<SkillValidation> {
+  const heur = heuristicFindings(skill.content, locale);
+  const ai = await aiFindings(skill.name, skill.content, locale);
 
   // Dedup simples por título.
   const seen = new Set<string>();
@@ -132,23 +148,23 @@ export async function analyzeSkill(skill: {
     return true;
   });
 
-  const checkedItems = [
+  const checks: { labelKey: MessageKey; ok: boolean }[] = [
     ...REQUIRED_CONTENT.map((r) => ({
-      label: r.label,
+      labelKey: r.labelKey,
       ok: r.re.test(skill.content),
     })),
     {
-      label: "Sem instruções de exfiltração de dados",
+      labelKey: "skillCheck.noExfiltration",
       ok: !findings.some((f) => f.type === "data-exfiltration"),
     },
     {
-      label: "Sem tentativa de desvio de política",
+      labelKey: "skillCheck.noPolicyBypass",
       ok: !findings.some(
         (f) => f.type === "policy-bypass" || f.type === "prompt-injection"
       ),
     },
     {
-      label: "Sem execução de comandos externos",
+      labelKey: "skillCheck.noCommandExec",
       ok: !findings.some((f) => f.type === "backdoor"),
     },
   ];
@@ -157,12 +173,17 @@ export async function analyzeSkill(skill: {
     skillName: skill.name,
     verdict: verdictFrom(findings),
     findings,
-    checkedItems,
+    checkedItems: checks.map((c) => ({
+      labelKey: c.labelKey,
+      label: translate(locale, c.labelKey),
+      ok: c.ok,
+    })),
   };
 }
 
 export async function analyzeSkills(
-  skills: { name: string; content: string }[]
+  skills: { name: string; content: string }[],
+  locale: Locale = DEFAULT_LOCALE
 ): Promise<SkillValidation[]> {
-  return Promise.all(skills.map(analyzeSkill));
+  return Promise.all(skills.map((s) => analyzeSkill(s, locale)));
 }

@@ -15,10 +15,10 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(step3Schema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   try {
     // Requisitos chegam como texto nesta rota standalone; viram Requirement[]
@@ -36,6 +36,6 @@ export async function POST(req: NextRequest) {
     return jsonOk(result);
   } catch (e) {
     const msg = e instanceof Error ? redact(e.message) : "Falha no scan.";
-    return jsonError(502, msg);
+    return jsonError(502, msg, null);
   }
 }

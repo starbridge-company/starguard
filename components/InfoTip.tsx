@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/lib/i18n";
 import { IconInfo } from "@/lib/icons";
 
 type Side = "top" | "bottom";
@@ -32,7 +33,7 @@ export default function InfoTip({
   content,
   children,
   side = "top",
-  label = "Mais informações",
+  label,
   className = "",
   size = "sm",
 }: {
@@ -40,10 +41,12 @@ export default function InfoTip({
   content: ReactNode;
   children?: ReactNode;
   side?: Side;
+  /** Rótulo acessível. Sem ele, cai no genérico traduzido. */
   label?: string;
   className?: string;
   size?: "sm" | "md";
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [coords, setCoords] = useState<Coords>({ top: 0, left: 0, side });
@@ -100,7 +103,7 @@ export default function InfoTip({
       className={`infotip ${children ? "has-trigger" : ""} ${className}`}
       tabIndex={0}
       role="button"
-      aria-label={label}
+      aria-label={label ?? t("common.moreInfo")}
       aria-expanded={open}
       aria-describedby={open ? id : undefined}
       onMouseEnter={show}

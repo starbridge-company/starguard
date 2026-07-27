@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import InfoTip from "@/components/InfoTip";
+import { useT } from "@/lib/i18n";
 import { IconSkills, IconX } from "@/lib/icons";
 
 export interface SkillEntry {
@@ -16,6 +17,7 @@ export default function SkillInput({
   skills: SkillEntry[];
   onChange: (s: SkillEntry[]) => void;
 }) {
+  const t = useT();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const addEmpty = () =>
@@ -49,11 +51,11 @@ export default function SkillInput({
     <div className="field">
       <label className="field-label-row">
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <IconSkills /> Skills a validar
+          <IconSkills /> {t("skillInput.label")}
         </span>
         <InfoTip
-          title="Validação de skills"
-          content="Envie SKILL.md, prompts ou templates para a Fase 2 checar prompt-injection, exfiltração de dados e desvio de política. Opcional."
+          title={t("skillInput.help")}
+          content={t("skillInput.helpText")}
         />
       </label>
 
@@ -76,14 +78,14 @@ export default function SkillInput({
                   className="input"
                   style={{ flex: 1 }}
                   value={s.name}
-                  placeholder="nome-da-skill.md"
+                  placeholder={t("skillInput.namePlaceholder")}
                   onChange={(e) => update(i, { name: e.target.value })}
                 />
                 <button
                   type="button"
                   className="button danger"
                   onClick={() => remove(i)}
-                  aria-label="Remover skill"
+                  aria-label={t("skillInput.remove")}
                 >
                   <IconX />
                 </button>
@@ -92,7 +94,7 @@ export default function SkillInput({
                 className="textarea"
                 style={{ minHeight: 90 }}
                 value={s.content}
-                placeholder="Cole o conteúdo da skill/prompt (SKILL.md, template…)"
+                placeholder={t("skillInput.contentPlaceholder")}
                 onChange={(e) => update(i, { content: e.target.value })}
               />
             </div>
@@ -102,14 +104,14 @@ export default function SkillInput({
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button type="button" className="button ghost" onClick={addEmpty}>
-          + Adicionar skill
+          {t("skillInput.add")}
         </button>
         <button
           type="button"
           className="button ghost"
           onClick={() => fileRef.current?.click()}
         >
-          Enviar arquivos
+          {t("skillInput.upload")}
         </button>
         <input
           ref={fileRef}

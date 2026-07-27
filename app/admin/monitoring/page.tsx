@@ -10,12 +10,12 @@ import {
   UserSelect,
   type UserOption,
 } from "@/components/filters";
-import { apiGet, ApiError, isAbortError } from "@/lib/client";
+import { apiGet, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate, AuditBadge } from "@/components/listing";
 import { CATEGORY_ORDER } from "@/lib/audit-events";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 import { IconRefresh } from "@/lib/icons";
 
 interface Row {
@@ -54,6 +54,7 @@ export default function MonitoringPage() {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const t = useT();
+  const apiError = useApiError();
   const [category, setCategory] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -89,12 +90,12 @@ export default function MonitoringPage() {
         setData(await apiGet<Paged<Row>>(`/api/admin/audit?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return;
-        setError(e instanceof ApiError ? e.message : t("monitoring.loadFailed"));
+        setError(apiError(e, "monitoring.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced, category, from, to, userId, t]
+    [page, qDebounced, category, from, to, userId, apiError]
   );
 
   useEffect(() => {

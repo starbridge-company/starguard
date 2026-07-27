@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (!session) return jsonError(401, "Não autenticado.");
 
   const v = validate(githubUrlField, req.nextUrl.searchParams.get("repoUrl"));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   const { isPrivateRepo } = await import("@/lib/github");
   return jsonOk({ private: await isPrivateRepo(v.data) });

@@ -9,10 +9,10 @@ import RepoInput from "@/components/RepoInput";
 import TokenPicker, { type TokenSelection } from "@/components/TokenPicker";
 import Collapsible from "@/components/Collapsible";
 import InfoTip from "@/components/InfoTip";
-import { apiPost, ApiError } from "@/lib/client";
+import { apiPost } from "@/lib/client";
 import { parseGitHubRepo } from "@/lib/validation";
 import { IconPlan, IconSkills, IconScan, IconRefactor, IconRepo } from "@/lib/icons";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 
 const PHASES = [
   {
@@ -40,6 +40,7 @@ const PHASES = [
 export default function OnboardingPage() {
   const router = useRouter();
   const t = useT();
+  const apiError = useApiError();
   const [projectName, setProjectName] = useState("");
   const [systemDescription, setSystemDescription] = useState("");
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -72,7 +73,7 @@ export default function OnboardingPage() {
       });
       router.push(`/results/${id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("onb.failed"));
+      setError(apiError(err, "onb.failed"));
       setLoading(false);
     }
   };

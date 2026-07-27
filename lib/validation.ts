@@ -3,6 +3,7 @@
 // Regra: nenhuma rota confia em body/query/params sem passar por aqui.
 // ============================================================
 import { z } from "zod";
+import { LOCALES } from "@/lib/i18n/config";
 
 // E-mail e URL validados por refine (independente de versão do zod).
 const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -117,7 +118,9 @@ export const profileUpdateSchema = z
     email: emailField.optional(),
     currentPassword: z.string().max(200).optional(),
     newPassword: z.string().min(8).max(200).optional(),
-    locale: z.enum(["pt-BR", "en"]).optional(),
+    // Vem de LOCALES: um idioma novo não pode depender de alguém lembrar de
+    // repetir a lista aqui — o formulário aceitaria e a rota recusaria.
+    locale: z.enum(LOCALES).optional(),
   })
   .refine(
     (d) =>

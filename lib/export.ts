@@ -10,6 +10,8 @@
 // devolve texto. É o que o torna testável sem Postgres.
 // ============================================================
 import { collidesWithSast } from "@/lib/dedup";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
+import { translate } from "@/lib/i18n/translate";
 import type { DependencyVuln, Job, Severity, Vulnerability } from "@/types";
 
 export type ExportFormat = "sarif" | "csv" | "json";
@@ -94,7 +96,8 @@ function oneLine(s: string, max = 240): string {
  */
 function buildRules(
   findings: Vulnerability[],
-  deps: DependencyVuln[]
+  deps: DependencyVuln[],
+  locale: Locale
 ): { rules: SarifRule[]; indexOf: Map<string, number> } {
   const rules: SarifRule[] = [];
   const indexOf = new Map<string, number>();
@@ -136,8 +139,11 @@ function buildRules(
         text: oneLine(
           d.explain?.howToFix ||
             (d.fixedVersion
-              ? `Atualize ${d.package} para ${d.fixedVersion} ou superior.`
-              : `Não há versão corrigida publicada para ${d.package}.`),
+              ? translate(locale, "export.depUpgradeHelp", {
+                  pkg: d.package,
+                  version: d.fixedVersion,
+                })
+              : translate(locale, "export.depNoFixHelp", { pkg: d.package })),
           1000
         ),
       },
@@ -156,10 +162,10 @@ function sarifUri(file: string): string {
   return (file || "").replace(/\\/g, "/").replace(/^\.?\//, "");
 }
 
-export function toSarif(job: Job): string {
+export function toSarif(job: Job, locale: Locale = DEFAULT_LOCALE): string {
   const findings = collectCodeFindings(job);
   const deps = collectDependencyFindings(job);
-  const { rules, indexOf } = buildRules(findings, deps);
+  const { rules, indexOf } = buildRules(findings, deps, locale);
 
   const results = [
     ...findings.map((f) => ({
@@ -244,19 +250,25 @@ export function toSarif(job: Job): string {
 // CSV
 // ------------------------------------------------------------
 
-const CSV_HEADER = [
-  "id",
-  "origem",
-  "severidade",
-  "regra",
-  "cwe",
-  "owasp",
-  "arquivo",
-  "linha",
-  "titulo",
-  "descricao",
-  "como_corrigir",
-];
+// Quem abre o CSV é uma PESSOA, no Excel — o cabeçalho segue o idioma dela.
+// O JSON não: aquele é contrato de máquina e mantém as chaves estáveis.
+const CSV_COLS = [
+  "csv.id",
+  "csv.source",
+  "csv.severity",
+  "csv.rule",
+  "csv.cwe",
+  "csv.owasp",
+  "csv.file",
+  "csv.line",
+  "csv.title",
+  "csv.description",
+  "csv.howToFix",
+] as const;
+
+function csvHeader(locale: Locale): string[] {
+  return CSV_COLS.map((c) => translate(locale, c));
+}
 
 /**
  * Escapa um campo de CSV.
@@ -273,7 +285,7 @@ function csvCell(v: unknown): string {
   return s;
 }
 
-export function toCsv(job: Job): string {
+export function toCsv(job: Job, locale: Locale = DEFAULT_LOCALE): string {
   const rows: string[][] = [];
 
   for (const f of collectCodeFindings(job)) {
@@ -305,7 +317,9 @@ export function toCsv(job: Job): string {
       d.explain?.title || d.title,
       d.description,
       d.explain?.howToFix ||
-        (d.fixedVersion ? `Atualizar para ${d.fixedVersion}` : "Sem correção publicada"),
+        (d.fixedVersion
+          ? translate(locale, "export.depUpgradeTo", { version: d.fixedVersion })
+          : translate(locale, "export.depNoFix")),
     ]);
   }
 
@@ -313,7 +327,7 @@ export function toCsv(job: Job): string {
   // "injeÃ§Ã£o". É o formato que mais vai parar numa planilha.
   return (
     "﻿" +
-    [CSV_HEADER, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") +
+    [csvHeader(locale), ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") +
     "\r\n"
   );
 }
@@ -350,9 +364,15 @@ export function toJson(job: Job): string {
   );
 }
 
-export function exportAnalysis(job: Job, format: ExportFormat): string {
-  if (format === "sarif") return toSarif(job);
-  if (format === "csv") return toCsv(job);
+export function exportAnalysis(
+  job: Job,
+  format: ExportFormat,
+  locale: Locale = DEFAULT_LOCALE
+): string {
+  if (format === "sarif") return toSarif(job, locale);
+  if (format === "csv") return toCsv(job, locale);
+  // JSON é dado bruto para pipeline: as chaves NÃO seguem o idioma, senão
+  // trocar de idioma quebraria o consumidor do outro lado.
   return toJson(job);
 }
 

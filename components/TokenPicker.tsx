@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import InfoTip from "@/components/InfoTip";
 import { Picker } from "@/components/filters";
 import { apiGet } from "@/lib/client";
+import { useT } from "@/lib/i18n";
 import { IconKey } from "@/lib/icons";
 
 export interface TokenSelection {
@@ -31,6 +32,7 @@ export default function TokenPicker({
   value: TokenSelection;
   onChange: (v: TokenSelection) => void;
 }) {
+  const t = useT();
   const [saved, setSaved] = useState<SavedToken[]>([]);
   const [mode, setMode] = useState<string>(NONE); // NONE | NEW | <tokenId>
 
@@ -52,11 +54,11 @@ export default function TokenPicker({
     <div className="field">
       <label className="field-label-row">
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <IconKey /> Token de acesso
+          <IconKey /> {t("repo.tokenLabel")}
         </span>
         <InfoTip
-          title="Token do GitHub"
-          content="Necessário só para repositórios privados / abrir PR. Escolha um token salvo (cifrado na sua conta) ou digite um novo. Um token novo pode ser salvo na conta para reutilizar — sempre cifrado, nunca em texto puro."
+          title={t("tokenPicker.help")}
+          content={t("tokenPicker.helpText")}
         />
       </label>
 
@@ -64,18 +66,18 @@ export default function TokenPicker({
           components/filters.tsx. Ver AUDITORIA.md#UX-11. */}
       <Picker
         value={mode}
-        ariaLabel="Token de acesso"
+        ariaLabel={t("repo.tokenLabel")}
         icon={<IconKey />}
         onChange={selectMode}
         options={[
-          { value: NONE, label: "Nenhum (repositório público)" },
-          ...saved.map((t) => ({
-            value: t.id,
-            label: t.name,
-            sub: `••••${t.last4}`,
-            group: "Tokens salvos",
+          { value: NONE, label: t("tokenPicker.none") },
+          ...saved.map((tk) => ({
+            value: tk.id,
+            label: tk.name,
+            sub: `••••${tk.last4}`,
+            group: t("pr.savedTokens"),
           })),
-          { value: NEW, label: "+ Novo token…" },
+          { value: NEW, label: t("tokenPicker.new") },
         ]}
       />
 
@@ -85,7 +87,7 @@ export default function TokenPicker({
             className="input"
             type="password"
             autoComplete="off"
-            placeholder="ghp_…"
+            placeholder={t("account.tokenPlaceholder")}
             value={value.token || ""}
             onChange={(e) =>
               onChange({ ...value, tokenId: undefined, token: e.target.value })
@@ -97,12 +99,12 @@ export default function TokenPicker({
               checked={!!value.saveToken}
               onChange={(e) => onChange({ ...value, saveToken: e.target.checked })}
             />
-            Salvar na conta (cifrado)
+            {t("tokenPicker.saveToAccount")}
           </label>
           {value.saveToken && (
             <input
               className="input"
-              placeholder="Nome do token (ex.: PAT pessoal)"
+              placeholder={t("tokenPicker.namePlaceholder")}
               value={value.tokenName || ""}
               maxLength={100}
               onChange={(e) => onChange({ ...value, tokenName: e.target.value })}

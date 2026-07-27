@@ -54,13 +54,23 @@ export interface SkillFinding {
   snippet?: string;
   line?: number;
   recommendation: string;
+  /**
+   * Chaves de tradução do achado HEURÍSTICO (determinístico, texto nosso).
+   * O `title`/`recommendation` em texto continuam preenchidos: análises
+   * gravadas antes desta mudança não têm chave, e a tela cai neles.
+   * Achado vindo da IA já nasce no idioma do usuário e não tem chave.
+   * Ver AUDITORIA.md#FEAT-04.
+   */
+  titleKey?: string;
+  recommendationKey?: string;
 }
 
 export interface SkillValidation {
   skillName: string;
   verdict: SkillVerdict;
   findings: SkillFinding[];
-  checkedItems: { label: string; ok: boolean }[];
+  /** `labelKey` é a fonte; `label` fica para as análises antigas. */
+  checkedItems: { label: string; labelKey?: string; ok: boolean }[];
 }
 
 /**
@@ -234,6 +244,12 @@ export interface PullRequest {
 // ---- Orquestração (job das 4 fases) ----
 export interface PhaseState<T = unknown> {
   key: PhaseKey;
+  /**
+   * Rótulo INTERNO ("Plan · Modelagem de ameaças"), gravado no JSONB para
+   * inspeção do banco. A tela nunca o lê — o stepper e a tela de resultados
+   * usam as chaves `pipe.*`, que seguem o idioma. Se um dia isto for exibido,
+   * precisa virar chave antes. Ver AUDITORIA.md#FEAT-04.
+   */
   label: string;
   status: StepStatus;
   ai?: StepAIConfig;

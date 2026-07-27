@@ -5,11 +5,11 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
 import { SearchBox, Segmented, DateRange } from "@/components/filters";
-import { apiGet, apiDelete, ApiError, isAbortError } from "@/lib/client";
+import { apiGet, apiDelete, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { IconReport, IconBolt, IconExternal, IconTrash } from "@/lib/icons";
-import { useT } from "@/lib/i18n";
+import { useApiError, useT } from "@/lib/i18n";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
 
 interface Row {
@@ -38,6 +38,7 @@ const STATUS_SEG = [
 
 export default function AnalysesPage() {
   const t = useT();
+  const apiError = useApiError();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -63,12 +64,12 @@ export default function AnalysesPage() {
         setData(await apiGet<Paged<Row>>(`/api/analyses?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return; // substituída por uma busca mais nova
-        setError(e instanceof ApiError ? e.message : t("list.loadFailed"));
+        setError(apiError(e, "list.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced, status, from, to, t]
+    [page, qDebounced, status, from, to, apiError]
   );
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function AnalysesPage() {
       await apiDelete(`/api/analyses/${r.id}`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("list.deleteFailed"));
+      setError(apiError(e, "list.deleteFailed"));
     } finally {
       setDeleting(null);
     }

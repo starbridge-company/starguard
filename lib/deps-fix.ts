@@ -14,6 +14,7 @@
 // Isomórfico: a tela usa `canFixDependency` para decidir se mostra o botão.
 // ============================================================
 import type { DependencyVuln, FixTarget } from "@/types";
+import type { MessageKey, Values } from "@/lib/i18n/translate";
 
 /** Como regerar o lock depois que o manifesto muda, por ecossistema. */
 const LOCK_COMMAND: Record<string, string> = {
@@ -60,14 +61,27 @@ export function whyCannotFix(
  * `npm ci` do CI de quem recebe.
  *
  * Não dá para esconder isso: o texto vai no corpo do PR e na tela.
+ *
+ * Devolve CHAVE + valores, não texto pronto: os dois destinos (tela e corpo do
+ * PR) traduzem no idioma de quem está usando. Montar a frase aqui prenderia o
+ * aviso ao português — e este é o aviso que evita um PR que quebra o CI de
+ * quem recebe. Ver AUDITORIA.md#FEAT-04.
  */
-export function lockfileWarning(dep: DependencyVuln): string | null {
+export interface LockfileWarning {
+  key: MessageKey;
+  values: Values;
+}
+
+export function lockfileWarning(dep: DependencyVuln): LockfileWarning | null {
   if (!dep.lockfile) return null;
   const cmd = lockCommandFor(dep);
-  const base = `A correção altera ${dep.manifest}; o arquivo de lock (${dep.lockfile}) NÃO é regerado automaticamente`;
+  const values: Values = {
+    manifest: dep.manifest || "",
+    lockfile: dep.lockfile,
+  };
   return cmd
-    ? `${base} — rode \`${cmd}\` e inclua o lock no commit antes de mergear.`
-    : `${base} — regere o lock com o gerenciador do projeto antes de mergear.`;
+    ? { key: "deps.lockWarningWithCmd", values: { ...values, cmd } }
+    : { key: "deps.lockWarning", values };
 }
 
 /** Instruções para o motor de correção. Determinísticas no alvo. */

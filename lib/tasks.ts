@@ -5,6 +5,7 @@
 import "server-only";
 import { ENGINES, phaseMaxTokens } from "@/lib/config";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
+import { translate } from "@/lib/i18n/translate";
 import { runAI, extractJSON, AIError } from "@/lib/ai";
 import type {
   ThreatModel,
@@ -63,15 +64,18 @@ Escreva TODO o texto de saída em ${LOCALE_AI_NAME[locale]}.`,
 }
 
 export async function validateSkills(
-  skills: { name: string; content: string }[]
+  skills: { name: string; content: string }[],
+  locale: Locale = DEFAULT_LOCALE
 ): Promise<SkillValidation[]> {
   if (!skills.length) return [];
   const { analyzeSkills } = await import("@/lib/skills");
-  return analyzeSkills(skills);
+  return analyzeSkills(skills, locale);
 }
 
 // Sem repositório não há o que escanear: retorna um resultado vazio válido.
-function emptyScan(): ScanResult {
+// A `note` é PERSISTIDA e lida depois direto do banco — por isso já sai
+// traduzida, no idioma de quem pediu a análise (AUDITORIA.md#FEAT-04).
+function emptyScan(locale: Locale): ScanResult {
   return {
     sast: { engine: ENGINES.sast, ran: false, vulnerabilities: [] },
     sca: { engine: ENGINES.sca, ran: false, dependencies: [] },
@@ -79,7 +83,7 @@ function emptyScan(): ScanResult {
       engine: "security-review",
       ran: false,
       findings: [],
-      note: "Nenhum repositório informado.",
+      note: translate(locale, "scan.noRepo"),
     },
   };
 }
@@ -93,7 +97,8 @@ export async function runScan(
     locale?: Locale;
   }
 ): Promise<ScanResult> {
-  if (!repoUrl) return emptyScan();
+  const locale = ctx?.locale || DEFAULT_LOCALE;
+  if (!repoUrl) return emptyScan(locale);
 
   const { cloneRepo, cleanup } = await import("@/lib/github");
   const { runSast } = await import("@/lib/sast");
@@ -118,7 +123,7 @@ export async function runScan(
         ? Promise.resolve({
             engine: ENGINES.sast,
             ran: false,
-            note: "SAST desligado por configuração (SAST_ENGINE=none).",
+            note: translate(locale, "scan.sastOff"),
             vulnerabilities: [] as Vulnerability[],
           })
         : runSast(dir)
@@ -137,7 +142,7 @@ export async function runScan(
         ? Promise.resolve({
             engine: ENGINES.sca,
             ran: false,
-            note: "SCA desligado por configuração (SCA_ENGINE=none).",
+            note: translate(locale, "scan.scaOff"),
             dependencies: [] as DependencyVuln[],
           })
         : runSca(dir)

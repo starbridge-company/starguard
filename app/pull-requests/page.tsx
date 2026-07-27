@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
-import { apiGet, ApiError } from "@/lib/client";
+import { apiGet } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate } from "@/components/listing";
-import { useT } from "@/lib/i18n";
+import { useApiError, useT } from "@/lib/i18n";
 import { IconPullRequest, IconExternal } from "@/lib/icons";
 
 interface Row {
@@ -24,6 +24,7 @@ interface Row {
 
 export default function PullRequestsPage() {
   const t = useT();
+  const apiError = useApiError();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -36,11 +37,11 @@ export default function PullRequestsPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: "20" });
       setData(await apiGet<Paged<Row>>(`/api/pull-requests?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("pr.loadFailed"));
+      setError(apiError(e, "pr.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, t]);
+  }, [page, apiError]);
 
   useEffect(() => {
     load();

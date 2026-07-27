@@ -30,11 +30,39 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **3 — Estado e cache** | FEAT-01 · FEAT-02 | ✅ **entregue e testado** em 27/07/2026 |
 | **4 — Interface** | UX-01 · UX-02 · UX-04 · UX-05 · UX-06 | ✅ **entregue e testado em navegador** em 27/07/2026 |
 | **5 — Descrições** | FEAT-03 · ARQ-11 | ✅ **entregue e testado em navegador** em 27/07/2026 |
-| **6 — Idioma** | FEAT-04 | 🟡 **fundação entregue e testada; extração parcial** em 27/07/2026 |
+| **6 — Idioma** | FEAT-04 | ✅ **entregue** em 27/07/2026 — três idiomas, varredura completa (Sprint 8) |
 | **Contínuo — Qualidade** | ARQ-01 · ARQ-02 · ARQ-03 · BUG-17 | ✅ **entregue** em 27/07/2026 |
 | **Varredura de pendências** | 18 das 19 pendências abertas | ✅ **resolvidas e verificadas** em 27/07/2026 |
 | **7 — Backlog P1/P2/P3** | SEC-06 · BUG-11 a BUG-22 · ARQ-10 · UX-03 · UX-04 (resto) · UX-07 · UX-08 · UX-10 · UX-11 · UX-12 · UX-13 · UX-19 · PEND-23 | ✅ **entregue** em 27/07/2026 |
-| Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-28 | ⬜ a fazer |
+| **8 — Vistoria de idioma** | FEAT-04 (fechamento) · PEND-29 | ✅ **entregue** em 27/07/2026 |
+| Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-31 | ⬜ a fazer |
+
+<details>
+<summary><strong>Como o Sprint 8 foi validado</strong></summary>
+
+Suíte de unidade, tipos e lint. **Não houve execução em navegador nem contra
+banco** — ver PEND-30 e PEND-31.
+
+| Verificação | Resultado **medido** |
+|---|---|
+| Idiomas suportados | 3 — `pt-BR`, `en`, `es` (era 2, e o inglês era `Partial`) |
+| Chaves por idioma | **583 em cada um** (eram 434 só em português; 149 chaves novas) |
+| Paridade de chaves | Garantida pelo **tipo**: `EN`/`ES` são `Record<MessageKey, string>`, não `Partial` — chave sem tradução **não compila** |
+| Catálogo de explicações | 54 entradas (40 regras + 14 CWEs) nos **três** idiomas, com paridade travada em teste |
+| Literais em `placeholder`/`title`/`aria-label` | 0 nas 31 telas e componentes varridos (havia 18) |
+| Literais entre tags no JSX | 0 nas mesmas 31 (a varredura anterior cobria 9) |
+| Mensagem de erro de API | Traduzida pela **chave** em 23 pontos de tela; antes 100% deles mostravam o texto do servidor, em português |
+| Texto gravado no JSONB | Escrito já traduzido: `phases[].error`, `sast.note`, `sca.note`, rótulos de checagem de skill e achados heurísticos |
+| Exportação | Cabeçalho do CSV e `help.text` do SARIF seguem o idioma; **chaves do JSON não** (contrato de máquina), fixado em teste |
+| Suíte | **258 testes, 21 arquivos, todos passando** (eram 243) |
+| `npm run typecheck` | limpo |
+| `npm run lint` | 0 erros; 10 avisos de `set-state-in-effect`, todos **pré-existentes** |
+
+Testes novos: `tests/i18n-server.test.ts` (7), mais os de paridade dos três
+idiomas, varredura de literal por atributo, contrato do `jsonError` e idioma da
+exportação.
+
+</details>
 
 <details>
 <summary><strong>Como o Sprint 7 foi validado</strong></summary>
@@ -291,9 +319,11 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ## Pendências
 
 > Varredura de 27/07/2026: as 19 pendências abertas foram revisadas uma a uma e
-> **18 foram resolvidas**. A PEND-23 foi fechada no Sprint 7. As quatro abaixo
-> nasceram do próprio Sprint 7 e são todas do mesmo tipo: **o que foi entregue
-> não foi exercitado em uso real.**
+> **18 foram resolvidas**. A PEND-23 foi fechada no Sprint 7. As sete abaixo
+> nasceram dos Sprints 7 e 8 e são todas do mesmo tipo: **o que foi entregue
+> não foi exercitado em uso real.** As três do Sprint 8 (PEND-29 a PEND-31)
+> merecem leitura junta: o idioma está garantido por tipo e por teste, mas
+> **nada disso prova que o espanhol lê bem na tela.**
 
 | ID | Origem | O que falta | Por quê / o que fazer |
 |---|---|---|---|
@@ -302,6 +332,9 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-26** | BUG-11 / BUG-22 | Nenhuma consulta nova rodou contra Postgres | `listStale`, `patchIfUntouchedSince` e `softDelete` são Drizzle novo em `lib/repos/`, que por decisão do projeto não tem teste de unidade. A rota de exclusão está coberta com o repositório mockado — a **consulta em si**, não. Rodar contra um Postgres descartável. *(Parcial em 27/07/2026: as migrações `0002`–`0004` foram aplicadas a um banco real e o login foi exercitado ponta a ponta pelo ARQ-12; as três consultas novas seguem sem execução.)* |
 | **PEND-28** | ARQ-12 | O sintoma continua: 500 mudo | A causa do ARQ-12 foi corrigida (migrações aplicadas), mas **o modo de falha não**. Um banco atrás do código volta a derrubar o login exatamente do mesmo jeito no próximo deploy. Implementar a checagem de schema descrita no item. |
 | **PEND-27** | BUG-12/13/14 | Os três provedores continuam sem chamada real | O retry, o timeout, o `stop_reason` e o `max_completion_tokens` estão cobertos com `fetch` mockado. Nenhuma chave de IA foi usada. O BUG-14 em especial nasceu de um contrato do provedor: só uma chamada real prova que a OpenAI voltou a funcionar. |
+| **PEND-29** | Sprint 8 | Nenhuma tela foi aberta em espanhol | As 583 chaves × 3 idiomas estão travadas por tipo e por teste, mas **paridade de chave não é qualidade de tradução**: quebra de layout por texto mais longo, concordância de gênero e frase que só fica errada em contexto não aparecem em teste de unidade. Abrir o app nos três idiomas e percorrer os fluxos principais; de preferência com revisão de um falante nativo de espanhol. |
+| **PEND-30** | Sprint 8 | O texto gerado por IA em espanhol nunca foi visto | `LOCALE_AI_NAME.es` instrui o modelo a responder em espanhol nas 4 fases (ameaças, skills, enriquecimento, correção). Isso é **instrução a modelo — pedido, não garantia**. Nenhuma chamada real foi feita em espanhol. Rodar uma análise com `sg_locale=es` e conferir que ameaças, explicações e a `explanation` da correção saem no idioma certo. |
+| **PEND-31** | Sprint 8 | A troca de `errorKey` não foi exercitada contra rota real | `jsonError(..., null)` para mensagem dinâmica e `useApiError()` na tela estão cobertos por unidade (7 asserções) e pelos testes de rota com repositório mockado. O percurso completo — rota real devolve 409/403, a tela mostra o texto no idioma do usuário — **não rodou**. Vai junto do PEND-24. |
 
 ### Histórico
 
@@ -662,20 +695,57 @@ create table starguard.finding_fixes (
 - **UI:** o card mostra `whatItIs` + `whyItMatters`; `attackScenario` e o trecho ficam num `Collapsible` (segue a direção de UX enxuta já adotada no projeto).
 - **Aceite:** um achado `detect-child-process` exibe "Execução de comando do sistema com entrada não validada — um atacante que controle `userInput` executa comandos arbitrários no servidor", em português, e em inglês quando o idioma for `en`.
 
-### FEAT-04 · Internacionalização de verdade (UI + IA) 💡
+### FEAT-04 · Internacionalização de verdade (UI + IA) ✅
 **P1 · Esforço G** — *pedido explícito*
 
-> 🟡 **Parcial — 27/07/2026.** **Fundação entregue e testada** (detecção automática por `Accept-Language`, cookie, `<html lang>` dinâmico, provider com `t()` e fallback, seletor na Conta) e a **saída da IA** já respeita o idioma nas quatro frentes de geração — a análise carrega a escolha até o fim do job. A extração de strings cobre o fluxo principal (login → menu → resultados → correção); governança, relatório e onboarding seguem em português — ver PEND-16.
+> ✅ **Entregue em 27/07/2026** (fundação no Sprint 6, extração no Sprint 7,
+> **vistoria completa e espanhol no Sprint 8**).
+>
+> São **três idiomas — português (Brasil), inglês e espanhol — e nenhum é de
+> segunda classe**: `EN` e `ES` deixaram de ser `Partial` e passaram a ser
+> `Record<MessageKey, string>` completos, então **chave sem tradução não
+> compila**. 583 chaves em cada idioma; catálogo de explicações com 54 entradas
+> nos três, com paridade travada em teste.
+>
+> A vistoria do Sprint 8 fechou o que a extração anterior tinha deixado de fora
+> — e que nenhum teste pegava, porque a varredura só olhava texto entre tags:
+>
+> | O que estava preso em português | Onde |
+> |---|---|
+> | `placeholder`, `title`, `aria-label` | `RepoInput`, `ThreatInput`, `SkillInput`, `TokenPicker`, `Modal`, `Pagination`, `SectionTabs`, `InfoTip` |
+> | Rótulos e sub-rótulos de papel | `filters.tsx` (`RoleSelect`) |
+> | Veredito e recomendação de skill | `SkillFindingCard` |
+> | Título das abas, métricas do stepper, cobertura da revisão | tela de resultados |
+> | `<title>` e `description` do documento | `app/layout.tsx` — agora `generateMetadata` por requisição |
+> | Título e corpo do **Pull Request** | tela de resultados e `BatchFixModal` |
+> | Aviso de lockfile | `lib/deps-fix.ts` — devolve **chave + valores**, não texto pronto |
+> | Mensagem de erro de API | **23 pontos de tela** mostravam `err.message`, escrito em português pelo servidor. Agora vale a chave, via `useApiError()` |
+> | Texto gravado no JSONB `phases` | `lib/jobs.ts`, `lib/tasks.ts`, `lib/skills.ts` — escrito **já traduzido**, no idioma de quem pediu a análise |
+> | Cabeçalho do CSV e `help.text` do SARIF | `lib/export.ts` — o JSON ficou de fora **de propósito**: é contrato de máquina |
+>
+> Duas decisões que merecem registro, porque não são óbvias:
+>
+> - **Texto que o servidor grava sai já traduzido.** Ele é escrito uma vez e
+>   lido do banco para sempre — não passa por `t()` na exibição. Por isso o
+>   idioma acompanha o job (`Transient.locale`) e, quando o job já morreu
+>   (análise órfã/abandonada), vem de `users.locale`.
+> - **`jsonError(..., null)` existe.** Erro redigido de ferramenta externa e
+>   detalhe do Zod não têm chave que os represente; trocá-los por um "Erro no
+>   servidor." genérico apagaria a única informação acionável que o usuário tem.
+>
+> **Ainda não exercitado:** nenhuma tela foi aberta em espanhol e nenhuma
+> chamada de IA rodou nesse idioma — ver PEND-29, PEND-30 e PEND-31. Paridade
+> de chave não é qualidade de tradução.
 
 - **Evidência:** zero infraestrutura de i18n (nenhum `next-intl`/`react-i18next`, nenhuma pasta `locales/`). [app/layout.tsx:40](app/layout.tsx#L40) fixa `lang="pt-BR"`. Todas as strings estão embutidas no JSX. Os **prompts** também são pt-BR e um deles ordena explicitamente `Output em PT-BR` ([lib/review.ts:38](lib/review.ts#L38)).
 - **O ponto que costuma ser esquecido:** traduzir a interface não basta. Se a IA continuar respondendo em português, o usuário em inglês vê botões traduzidos e **conteúdo** em português. i18n aqui tem **quatro** frentes:
 
-| Frente | Onde | Como |
-|---|---|---|
-| Interface | ~40 arquivos `.tsx` | `next-intl` + `messages/{pt-BR,en,es}.json` |
-| Enums de domínio | `SEVERITY_LABEL_PT` ([types/index.ts:205](types/index.ts#L205)) | virar chave de tradução, não string |
-| Saída da IA | `lib/tasks.ts`, `lib/review.ts`, `lib/skills.ts` | parâmetro `locale` no prompt: *"Responda em {locale}"* |
-| Formatação | [listing.tsx:11](components/listing.tsx#L11) fixa `toLocaleString("pt-BR")` | receber o locale ativo |
+| Frente | Onde | Como | Situação |
+|---|---|---|---|
+| Interface | ~40 arquivos `.tsx` | `next-intl` + `messages/{pt-BR,en,es}.json` | ✅ sem lib: dicionário próprio em `lib/i18n/messages.ts`, cookie em vez de rota |
+| Enums de domínio | `SEVERITY_LABEL_PT` ([types/index.ts:205](types/index.ts#L205)) | virar chave de tradução, não string | ✅ removido; severidade, estado do achado e evento de auditoria são chave |
+| Saída da IA | `lib/tasks.ts`, `lib/review.ts`, `lib/skills.ts` | parâmetro `locale` no prompt: *"Responda em {locale}"* | ✅ nas 4 fases, incluindo a passada de IA das skills |
+| Formatação | [listing.tsx:11](components/listing.tsx#L11) fixa `toLocaleString("pt-BR")` | receber o locale ativo | ✅ `fmtDate`/`fmtNum` leem o cookie |
 
 - **Plano:**
   1. `next-intl` com roteamento por prefixo (`/pt-BR/...`, `/en/...`) **ou** cookie `NEXT_LOCALE` (mais simples, não quebra as URLs existentes — recomendo este).

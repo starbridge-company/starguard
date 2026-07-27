@@ -3,6 +3,7 @@ import { jsonError, requireSession, canAccess } from "@/lib/http";
 import { validate, uuidField } from "@/lib/validation";
 import { getAnalysis, getAnalysisOwner } from "@/lib/jobs";
 import { audit } from "@/lib/auth";
+import { getLocale } from "@/lib/i18n/server";
 import {
   exportAnalysis,
   exportFilename,
@@ -30,7 +31,7 @@ export async function GET(
 
   const format = req.nextUrl.searchParams.get("format") ?? "sarif";
   if (!isExportFormat(format)) {
-    return jsonError(400, "Formato inválido. Use sarif, csv ou json.");
+    return jsonError(400, "Formato inválido. Use sarif, csv ou json.", "err.badExportFormat");
   }
 
   const { id } = await params;
@@ -46,7 +47,9 @@ export async function GET(
   const job = await getAnalysis(id);
   if (!job) return jsonError(404, "Análise não encontrada.");
 
-  const body = exportAnalysis(job, format);
+  // O arquivo baixado é lido por uma PESSOA (SARIF no GitHub, CSV no Excel):
+  // sai no idioma dela, não no do servidor. Ver AUDITORIA.md#FEAT-04.
+  const body = exportAnalysis(job, format, await getLocale());
   const filename = exportFilename(job, format);
 
   audit("analysis.export", { userId: session.sub, analysisId: id, format });

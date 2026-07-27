@@ -15,7 +15,7 @@ import {
   clampPrTitle,
 } from "@/lib/validation";
 import { useRepoVisibility } from "@/lib/useRepoVisibility";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 import {
   IconX,
   IconCheck,
@@ -101,6 +101,7 @@ export default function BatchFixModal({
   // Nada começa sozinho: gerar N correções custa dinheiro e tempo, então o
   // usuário confirma antes. Ver AUDITORIA.md#UX-05.
   const t = useT();
+  const apiError = useApiError();
   const [phase, setPhase] = useState<"confirm" | "working">("confirm");
   const [items, setItems] = useState<Record<string, ItemState>>(() =>
     Object.fromEntries(vulns.map((v) => [v.id, { status: "queued" as ItemStatus }]))
@@ -253,7 +254,8 @@ export default function BatchFixModal({
             for (const v of group) setItem(v.id, { status: "cancelled" });
             return;
           }
-          const error = err instanceof ApiError ? err.message : "Falha ao gerar.";
+          const error =
+            apiError(err, "batch.genFailed");
           for (const v of group) setItem(v.id, { status: "error", error });
         }
       }
@@ -362,18 +364,18 @@ export default function BatchFixModal({
       // recusar a própria saída no último passo não protege nada.
       const body = clampPrBody(
         [
-          `Correções de segurança geradas pelo StarGuard (${total} achado(s) em ${prFiles.length} arquivo(s)).`,
+          t("pr.batchIntro", { findings: total, files: prFiles.length }),
           "",
           ...prFiles.map((f) => `- \`${f.file}\`: ${f.explanation}`),
           "",
-          "Revise cada alteração antes de mergear.",
+          t("pr.reviewBeforeMerge"),
         ].join("\n")
       );
 
       const result = await apiPost<BatchPR>("/api/github/pr-batch", {
         repoUrl,
         files: prFiles.map((f) => ({ file: f.file, fixedCode: f.fixedCode })),
-        title: clampPrTitle(`Correções de segurança StarGuard (${total})`),
+        title: clampPrTitle(t("pr.batchTitle", { n: total })),
         body,
         analysisId,
         ...tokenChoice,
@@ -393,7 +395,9 @@ export default function BatchFixModal({
       if (err instanceof ApiError && err.key === "err.githubTokenRequired") {
         setNeedToken(err.message);
       } else {
-        setPrError(err instanceof ApiError ? err.message : "Falha ao abrir o PR.");
+        setPrError(
+          apiError(err, "batch.prFailed")
+        );
       }
       // `finally`, e não uma linha por caminho: um `return` dentro do catch já
       // pulou este reset uma vez e travou os dois botões girando para sempre.
@@ -466,7 +470,7 @@ export default function BatchFixModal({
         {groups.length !== total && (
           <>
             {" · "}
-            <strong>{groups.length}</strong> arquivo(s)
+            {t("batch.nFiles", { n: groups.length })}
           </>
         )}
       </p>

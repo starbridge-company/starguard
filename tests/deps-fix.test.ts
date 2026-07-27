@@ -8,6 +8,8 @@ import {
   dependencyFixTitle,
 } from "@/lib/deps-fix";
 import { manifestForTarget, parseTrivy } from "@/lib/parsers";
+import { translate } from "@/lib/i18n/translate";
+import { LOCALES } from "@/lib/i18n/config";
 import type { DependencyVuln } from "@/types";
 
 // Correção de dependência: o alvo é determinístico (o Trivy já diz o pacote e
@@ -134,16 +136,37 @@ describe("canFixDependency", () => {
 describe("lockfileWarning · o limite honesto", () => {
   // O agente não executa comandos (Bash está em disallowedTools). Ele edita o
   // manifesto e NÃO regera o lock — e isso quebra o `npm ci` de quem recebe.
+  //
+  // O aviso devolve CHAVE + valores desde o FEAT-04: ele vai para a tela E
+  // para o corpo do PR, e os dois precisam sair no idioma de quem usa.
   it("avisa e diz o comando do ecossistema", () => {
     const w = lockfileWarning(dep())!;
-    expect(w).toContain("package-lock.json");
-    expect(w).toContain("npm install");
+    expect(w.key).toBe("deps.lockWarningWithCmd");
+    expect(w.values).toMatchObject({
+      manifest: "package.json",
+      lockfile: "package-lock.json",
+      cmd: "npm install",
+    });
+    // O texto renderizado precisa carregar os três dados, em qualquer idioma.
+    for (const locale of LOCALES) {
+      const texto = translate(locale, w.key, w.values);
+      expect(texto).toContain("package-lock.json");
+      expect(texto).toContain("npm install");
+      expect(texto).not.toContain("{");
+    }
   });
 
   it("ecossistema desconhecido ainda avisa, sem inventar comando", () => {
     const w = lockfileWarning(dep({ ecosystem: "exotico" }))!;
-    expect(w).toContain("regere o lock");
-    expect(w).not.toContain("undefined");
+    expect(w.key).toBe("deps.lockWarning");
+    expect(w.values).not.toHaveProperty("cmd");
+    for (const locale of LOCALES) {
+      const texto = translate(locale, w.key, w.values);
+      expect(texto).not.toContain("undefined");
+      expect(texto).not.toContain("{");
+    }
+    // E em português continua dizendo o que fazer sem citar comando nenhum.
+    expect(translate("pt-BR", w.key, w.values)).toContain("regere o lock");
   });
 
   it("sem lockfile não há aviso a dar", () => {

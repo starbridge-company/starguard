@@ -3,6 +3,7 @@ import {
   toSarif,
   toCsv,
   toJson,
+  exportAnalysis,
   isExportFormat,
   exportFilename,
   collectCodeFindings,
@@ -264,6 +265,52 @@ describe("toJson", () => {
     const j = job();
     j.phases.software.result!.sast.ran = false;
     expect(JSON.parse(toJson(j)).coverage.sastRan).toBe(false);
+  });
+});
+
+// AUDITORIA.md#FEAT-04 — o arquivo baixado também tem idioma. A distinção
+// entre CSV e JSON é DELIBERADA e precisa ficar registrada em teste: quem abre
+// o CSV é uma pessoa no Excel; quem consome o JSON é um pipeline, e mudar as
+// chaves dele conforme o idioma quebraria o consumidor do outro lado.
+describe("exportação · idioma do arquivo baixado", () => {
+  const comAchados = () => job({ sast: [vuln()], sca: [dep()] });
+
+  it("o cabeçalho do CSV acompanha o idioma", () => {
+    const pt = toCsv(job(), "pt-BR").split("\r\n")[0]!;
+    const en = toCsv(job(), "en").split("\r\n")[0]!;
+    const es = toCsv(job(), "es").split("\r\n")[0]!;
+
+    expect(pt).toContain("severidade");
+    expect(en).toContain("severity");
+    expect(es).toContain("severidad");
+    expect(new Set([pt, en, es]).size).toBe(3);
+  });
+
+  it("sem idioma informado o CSV sai em português", () => {
+    expect(toCsv(job()).split("\r\n")[0]).toBe(toCsv(job(), "pt-BR").split("\r\n")[0]);
+  });
+
+  it("as CHAVES do JSON NÃO mudam com o idioma — é contrato de máquina", () => {
+    const chaves = (locale: Parameters<typeof exportAnalysis>[2]) =>
+      Object.keys(JSON.parse(exportAnalysis(job(), "json", locale))).sort();
+    expect(chaves("en")).toEqual(chaves("pt-BR"));
+    expect(chaves("es")).toEqual(chaves("pt-BR"));
+  });
+
+  it("o SARIF continua válido e a ajuda da dependência é traduzida", () => {
+    // O `help.text` da regra de dependência é o texto que o GitHub Code
+    // Scanning mostra ao revisor — sem locale ele ficava preso em português.
+    const ajuda = (locale: "pt-BR" | "en" | "es") => {
+      const s = JSON.parse(toSarif(comAchados(), locale));
+      expect(s.version).toBe("2.1.0");
+      expect(s.runs[0].results.length).toBeGreaterThan(0);
+      const regra = s.runs[0].tool.driver.rules.find(
+        (r: { id: string }) => r.id === "CVE-2021-23337"
+      );
+      return regra.help.text as string;
+    };
+    expect(ajuda("pt-BR")).toContain("4.17.21");
+    expect(new Set([ajuda("pt-BR"), ajuda("en"), ajuda("es")]).size).toBe(3);
   });
 });
 

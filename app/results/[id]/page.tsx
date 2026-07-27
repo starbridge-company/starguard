@@ -27,7 +27,7 @@ import {
   lockfileWarning,
 } from "@/lib/deps-fix";
 import { Segmented, SearchBox } from "@/components/filters";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 
 import { SEVERITY_ORDER } from "@/types";
 import type {
@@ -65,6 +65,15 @@ const PHASE_NAME: Record<PhaseKey, MessageKey> = {
   refactor: "pipe.refactor.short",
 };
 
+// Estado da fase em minúsculas, para aparecer no meio de uma frase da visão
+// geral ("Correções · rodando…"). O stepper usa `pipe.status.*`, capitalizado.
+const PHASE_STATUS_KEY: Record<StepStatus, MessageKey> = {
+  running: "phase.running",
+  pending: "phase.pending",
+  error: "phase.error",
+  done: "phase.done",
+};
+
 const SEV_TEXT: Record<Severity, string> = {
   critical: "danger",
   high: "warning",
@@ -100,6 +109,8 @@ export default function ResultsPage() {
   const { job, error, degraded, retry } = useAnalysisPolling(id);
 
   const t = useT();
+
+  const apiError = useApiError();
   const [tab, setTab] = useState<TabId>("overview");
 
   // Estado do fluxo de correção individual (FixModal).
@@ -202,7 +213,7 @@ export default function ResultsPage() {
       setFix(result);
       if (!force) void reloadFindings(); // pode ter passado a existir correção
     } catch (err) {
-      setFixError(err instanceof ApiError ? err.message : t("fix.failed"));
+      setFixError(apiError(err, "fix.failed"));
     } finally {
       setFixLoading(false);
     }
@@ -230,7 +241,7 @@ export default function ResultsPage() {
       const title = clampPrTitle(
         depAlvo
           ? dependencyFixTitle(depAlvo)
-          : `Correção de segurança: ${selVuln?.title || fix.file}`
+          : t("pr.fixTitle", { title: selVuln?.title || fix.file })
       );
       const avisoLock = depAlvo ? lockfileWarning(depAlvo) : null;
       // O engine de agente pode ter editado VÁRIOS arquivos. Mandar só
@@ -250,8 +261,10 @@ export default function ResultsPage() {
               body: clampPrBody(
                 [
                   fix.explanation,
-                  `\nArquivos alterados: ${changed.map((c) => `\`${c.file}\``).join(", ")}`,
-                  avisoLock ? `\n> ⚠️ ${avisoLock}` : "",
+                  `\n${t("pr.changedFiles", {
+                    files: changed.map((c) => `\`${c.file}\``).join(", "),
+                  })}`,
+                  avisoLock ? `\n> ⚠️ ${t(avisoLock.key, avisoLock.values)}` : "",
                 ]
                   .filter(Boolean)
                   .join("\n")
@@ -266,7 +279,7 @@ export default function ResultsPage() {
               title,
               body: clampPrBody(
                 avisoLock
-                  ? `${fix.explanation}\n\n> ⚠️ ${avisoLock}`
+                  ? `${fix.explanation}\n\n> ⚠️ ${t(avisoLock.key, avisoLock.values)}`
                   : fix.explanation
               ),
               analysisId: job.id,
@@ -288,7 +301,7 @@ export default function ResultsPage() {
         setNeedToken(err.message);
         return;
       }
-      setFixError(err instanceof ApiError ? err.message : t("fix.failed"));
+      setFixError(apiError(err, "fix.failed"));
     }
   };
 
@@ -376,7 +389,7 @@ export default function ResultsPage() {
     deps: !!scan && scan.sca.ran,
     reasons: [
       scan && !scan.sast.ran
-        ? scan.sast.note || `O SAST (${scan.sast.engine}) não foi executado.`
+        ? scan.sast.note || t("scan.sastNotRun", { engine: scan.sast.engine })
         : "",
       scan && !scan.review?.ran && scan.review?.note ? scan.review.note : "",
     ].filter(Boolean),
@@ -385,26 +398,26 @@ export default function ResultsPage() {
   const stepMetrics = (key: PhaseKey) => {
     if (key === "plan" && plan)
       return [
-        { label: "ameaças", value: plan.threats.length },
-        { label: "requisitos", value: plan.requirements.length },
+        { label: t("metric.threats"), value: plan.threats.length },
+        { label: t("metric.requirements"), value: plan.requirements.length },
       ];
     if (key === "skills" && job.phases.skills.status === "done")
       return [
-        { label: "skills", value: skills.length },
-        { label: "reprovadas", value: skillsRejected },
+        { label: t("metric.skills"), value: skills.length },
+        { label: t("metric.rejected"), value: skillsRejected },
       ];
     if (key === "software" && scan)
       return [
-        { label: "SAST", value: vulns.length },
-        { label: "IA", value: aiFindings.length },
-        { label: "SCA", value: deps.length },
+        { label: t("metric.sast"), value: vulns.length },
+        { label: t("metric.ai"), value: aiFindings.length },
+        { label: t("metric.sca"), value: deps.length },
       ];
     // A Fase 4 não gera mais correção automática (AUDITORIA.md#BUG-16): exibir
     // "correções 0 · PRs 0" em toda análise seria ruído, não informação.
     if (key === "refactor" && refactor && (refactor.fixes.length || refactor.prs.length))
       return [
-        { label: "correções", value: refactor.fixes.length },
-        { label: "PRs", value: refactor.prs.length },
+        { label: t("metric.fixes"), value: refactor.fixes.length },
+        { label: t("metric.prs"), value: refactor.prs.length },
       ];
     return [];
   };
@@ -502,13 +515,7 @@ export default function ResultsPage() {
     deps.filter((d) => d.severity === s).length;
 
   const statusText = (status: StepStatus) =>
-    status === "running"
-      ? "rodando…"
-      : status === "pending"
-        ? "aguardando"
-        : status === "error"
-          ? "erro"
-          : "concluído";
+    t(PHASE_STATUS_KEY[status]);
 
   // Estado "fase ainda não pronta" (rodando / aguardando / erro).
   const notReady = (key: PhaseKey, running: string) => {
@@ -618,7 +625,7 @@ export default function ResultsPage() {
       </header>
 
       {!done && (
-        <div className="progress-track" aria-label="progresso">
+        <div className="progress-track" aria-label={t("results.progressLabel")}>
           <div className="progress-fill" style={{ width: `${job.progress}%` }} />
         </div>
       )}
@@ -678,7 +685,7 @@ export default function ResultsPage() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Visão geral
+                {t("tab.overview")}
                 <InfoTip
                   title={t("help.overview")}
                   content={t("help.overviewText")}
@@ -751,7 +758,7 @@ export default function ResultsPage() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Correções
+                {t("tab.fixes")}
                 <InfoTip
                   title={t("help.fixes")}
                   content={t("help.fixesText")}
@@ -778,20 +785,15 @@ export default function ResultsPage() {
           {review?.ran && review.coverage && (
             <div className="alert info">
               <span>
-                A revisão por IA leu{" "}
-                <strong>
-                  {review.coverage.filesReviewed} de{" "}
-                  {review.coverage.filesEligible}
-                </strong>{" "}
-                arquivos elegíveis (priorizando autenticação, rotas, banco e os
-                arquivos que o SAST apontou)
-                {review.coverage.truncatedFiles > 0 && (
-                  <>
-                    ; {review.coverage.truncatedFiles} foram truncados por
-                    tamanho
-                  </>
-                )}
-                . O SAST e o SCA analisaram o repositório inteiro.
+                {t("fixes.coverage", {
+                  reviewed: review.coverage.filesReviewed,
+                  eligible: review.coverage.filesEligible,
+                })}
+                {review.coverage.truncatedFiles > 0
+                  ? ` ${t("fixes.coverageTruncated", {
+                      n: review.coverage.truncatedFiles,
+                    })}`
+                  : ""}
               </span>
             </div>
           )}
@@ -799,17 +801,15 @@ export default function ResultsPage() {
           {job.phases.software.status === "done" &&
             corrections.length === 0 &&
             (scannersRan.code ? (
-              <div className="empty-state">
-                Nenhuma correção de segurança encontrada. 🎉
-              </div>
+              <div className="empty-state">{t("fixes.empty")}</div>
             ) : (
               // "Nada encontrado" e "nada foi procurado" são coisas MUITO
               // diferentes num produto de segurança. Ver AUDITORIA.md#UX-15.
               <div className="alert error">
                 <span>
-                  <strong>{t("fixes.noScannerTitle")}</strong>{" "}
-                  {scannersRan.reasons.join(" ")} Isto não significa que o
-                  repositório esteja limpo — significa que ele não foi analisado.
+                  {t("fixes.noScanner", {
+                    reasons: scannersRan.reasons.join(" "),
+                  })}
                 </span>
               </div>
             ))}
@@ -838,7 +838,7 @@ export default function ResultsPage() {
                     setSevFilter(v);
                     setLimit(PAGE);
                   }}
-                  ariaLabel="Severidade"
+                  ariaLabel={t("filter.severity")}
                 />
                 <Segmented
                   options={[
@@ -851,7 +851,7 @@ export default function ResultsPage() {
                     setSrcFilter(v);
                     setLimit(PAGE);
                   }}
-                  ariaLabel="Origem"
+                  ariaLabel={t("filter.source")}
                 />
                 {/* Só aparece quando há o que filtrar: sem achado de confiança
                     média, o controle seria decoração. Ver AUDITORIA.md#UX-07. */}
@@ -886,7 +886,7 @@ export default function ResultsPage() {
                     setStatusFilter(v as "open" | "resolved" | "all");
                     setLimit(PAGE);
                   }}
-                  ariaLabel="Filtrar por estado"
+                  ariaLabel={t("filter.byStatus")}
                 />
                 <label className="check-inline">
                   <input
@@ -1007,7 +1007,7 @@ export default function ResultsPage() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Dependências · SCA
+                {t("deps.title")}
                 <InfoTip
                   title={t("help.deps")}
                   content={t("help.depsText")}
@@ -1100,7 +1100,7 @@ export default function ResultsPage() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Modelagem de ameaças
+                {t("help.threats")}
                 <InfoTip
                   title={t("help.threats")}
                   content={t("help.threatsText")}
@@ -1152,7 +1152,7 @@ export default function ResultsPage() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title-row">
-                Validação de skills
+                {t("help.skills")}
                 <InfoTip
                   title={t("help.skills")}
                   content={t("help.skillsText")}

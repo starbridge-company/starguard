@@ -20,10 +20,13 @@ export const GENERIC_SUGGESTION = "Revise o trecho conforme a recomendação.";
 
 /**
  * Reconhece qualquer uma das formas genéricas já usadas no projeto (o texto
- * exato mudou entre versões, e achados antigos continuam no banco).
+ * exato mudou entre versões, e achados antigos continuam no banco) NOS TRÊS
+ * IDIOMAS. Sem os três, um achado gravado em espanhol passaria por sugestão
+ * específica e a frase genérica apareceria duplicada na textarea do modal —
+ * exatamente o UX-09, só que na outra língua.
  */
 export const GENERIC_SUGGESTION_RE =
-  /^\s*(revise o trecho conforme a (regra|recomenda)|corrija apenas este problema de seguran)/i;
+  /^\s*(revise o trecho conforme a (regra|recomenda)|corrija apenas este problema de seguran|review the snippet against the recommendation|fix only this security problem|revisa el fragmento seg[uú]n la recomendaci|corrige solo este problema de seguridad)/i;
 
 export function isGenericSuggestion(s: string | undefined): boolean {
   return !s?.trim() || GENERIC_SUGGESTION_RE.test(s.trim());

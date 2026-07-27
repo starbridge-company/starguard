@@ -8,15 +8,15 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(step2Schema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   try {
     const result = await validateSkills(v.data.skills);
     return jsonOk({ skills: result });
   } catch {
-    return jsonError(502, "Falha ao validar as skills.");
+    return jsonError(502, "Falha ao validar as skills.", "err.skillsValidationFailed");
   }
 }

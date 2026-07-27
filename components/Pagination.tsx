@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import { IconChevronRight, IconArrowLeft } from "@/lib/icons";
 
 // Paginação visual (números de página) alimentada pelo COUNT do BD.
@@ -14,10 +15,13 @@ export default function Pagination({
   total?: number;
   onPage: (p: number) => void;
 }) {
+  // Antes de qualquer `return`: hook não pode ficar depois de saída condicional.
+  const t = useT();
+
   if (pageCount <= 1) {
     return total !== undefined ? (
       <div className="pagination">
-        <span className="muted">{total} no total</span>
+        <span className="muted">{t("common.total", { n: total })}</span>
       </div>
     ) : null;
   }
@@ -37,7 +41,9 @@ export default function Pagination({
   return (
     <div className="pagination">
       {total !== undefined && (
-        <span className="muted pagination-total">{total} no total</span>
+        <span className="muted pagination-total">
+          {t("common.total", { n: total })}
+        </span>
       )}
       <div className="pagination-controls">
         <button
@@ -45,7 +51,7 @@ export default function Pagination({
           className="page-btn"
           disabled={page <= 1}
           onClick={() => onPage(page - 1)}
-          aria-label="Página anterior"
+          aria-label={t("common.previousPage")}
         >
           <IconArrowLeft />
         </button>
@@ -71,7 +77,7 @@ export default function Pagination({
           className="page-btn"
           disabled={page >= pageCount}
           onClick={() => onPage(page + 1)}
-          aria-label="Próxima página"
+          aria-label={t("common.nextPage")}
         >
           <IconChevronRight />
         </button>

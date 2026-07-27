@@ -5,9 +5,9 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import SeverityBadge from "@/components/SeverityBadge";
-import { apiGet, ApiError } from "@/lib/client";
+import { apiGet } from "@/lib/client";
 import type { Job, Severity } from "@/types";
-import { useI18n } from "@/lib/i18n";
+import { useApiError, useI18n } from "@/lib/i18n";
 import { severityKey } from "@/components/SeverityBadge";
 import { IconDownload, IconArrowLeft, IconShield } from "@/lib/icons";
 
@@ -16,6 +16,7 @@ const SEV_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 export default function ReportPage() {
   // A data do rodapé seguia fixa em pt-BR — a frente "Formatação" do FEAT-04.
   const { t, locale } = useI18n();
+  const apiError = useApiError();
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,9 +25,9 @@ export default function ReportPage() {
     apiGet<Job>(`/api/status/${id}`)
       .then(setJob)
       .catch((e) =>
-        setError(e instanceof ApiError ? e.message : t("report.loadFailed"))
+        setError(apiError(e, "report.loadFailed"))
       );
-  }, [id, t]);
+  }, [id, apiError]);
 
   if (error) {
     return (

@@ -5,13 +5,13 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
 import NewUserModal from "@/components/NewUserModal";
-import { apiGet, apiPatch, apiDelete, ApiError, isAbortError } from "@/lib/client";
+import { apiGet, apiPatch, apiDelete, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { useMe } from "@/lib/useMe";
 import { SearchBox, RoleSelect } from "@/components/filters";
 import { fmtDate } from "@/components/listing";
-import { useT } from "@/lib/i18n";
+import { useApiError, useT } from "@/lib/i18n";
 import { IconScan, IconPlus, IconTrash } from "@/lib/icons";
 
 interface Row {
@@ -30,6 +30,7 @@ interface Row {
 
 export default function AdminUsersPage() {
   const t = useT();
+  const apiError = useApiError();
   const { me } = useMe();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
@@ -52,12 +53,12 @@ export default function AdminUsersPage() {
         setData(await apiGet<Paged<Row>>(`/api/admin/users?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return;
-        setError(e instanceof ApiError ? e.message : t("adminUsers.loadFailed"));
+        setError(apiError(e, "adminUsers.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced, t]
+    [page, qDebounced, apiError]
   );
 
   useEffect(() => {
@@ -75,7 +76,7 @@ export default function AdminUsersPage() {
         d ? { ...d, items: d.items.map((u) => (u.id === id ? { ...u, role } : u)) } : d
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("adminUsers.roleFailed"));
+      setError(apiError(e, "adminUsers.roleFailed"));
     } finally {
       setRoleBusy(null);
     }
@@ -94,7 +95,7 @@ export default function AdminUsersPage() {
       await apiDelete(`/api/admin/users/${id}`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("adminUsers.deleteFailed"));
+      setError(apiError(e, "adminUsers.deleteFailed"));
     } finally {
       setDeleting(null);
     }

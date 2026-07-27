@@ -13,7 +13,7 @@ import {
   IconCheck,
 } from "@/lib/icons";
 import { RoleBadge } from "@/components/listing";
-import { useT } from "@/lib/i18n";
+import { useT, type MessageKey } from "@/lib/i18n";
 
 // ---- Hook de dropdown (abre/fecha, clique-fora, ESC) ----
 export function useDropdown() {
@@ -138,8 +138,8 @@ export function DateRange({
           ? short(from)
           : `${short(from)} – ${short(to)}`
         : from
-          ? `desde ${short(from)}`
-          : `até ${short(to)}`;
+          ? t("filter.since", { date: short(from) })
+          : t("filter.until", { date: short(to) });
 
   const presets: { label: string; get: () => [string, string] }[] = [
     { label: t("filter.anyDate"), get: (): [string, string] => ["", ""] },
@@ -306,9 +306,19 @@ export function UserSelect({
 }
 
 // ---- Seletor de papel (mutação inline na tabela de usuários) ----
-const ROLE_OPTS: { value: "admin" | "superadmin"; desc: string }[] = [
-  { value: "admin", desc: "Vê apenas o próprio histórico" },
-  { value: "superadmin", desc: "Vê tudo de todos" },
+// Só o valor e a CHAVE do subtítulo: o texto sai do dicionário na renderização,
+// senão o papel ficaria em português numa tela em espanhol.
+const ROLE_OPTS: {
+  value: "admin" | "superadmin";
+  labelKey: MessageKey;
+  descKey: MessageKey;
+}[] = [
+  { value: "admin", labelKey: "role.admin", descKey: "newUser.roleAdminSub" },
+  {
+    value: "superadmin",
+    labelKey: "role.superadmin",
+    descKey: "newUser.roleSuperadminSub",
+  },
 ];
 export function RoleSelect({
   value,
@@ -321,6 +331,7 @@ export function RoleSelect({
   disabled?: boolean;
   busy?: boolean;
 }) {
+  const t = useT();
   const { open, setOpen, ref } = useDropdown();
   return (
     <div className="flt-dd" ref={ref}>
@@ -328,7 +339,7 @@ export function RoleSelect({
         type="button"
         className="role-trigger"
         disabled={disabled || busy}
-        title={disabled ? "Você não pode alterar o próprio papel" : "Alterar papel"}
+        title={disabled ? t("role.cannotChangeSelf") : t("role.change")}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
@@ -348,8 +359,8 @@ export function RoleSelect({
               }}
             >
               <span className="flt-option-main">
-                {o.value === "superadmin" ? "Superadmin" : "Admin"}
-                <span className="flt-option-sub">{o.desc}</span>
+                {t(o.labelKey)}
+                <span className="flt-option-sub">{t(o.descKey)}</span>
               </span>
               {value === o.value && <IconCheck />}
             </button>

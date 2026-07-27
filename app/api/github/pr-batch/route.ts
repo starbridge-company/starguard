@@ -22,10 +22,10 @@ async function ownedAnalysisId(
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(prBatchSchema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   const analysisId = await ownedAnalysisId(v.data.analysisId, session.sub);
 
@@ -68,6 +68,6 @@ export async function POST(req: NextRequest) {
       return jsonError(400, e.message, "err.githubTokenRequired");
     }
     const msg = e instanceof Error ? redact(e.message) : "Falha ao abrir o PR.";
-    return jsonError(502, msg);
+    return jsonError(502, msg, null);
   }
 }

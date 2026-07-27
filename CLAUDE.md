@@ -31,6 +31,75 @@ Dois bugs deste projeto só apareceram porque alguém foi verificar:
 
 Nenhum dos dois quebrava o build ou os tipos.
 
+## Idioma: três, sem exceção
+
+**O sistema fala português (Brasil), inglês e espanhol.** Não há texto de
+segunda classe: placeholder, título, botão, rótulo de coluna, `aria-label`,
+`title`, mensagem de erro, InfoTip, texto de confirmação, corpo de Pull Request
+e cabeçalho de planilha exportada seguem o idioma escolhido pela pessoa.
+
+O idioma vem de **cookie** (`sg_locale`), com a preferência salva na conta
+(`users.locale`) e `Accept-Language` na primeira visita. Não há prefixo de URL,
+e por isso não há biblioteca de i18n: o que uma lib entregaria (roteamento) não
+se aplica aqui.
+
+### Onde mexer para acrescentar texto
+
+| Você está escrevendo | Faça |
+|---|---|
+| Qualquer coisa que apareça na tela | Chave nova em `lib/i18n/messages.ts`, nos **três** idiomas, e `t("chave")` no JSX |
+| Texto com número/nome no meio | Use interpolação `{n}`, nunca concatenação — a ordem das palavras muda entre idiomas |
+| Texto que o SERVIDOR grava no banco | `translate(locale, "chave")` de `lib/i18n/translate.ts` |
+| Erro de rota | `jsonError(status, "texto pt-BR", "err.minhaChave")` + a chave nos três dicionários |
+| Erro dinâmico (ferramenta externa, Zod) | `jsonError(status, msg, null)` — o `null` diz "não substitua, este texto É a informação" |
+| Explicação de regra/CWE | `lib/catalog/{pt-BR,en,es}.ts` — as três com as **mesmas** chaves |
+
+`lib/i18n/index.tsx` é `"use client"`. O servidor **não** pode importar dele:
+use `lib/i18n/translate.ts`, que é puro. Isso não é preferência de organização —
+importar um módulo cliente do servidor devolve uma referência que não dá para
+chamar, e o erro só aparece em runtime.
+
+### O que o tipo já garante (e o que ele não garante)
+
+`EN` e `ES` são `Record<MessageKey, string>` **completos**, não `Partial`. Chave
+nova em português que ninguém traduziu **não compila**. O que o tipo não pega —
+e por isso tem teste em `tests/i18n.test.ts` e `tests/i18n-server.test.ts`:
+
+- valor vazio ou marcador de interpolação divergente entre idiomas;
+- frase longa copiada do português (tradução esquecida);
+- literal solto no JSX e em `placeholder`/`title`/`aria-label`;
+- texto gravado pelo servidor sem chave de tradução.
+
+### Decisões que já foram tomadas — não desfaça sem motivo
+
+- **Texto gravado no JSONB `phases` sai já traduzido**, no idioma de quem pediu
+  a análise. Ele é escrito uma vez e lido do banco para sempre; não passa por
+  `t()` na exibição. Vale para `phases[].error`, `sast.note`, os rótulos de
+  checagem de skill e os achados heurísticos.
+- **Achado heurístico de skill carrega `titleKey` + `title`.** A chave é a
+  fonte para a tela; o texto fica para as análises gravadas antes disso e para
+  quem lê o JSONB sem o dicionário.
+- **CSV é traduzido, JSON não.** Quem abre o CSV é uma pessoa no Excel; quem
+  consome o JSON é um pipeline, e mudar as chaves conforme o idioma quebraria o
+  consumidor do outro lado. Está fixado em `tests/export.test.ts`.
+- **A tela mostra a CHAVE traduzida do erro, não `err.message`.** Use
+  `useApiError()`, nunca `err instanceof ApiError ? err.message : t("...")` —
+  esse padrão mostrava a mensagem do servidor, que é escrita em português.
+- **`PhaseState.label` é interno** e nunca é renderizado. Se for exibir, vire
+  chave antes.
+
+### Acrescentando um quarto idioma
+
+1. `LOCALES`, `LOCALE_LABEL` e `LOCALE_AI_NAME` em `lib/i18n/config.ts`, mais o
+   ramo correspondente em `normalizeLocale`.
+2. Dicionário completo em `lib/i18n/messages.ts` (o compilador cobra).
+3. `lib/catalog/<locale>.ts` espelhando as chaves de `pt-BR.ts`, registrado em
+   `lib/catalog/index.ts`.
+4. `npm test` — a paridade dos dicionários e do catálogo é verificada.
+
+O seletor de idioma da tela de Conta e o schema do Zod saem de `LOCALES`: não
+há lista a repetir.
+
 ## Comandos
 
 ```bash
@@ -65,8 +134,9 @@ AUDITORIA.md    achados, o que foi entregue e as pendências abertas
 - **Mensagem de erro que chega ao usuário passa por `lib/redact.ts`.** Erro de
   ferramenta externa pode carregar credencial, e esse texto é persistido no
   JSONB `phases` e exibido na tela.
-- **Texto visível vem de `lib/i18n/messages.ts`**, nunca literal no JSX. O
-  português é a referência; o inglês pode estar incompleto e cai nele.
+- **Texto visível vem de `lib/i18n/messages.ts`**, nunca literal no JSX — nem em
+  `placeholder`, `title` ou `aria-label`. São três idiomas e nenhum é opcional:
+  ver a seção "Idioma" acima.
 - **Entrada de rota passa por Zod** (`lib/validation.ts`). Sem exceção.
 - **Método que muda estado exige CSRF** (`requireCsrf`). As três rotas de auth
   são a única exceção, por desenho.

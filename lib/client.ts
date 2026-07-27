@@ -29,11 +29,24 @@ export function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === "AbortError";
 }
 
+/** Chave genérica por status, para respostas sem corpo JSON (proxy, 502 do
+ *  host, timeout). Sem ela a tela mostraria um texto fixo em português. */
+function keyForStatus(status: number): string {
+  if (status === 401) return "err.unauthenticated";
+  if (status === 403) return "err.forbidden";
+  if (status === 404) return "err.notFound";
+  if (status === 409) return "err.conflict";
+  if (status === 429) return "err.tooManyRequests";
+  if (status >= 500) return "err.server";
+  return "err.badRequest";
+}
+
 async function handle<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const body = data as { error?: string; errorKey?: string };
-    throw new ApiError(body?.error || "Erro na requisição.", res.status, body?.errorKey);
+    const key = body?.errorKey ?? (body?.error ? undefined : keyForStatus(res.status));
+    throw new ApiError(body?.error || "", res.status, key);
   }
   return data as T;
 }

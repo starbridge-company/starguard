@@ -30,13 +30,13 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await requireRole(req, ROLES.superadmin);
   if (!session) return jsonError(403, "Acesso restrito.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(userCreateSchema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   if (await usersRepo.existsByEmail(v.data.email)) {
-    return jsonError(409, "Já existe um usuário com este e-mail.");
+    return jsonError(409, "Já existe um usuário com este e-mail.", "err.emailTaken");
   }
 
   try {
@@ -59,9 +59,9 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     // Corrida na unicidade do e-mail (índice único).
     if ((e as { code?: string })?.code === "23505") {
-      return jsonError(409, "Já existe um usuário com este e-mail.");
+      return jsonError(409, "Já existe um usuário com este e-mail.", "err.emailTaken");
     }
     const msg = e instanceof Error ? e.message : "Falha ao criar o usuário.";
-    return jsonError(500, msg);
+    return jsonError(500, msg, null);
   }
 }

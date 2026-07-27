@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { Segmented } from "@/components/filters";
-import { useI18n } from "@/lib/i18n";
+import { useApiError, useI18n } from "@/lib/i18n";
 import { LOCALES, LOCALE_LABEL } from "@/lib/i18n/config";
 import Pagination from "@/components/Pagination";
 import InfoTip from "@/components/InfoTip";
-import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from "@/lib/client";
+import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { useMe, clearMe } from "@/lib/useMe";
 import { fmtDate, RoleBadge } from "@/components/listing";
@@ -29,6 +29,7 @@ interface Profile {
 
 export default function AccountPage() {
   const { locale, setLocale, t } = useI18n();
+  const apiError = useApiError();
   const { me } = useMe();
 
   // ---- Perfil (nome + login) ----
@@ -77,11 +78,11 @@ export default function AccountPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: "10" });
       setData(await apiGet<Paged<TokenView>>(`/api/account/tokens?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : t("account.loadTokensFailed"));
+      setError(apiError(e, "account.loadTokensFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, t]);
+  }, [page, apiError]);
 
   useEffect(() => {
     load();
@@ -119,7 +120,7 @@ export default function AccountPage() {
       setProfileOk(t("account.profileUpdated"));
     } catch (err) {
       setProfileError(
-        err instanceof ApiError ? err.message : t("account.updateFailed")
+        apiError(err, "account.updateFailed")
       );
     } finally {
       setSavingProfile(false);
@@ -146,7 +147,7 @@ export default function AccountPage() {
       clearMe();
       setPwOk(t("account.passwordChanged"));
     } catch (err) {
-      setPwError(err instanceof ApiError ? err.message : t("account.changePasswordFailed"));
+      setPwError(apiError(err, "account.changePasswordFailed"));
     } finally {
       setSavingPw(false);
     }
@@ -166,7 +167,7 @@ export default function AccountPage() {
       setPage(1);
       await load();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : t("account.saveTokenFailed"));
+      setFormError(apiError(err, "account.saveTokenFailed"));
     } finally {
       setSaving(false);
     }
@@ -179,7 +180,7 @@ export default function AccountPage() {
       await apiDelete(`/api/account/tokens/${id}`);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("account.removeTokenFailed"));
+      setError(apiError(err, "account.removeTokenFailed"));
     } finally {
       setDeleting(null);
     }

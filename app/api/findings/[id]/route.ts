@@ -20,13 +20,13 @@ export async function PATCH(
 ) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const { id } = await params;
   if (!validate(uuidField, id).ok) return jsonError(404, "Achado não encontrado.");
 
   const v = validate(findingStatusSchema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   const owner = await findingsRepo.ownerOfFinding(id);
   if (!owner || !canAccess(session, owner)) {

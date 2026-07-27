@@ -2,6 +2,7 @@
 
 import InfoTip from "@/components/InfoTip";
 import { parseGitHubRepo } from "@/lib/validation";
+import { useT } from "@/lib/i18n";
 import { IconRepo, IconKey } from "@/lib/icons";
 
 export default function RepoInput({
@@ -17,6 +18,7 @@ export default function RepoInput({
   onToken?: (v: string) => void;
   hideToken?: boolean;
 }) {
+  const t = useT();
   // Mesma função que o servidor usa (`lib/validation.ts` é isomórfico): assim
   // a regra é uma só e o erro aparece no campo, não depois do envio.
   // Campo vazio é válido — o repositório é opcional. Ver AUDITORIA.md#UX-19.
@@ -28,19 +30,16 @@ export default function RepoInput({
       <div className="field">
         <label htmlFor="repo-url" className="field-label-row">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <IconRepo /> Repositório GitHub
+            <IconRepo /> {t("repo.label")}
           </span>
-          <InfoTip
-            title="URL do repositório"
-            content="Somente github.com é aceito (allowlist anti-SSRF). Sem repositório, a Fase 3 (scan de código) não roda — as demais fases seguem normalmente."
-          />
+          <InfoTip title={t("repo.help")} content={t("repo.helpText")} />
         </label>
         <input
           id="repo-url"
           className={`input ${invalid ? "is-invalid" : ""}`}
           type="url"
           inputMode="url"
-          placeholder="https://github.com/starbridge/meu-projeto"
+          placeholder={t("repo.placeholder")}
           value={repoUrl}
           aria-invalid={invalid || undefined}
           aria-describedby={invalid ? "repo-url-error" : undefined}
@@ -48,8 +47,7 @@ export default function RepoInput({
         />
         {invalid && (
           <span id="repo-url-error" className="field-hint error" role="alert">
-            URL inválida. Use o formato https://github.com/dono/repositorio —
-            só github.com é aceito.
+            {t("repo.invalid")}
           </span>
         )}
       </div>
@@ -58,11 +56,11 @@ export default function RepoInput({
         <div className="field">
           <label htmlFor="repo-token" className="field-label-row">
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <IconKey /> Token de acesso
+              <IconKey /> {t("repo.tokenLabel")}
             </span>
             <InfoTip
-              title="Personal Access Token"
-              content="Necessário apenas para repositórios privados. O token vive só em memória durante o job e nunca é persistido nem devolvido ao cliente."
+              title={t("repo.tokenHelp")}
+              content={t("repo.tokenHelpText")}
             />
           </label>
           <input
@@ -70,7 +68,7 @@ export default function RepoInput({
             className="input"
             type="password"
             autoComplete="off"
-            placeholder="ghp_… (opcional)"
+            placeholder={t("repo.tokenPlaceholder")}
             value={token || ""}
             onChange={(e) => onToken?.(e.target.value)}
           />

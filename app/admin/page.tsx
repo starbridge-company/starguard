@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
-import { apiGet, ApiError } from "@/lib/client";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { apiGet } from "@/lib/client";
+import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 import { fmtNum } from "@/components/listing";
 import {
   IconUsers,
@@ -40,6 +40,7 @@ const SEVS: { key: keyof Metrics; labelKey: MessageKey; cls: string }[] = [
 
 export default function AdminDashboardPage() {
   const t = useT();
+  const apiError = useApiError();
   const [m, setM] = useState<Metrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,9 +48,9 @@ export default function AdminDashboardPage() {
     apiGet<Metrics>("/api/admin/metrics")
       .then(setM)
       .catch((e) =>
-        setError(e instanceof ApiError ? e.message : t("admin.metricsFailed"))
+        setError(apiError(e, "admin.metricsFailed"))
       );
-  }, [t]);
+  }, [apiError]);
 
   const sevTotal = m ? m.critical + m.high + m.medium + m.low : 0;
 

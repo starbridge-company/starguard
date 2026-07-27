@@ -23,10 +23,10 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const v = validate(step4Schema, await readJson(req));
-  if (!v.ok) return jsonError(400, v.message);
+  if (!v.ok) return jsonError(400, v.message, null);
 
   // O achado pode vir identificado pelo id persistido OU pelo par
   // (análise, id local). O segundo caminho existe porque a tela carrega o mapa
@@ -101,6 +101,6 @@ export async function POST(req: NextRequest) {
       e instanceof Error && e.name === "AIError"
         ? e.message
         : "Falha ao gerar a correção.";
-    return jsonError(502, msg);
+    return jsonError(502, msg, null);
   }
 }

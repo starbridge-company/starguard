@@ -29,7 +29,7 @@ export async function DELETE(
 ) {
   const session = await requireSession(req);
   if (!session) return jsonError(401, "Não autenticado.");
-  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.");
+  if (!requireCsrf(req)) return jsonError(403, "Token CSRF inválido.", "err.csrf");
 
   const { id } = await params;
   if (!validate(uuidField, id).ok) {

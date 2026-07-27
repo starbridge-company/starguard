@@ -25,19 +25,40 @@ describe("catálogo · FEAT-03", () => {
     expect(lookupCatalog("regra-nova", "CWE-99999")).toBeUndefined();
   });
 
-  // AUDITORIA.md#PEND-18 — o catálogo passou a existir nos dois idiomas.
+  // AUDITORIA.md#PEND-18 — o catálogo passou a existir nos três idiomas.
   it("responde no idioma pedido", () => {
     const pt = lookupCatalog("detect-child-process", undefined, "pt-BR");
     const en = lookupCatalog("detect-child-process", undefined, "en");
+    const es = lookupCatalog("detect-child-process", undefined, "es");
     expect(pt?.whatItIs).toMatch(/comandos do sistema/i);
     expect(en?.whatItIs).toMatch(/operating-system commands/i);
-    expect(pt?.whatItIs).not.toBe(en?.whatItIs);
+    expect(es?.whatItIs).toMatch(/comandos del sistema/i);
+    // Os três textos precisam ser DIFERENTES entre si: dois iguais significa
+    // um dicionário copiado do outro sem tradução.
+    expect(new Set([pt?.whatItIs, en?.whatItIs, es?.whatItIs]).size).toBe(3);
   });
 
-  it("os dois idiomas cobrem exatamente as MESMAS regras e CWEs", () => {
-    // Sem isto, uma entrada nova em português deixaria o inglês cair na IA
+  it("os três idiomas cobrem exatamente as MESMAS regras e CWEs", () => {
+    // Sem isto, uma entrada nova em português deixaria os outros caírem na IA
     // silenciosamente — e o custo voltaria sem ninguém perceber.
     expect(catalogKeys("en")).toEqual(catalogKeys("pt-BR"));
+    expect(catalogKeys("es")).toEqual(catalogKeys("pt-BR"));
+  });
+
+  it("nenhuma entrada fica sem título ou sem como corrigir, em nenhum idioma", () => {
+    for (const locale of ["pt-BR", "en", "es"]) {
+      const { rules, cwes } = catalogKeys(locale);
+      for (const r of rules) {
+        const e = lookupCatalog(r, undefined, locale);
+        expect(e?.title?.trim(), `${locale}/${r} sem título`).toBeTruthy();
+        expect(e?.howToFix?.trim(), `${locale}/${r} sem howToFix`).toBeTruthy();
+      }
+      for (const c of cwes) {
+        const e = lookupCatalog("regra-inexistente", c, locale);
+        expect(e?.title?.trim(), `${locale}/${c} sem título`).toBeTruthy();
+        expect(e?.howToFix?.trim(), `${locale}/${c} sem howToFix`).toBeTruthy();
+      }
+    }
   });
 
   it("idioma desconhecido cai no padrão em vez de quebrar", () => {

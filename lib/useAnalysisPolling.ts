@@ -15,8 +15,8 @@
 // algumas seguidas).
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, ApiError, isAbortError } from "@/lib/client";
-import { useT } from "@/lib/i18n";
+import { apiGet, isAbortError } from "@/lib/client";
+import { useApiError } from "@/lib/i18n";
 import type { Job } from "@/types";
 
 const TERMINAL = new Set(["done", "error"]);
@@ -50,7 +50,7 @@ export function useAnalysisPolling(id: string): AnalysisPolling {
   const [error, setError] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(false);
   const [nonce, setNonce] = useState(0);
-  const t = useT();
+  const apiError = useApiError();
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -94,7 +94,7 @@ export function useAnalysisPolling(id: string): AnalysisPolling {
         setDegraded(true);
         if (failures >= FAILURES_BEFORE_ERROR) {
           setError(
-            e instanceof ApiError ? e.message : t("results.loadFailed")
+            apiError(e, "results.loadFailed")
           );
         }
         // 2s, 4s, 8s, 16s… teto de 30s.
@@ -114,7 +114,7 @@ export function useAnalysisPolling(id: string): AnalysisPolling {
       document.removeEventListener("visibilitychange", onVisibility);
       if (timer) clearTimeout(timer);
     };
-  }, [id, nonce, t]);
+  }, [id, nonce, apiError]);
 
   return { job, error, degraded, retry };
 }

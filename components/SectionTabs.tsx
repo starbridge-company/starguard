@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
+
 export type TabTone = "default" | "danger" | "warning" | "accent";
 
 export interface SectionTab {
@@ -22,8 +24,9 @@ export default function SectionTabs({
   active: string;
   onChange: (id: string) => void;
 }) {
+  const t = useT();
   return (
-    <div className="section-tabs" role="tablist" aria-label="Seções da análise">
+    <div className="section-tabs" role="tablist" aria-label={t("tab.ariaLabel")}>
       {tabs.map((t) => (
         <button
           key={t.id}

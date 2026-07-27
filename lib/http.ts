@@ -22,15 +22,20 @@ export function jsonOk<T>(data: T, status = 200): NextResponse {
  * e `errorKey` — uma chave estável que o cliente traduz para o idioma do
  * usuário. Sem a chave, toda mensagem ficaria presa em pt-BR.
  * Ver AUDITORIA.md#PEND-17.
+ *
+ * `errorKey: null` diz "esta mensagem é DINÂMICA — não a substitua". É o caso
+ * do erro redigido de uma ferramenta externa e do detalhe do Zod: não existe
+ * chave que os represente, e trocá-los por um "Erro no servidor." genérico
+ * apagaria a única informação útil que o usuário tem para agir.
  */
 export function jsonError(
   status: number,
   message: string,
-  errorKey?: string
+  errorKey?: string | null
 ): NextResponse {
-  return harden(
-    NextResponse.json({ error: message, errorKey: errorKey ?? keyFor(status) }, { status })
-  );
+  const body: { error: string; errorKey?: string } = { error: message };
+  if (errorKey !== null) body.errorKey = errorKey ?? keyFor(status);
+  return harden(NextResponse.json(body, { status }));
 }
 
 /** Chave genérica por status, quando a rota não informa uma específica. */

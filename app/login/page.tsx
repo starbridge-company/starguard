@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiPost, ApiError } from "@/lib/client";
+import { apiPost } from "@/lib/client";
 import { initTheme } from "@/lib/theme";
 import { IconShield } from "@/lib/icons";
-import { useT } from "@/lib/i18n";
+import { useApiError, useT } from "@/lib/i18n";
 
 export default function LoginPage() {
   const router = useRouter();
   const t = useT();
+  const apiError = useApiError();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +31,7 @@ export default function LoginPage() {
       router.push(next && next.startsWith("/") ? next : "/");
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : t("login.failed")
+        apiError(err, "login.failed")
       );
       setLoading(false);
     }

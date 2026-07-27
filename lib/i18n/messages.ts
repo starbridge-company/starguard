@@ -1,9 +1,12 @@
 // ============================================================
 // Dicionários. Chaves planas com pontos; `{x}` marca interpolação.
 //
-// O português é a referência: toda chave existe aqui. O inglês pode estar
-// incompleto — `t()` cai no português e, em último caso, devolve a própria
-// chave (que aparece na tela e denuncia o que falta traduzir).
+// O português é a REFERÊNCIA: `PT_BR` define o conjunto de chaves e o tipo
+// `MessageKey` sai dele. Inglês e espanhol são `Record<MessageKey, string>`
+// COMPLETOS — não `Partial`. Isso é de propósito: uma chave nova em português
+// vira erro de compilação nos outros dois idiomas, em vez de cair no fallback
+// e produzir uma tela meio traduzida que ninguém percebe até trocar o idioma.
+// Ver AUDITORIA.md#FEAT-04 e o teste tests/i18n.test.ts.
 // ============================================================
 import type { Locale } from "./config";
 
@@ -26,6 +29,13 @@ export const PT_BR = {
   "nav.activeAccount": "conta ativa",
   "role.superadmin": "Superadmin",
   "role.admin": "Admin",
+  "role.change": "Alterar papel",
+  "role.cannotChangeSelf": "Você não pode alterar o próprio papel",
+
+  // ---- Metadados do documento ----
+  "meta.title": "StarGuard | Copilot de Segurança",
+  "meta.description":
+    "Plataforma de segurança assistida por IA para desenvolvimento seguro de software — DevSecOps ponta a ponta, headless e AI-native.",
 
   // ---- Comuns ----
   "common.retry": "Tentar novamente",
@@ -37,6 +47,10 @@ export const PT_BR = {
   "common.new": "Nova",
   "common.loading": "Carregando…",
   "common.language": "Idioma",
+  "common.moreInfo": "Mais informações",
+  "common.total": "{n} no total",
+  "common.previousPage": "Página anterior",
+  "common.nextPage": "Próxima página",
 
   // ---- Login ----
   "login.subtitle": "Copilot de Segurança · DevSecOps assistido por IA",
@@ -78,11 +92,13 @@ export const PT_BR = {
   "results.phasesFailed": "{n} fase(s) falharam:",
   "results.goToPhase": "Ver detalhes",
   "results.loadFailed": "Falha ao carregar a análise.",
+  "results.progressLabel": "progresso",
   "tab.overview": "Visão geral",
   "tab.fixes": "Correções",
   "tab.deps": "Dependências",
   "tab.threats": "Ameaças",
   "tab.skills": "Skills",
+  "tab.ariaLabel": "Seções da análise",
 
   "fixes.searchPlaceholder": "Buscar por arquivo, regra ou CWE…",
   "fixes.allSeverities": "Toda severidade",
@@ -103,6 +119,10 @@ export const PT_BR = {
   "deps.selectPage": "Selecionar as {n} desta página",
   "deps.selectAllFiltered": "Selecionar todas as {n}",
   "deps.fixSelected": "Corrigir {n} com IA",
+  "deps.lockWarningWithCmd":
+    "A correção altera {manifest}; o arquivo de lock ({lockfile}) NÃO é regerado automaticamente — rode `{cmd}` e inclua o lock no commit antes de mergear.",
+  "deps.lockWarning":
+    "A correção altera {manifest}; o arquivo de lock ({lockfile}) NÃO é regerado automaticamente — regere o lock com o gerenciador do projeto antes de mergear.",
   "fixes.selectPage": "Selecionar as {n} desta página",
   "fixes.selectAllFiltered": "Selecionar todas as {n}",
   "fixes.clearAll": "Limpar seleção",
@@ -112,11 +132,13 @@ export const PT_BR = {
   "fixes.emptyFilters": "Nenhum achado para os filtros atuais.",
   "fixes.emptyResolved": "Todos os achados desta análise já foram resolvidos. 🎉",
   "fixes.emptyNoResolved": "Nenhum achado resolvido ainda.",
+  "fixes.empty": "Nenhuma correção de segurança encontrada. 🎉",
   "fixes.analyzing": "Analisando o código-fonte…",
   "fixes.noScanner":
     "Nenhum analisador de código rodou. {reasons} Isto não significa que o repositório esteja limpo — significa que ele não foi analisado.",
   "fixes.coverage":
     "A revisão por IA leu {reviewed} de {eligible} arquivos elegíveis (priorizando autenticação, rotas, banco e os arquivos que o SAST apontou). O SAST e o SCA analisaram o repositório inteiro.",
+  "fixes.coverageTruncated": "{n} arquivo(s) foram truncados por tamanho.",
 
   // ---- Card de achado ----
   "card.line": "linha {n}",
@@ -128,6 +150,7 @@ export const PT_BR = {
   "card.originalText": "Texto original da ferramenta",
   "card.howToFix": "Como corrigir",
   "card.suggestion": "Sugestão de correção",
+  "card.recommendation": "Recomendação",
   "card.aiGenerated":
     "Texto gerado por IA a partir do repositório analisado — confira antes de tratar como veredito da ferramenta.",
   "card.confidenceMedium": "confiança média",
@@ -138,6 +161,9 @@ export const PT_BR = {
   "filter.confidence": "Confiança",
   "filter.confidenceAll": "Toda",
   "filter.confidenceHigh": "Só alta",
+  "filter.severity": "Severidade",
+  "filter.source": "Origem",
+  "filter.byStatus": "Filtrar por estado",
   "card.fixWithAi": "Corrigir com IA",
   "card.viewFix": "Ver correção",
   "card.markFixed": "Já corrigi",
@@ -170,6 +196,11 @@ export const PT_BR = {
   "fix.snippetOnly":
     "A IA recebeu apenas o trecho — não foi possível buscar o arquivo inteiro.",
   "fix.failed": "Falha ao gerar correção.",
+  // Frase-guia que já vem escrita na textarea do modal (lib/constants.ts).
+  "fix.guide":
+    "Corrija apenas este problema de segurança, sem alterar a lógica de negócio, mantendo o estilo e a indentação do arquivo.",
+  // Exibida no lugar da sugestão genérica gravada pelo scanner.
+  "fix.genericSuggestion": "Revise o trecho conforme a recomendação.",
 
   // ---- Diff ----
   "diff.showAll": "Mostrar tudo",
@@ -178,7 +209,6 @@ export const PT_BR = {
   "diff.viewDiff": "Ver diff",
   "diff.noChange": "nenhuma alteração",
   "diff.unchangedLines": "{n} linhas inalteradas",
-
 
   // ---- Onboarding (nova análise) ----
   "onb.kicker": "Nova análise",
@@ -203,6 +233,49 @@ export const PT_BR = {
   "phase4.label": "Correção",
   "phase4.desc": "Fase 4 · Gera a correção e abre o Pull Request no GitHub.",
 
+  // ---- Contexto do sistema (Tela 1) ----
+  "threatInput.label": "Contexto do sistema",
+  "threatInput.help": "O que descrever aqui",
+  "threatInput.helpText":
+    "Cole a descrição do sistema, notas de reunião ou requisitos de compliance. Este texto vira contexto para as 4 fases: ameaças, validação de skills, scan e correção. Ex.: dados sensíveis, fluxos de login, integrações de pagamento e regras de negócio.",
+  "threatInput.placeholder":
+    "Ex.: API de telemedicina que armazena dados de saúde (LGPD). Login por e-mail/senha, prontuários por paciente, pagamento por cartão (PCI). Um médico só acessa pacientes da sua clínica…",
+
+  // ---- Repositório (Tela 1) ----
+  "repo.label": "Repositório GitHub",
+  "repo.help": "URL do repositório",
+  "repo.helpText":
+    "Somente github.com é aceito (allowlist anti-SSRF). Sem repositório, a Fase 3 (scan de código) não roda — as demais fases seguem normalmente.",
+  "repo.placeholder": "https://github.com/starbridge/meu-projeto",
+  "repo.invalid":
+    "URL inválida. Use o formato https://github.com/dono/repositorio — só github.com é aceito.",
+  "repo.tokenLabel": "Token de acesso",
+  "repo.tokenHelp": "Personal Access Token",
+  "repo.tokenHelpText":
+    "Necessário apenas para repositórios privados. O token vive só em memória durante o job e nunca é persistido nem devolvido ao cliente.",
+  "repo.tokenPlaceholder": "ghp_… (opcional)",
+
+  // ---- Seletor de token (Tela 1) ----
+  "tokenPicker.help": "Token do GitHub",
+  "tokenPicker.helpText":
+    "Necessário só para repositórios privados / abrir PR. Escolha um token salvo (cifrado na sua conta) ou digite um novo. Um token novo pode ser salvo na conta para reutilizar — sempre cifrado, nunca em texto puro.",
+  "tokenPicker.none": "Nenhum (repositório público)",
+  "tokenPicker.new": "+ Novo token…",
+  "tokenPicker.saveToAccount": "Salvar na conta (cifrado)",
+  "tokenPicker.namePlaceholder": "Nome do token (ex.: PAT pessoal)",
+
+  // ---- Skills enviadas (Tela 1) ----
+  "skillInput.label": "Skills a validar",
+  "skillInput.help": "Validação de skills",
+  "skillInput.helpText":
+    "Envie SKILL.md, prompts ou templates para a Fase 2 checar prompt-injection, exfiltração de dados e desvio de política. Opcional.",
+  "skillInput.namePlaceholder": "nome-da-skill.md",
+  "skillInput.contentPlaceholder":
+    "Cole o conteúdo da skill/prompt (SKILL.md, template…)",
+  "skillInput.remove": "Remover skill",
+  "skillInput.add": "+ Adicionar skill",
+  "skillInput.upload": "Enviar arquivos",
+
   // ---- Listagens e filtros ----
   "list.historyKicker": "Histórico",
   "list.analysesTitle": "Análises",
@@ -219,6 +292,7 @@ export const PT_BR = {
   "list.loadFailed": "Falha ao carregar as análises.",
   "list.prs": "{n} PR(s)",
   "list.openRepo": "Abrir repositório",
+
   // ---- Novo usuário (governança) ----
   "newUser.title": "Novo usuário",
   "newUser.subtitle": "Defina o acesso e o papel da nova conta.",
@@ -263,6 +337,17 @@ export const PT_BR = {
   "pipe.refactor.desc":
     "Correção do código e abertura do Pull Request, sob demanda por achado.",
 
+  // ---- Métricas do stepper ----
+  "metric.threats": "ameaças",
+  "metric.requirements": "requisitos",
+  "metric.skills": "skills",
+  "metric.rejected": "reprovadas",
+  "metric.sast": "SAST",
+  "metric.ai": "IA",
+  "metric.sca": "SCA",
+  "metric.fixes": "correções",
+  "metric.prs": "PRs",
+
   // ---- Pull Requests ----
   "pr.tokenRequired": "Escolha o token do GitHub",
   "pr.tokenPrivateHint":
@@ -282,6 +367,13 @@ export const PT_BR = {
   "pr.colOpened": "Aberto",
   "pr.viewAnalysis": "Análise",
   "pr.openOnGithub": "Abrir no GitHub",
+  // Texto que vai para dentro do PR — segue o idioma de quem abriu.
+  "pr.fixTitle": "Correção de segurança: {title}",
+  "pr.batchTitle": "Correções de segurança StarGuard ({n})",
+  "pr.batchIntro":
+    "Correções de segurança geradas pelo StarGuard ({findings} achado(s) em {files} arquivo(s)).",
+  "pr.changedFiles": "Arquivos alterados: {files}",
+  "pr.reviewBeforeMerge": "Revise cada alteração antes de mergear.",
 
   "export.label": "Exportar",
   "export.needScan": "A Fase 3 (scan) ainda não produziu achados para exportar.",
@@ -291,6 +383,23 @@ export const PT_BR = {
   "export.csvSub": "Planilha (Excel, Sheets)",
   "export.json": "JSON",
   "export.jsonSub": "Dado bruto para pipeline",
+  // Cabeçalho da PLANILHA — quem abre no Excel lê estas colunas. O JSON, que é
+  // contrato de máquina, mantém as chaves em inglês de propósito.
+  "csv.id": "id",
+  "csv.source": "origem",
+  "csv.severity": "severidade",
+  "csv.rule": "regra",
+  "csv.cwe": "cwe",
+  "csv.owasp": "owasp",
+  "csv.file": "arquivo",
+  "csv.line": "linha",
+  "csv.title": "titulo",
+  "csv.description": "descricao",
+  "csv.howToFix": "como_corrigir",
+  "export.depUpgradeTo": "Atualizar para {version}",
+  "export.depNoFix": "Sem correção publicada",
+  "export.depUpgradeHelp": "Atualize {pkg} para {version} ou superior.",
+  "export.depNoFixHelp": "Não há versão corrigida publicada para {pkg}.",
   "list.delete": "Excluir",
   "list.deleteOf": "Excluir a análise {name}",
   "list.deleteConfirm":
@@ -308,6 +417,8 @@ export const PT_BR = {
   "filter.period": "Período",
   "filter.from": "De",
   "filter.to": "Até",
+  "filter.since": "desde {date}",
+  "filter.until": "até {date}",
   "filter.search": "Buscar…",
   "filter.clearSearch": "Limpar busca",
   "filter.allUsers": "Todos os usuários",
@@ -345,7 +456,9 @@ export const PT_BR = {
   "batch.waiting": "Aguarde as correções…",
   "batch.prOpened": "PR #{number} aberto com {files} arquivo(s).",
   "batch.nFindings": "{n} achado(s)",
-
+  "batch.nFiles": "{n} arquivo(s)",
+  "batch.genFailed": "Falha ao gerar.",
+  "batch.prFailed": "Falha ao abrir o PR.",
 
   // ---- Ajuda contextual e seções da tela de resultados ----
   "help.overview": "Visão geral",
@@ -397,6 +510,7 @@ export const PT_BR = {
   "results.phaseFailed": "Falha nesta fase.",
   "results.newAnalysisLink": "← Nova análise",
 
+  "deps.title": "Dependências · SCA",
   "deps.subtitle": "Pacotes vulneráveis e a versão que corrige.",
   "deps.scanning": "Escaneando as dependências…",
   "deps.empty": "Nenhuma dependência vulnerável encontrada. 🎉",
@@ -410,9 +524,59 @@ export const PT_BR = {
   "skills.subtitle": "Segurança de skills/prompts enviados.",
   "skills.validating": "Validando as skills…",
   "skills.empty": "Nenhuma skill enviada para validação.",
+  "skills.verdictApproved": "Validada",
+  "skills.verdictReview": "Requer revisão",
+  "skills.verdictRejected": "Reprovada",
 
   "fixes.noScannerTitle": "Nenhum analisador de código rodou.",
   "card.businessRule": "Regra de negócio",
+
+  // ---- Mensagens escritas pelo SERVIDOR e persistidas no JSONB ----
+  // Gravadas no idioma de quem pediu a análise (lib/jobs.ts, lib/tasks.ts).
+  "job.orphan":
+    "A análise foi interrompida antes de começar (o servidor reiniciou). Rode de novo — nada foi perdido no repositório.",
+  "job.stale":
+    "A análise não deu sinal de vida por tempo demais e foi encerrada (provável reinício do servidor durante o processamento).",
+  "job.phaseFailed": "Falha na etapa.",
+  "job.unexpected": "Falha inesperada na análise.",
+  "scan.noRepo": "Nenhum repositório informado.",
+  "scan.sastOff": "SAST desligado por configuração (SAST_ENGINE=none).",
+  "scan.scaOff": "SCA desligado por configuração (SCA_ENGINE=none).",
+  "scan.sastNotRun": "O SAST ({engine}) não foi executado.",
+
+  // ---- Explicação de dependência vulnerável (lib/enrich.ts, sem IA) ----
+  "depExplain.title": "Dependência vulnerável: {pkg}",
+  "depExplain.whatItIs":
+    "A versão em uso ({version}) tem uma vulnerabilidade conhecida, registrada como {cve}.",
+  "depExplain.whyItMatters":
+    "Código de terceiro roda com os mesmos privilégios do seu. Vulnerabilidade com CVE público já tem exploit conhecido e varredores automáticos procuram por ela.",
+  "depExplain.howToFix":
+    "Atualize `{pkg}` para {version} ou superior. Se for dependência transitiva, force a resolução no lockfile.",
+  "depExplain.noFixedVersion":
+    "Ainda não há versão corrigida. Avalie substituir a dependência, isolar o uso dela, ou acompanhar o avanço do {cve}.",
+
+  // ---- Validação de skills: checagens e heurísticas (lib/skills.ts) ----
+  "skillCheck.scope": "Contém objetivo/escopo declarado",
+  "skillCheck.noExfiltration": "Sem instruções de exfiltração de dados",
+  "skillCheck.noPolicyBypass": "Sem tentativa de desvio de política",
+  "skillCheck.noCommandExec": "Sem execução de comandos externos",
+  "skillFinding.heuristicDesc":
+    'Padrão suspeito detectado por heurística: "{match}".',
+  "skillFinding.promptInjection.title":
+    "Instrução de sobreposição de política (prompt injection)",
+  "skillFinding.promptInjection.fix":
+    "Remover instruções que peçam ao modelo ignorar regras do sistema; skills não devem sobrepor a política.",
+  "skillFinding.dataExfiltration.title": "Possível exfiltração de dados/segredos",
+  "skillFinding.dataExfiltration.fix":
+    "Proibir leitura de segredos e chamadas de rede dentro de skills; aplicar allowlist de operações.",
+  "skillFinding.backdoor.title": "Execução de código/comando embutida",
+  "skillFinding.backdoor.fix":
+    "Skills não devem executar comandos ou avaliar código arbitrário. Remover o trecho.",
+  "skillFinding.policyBypass.title": "Tentativa de desvio de política",
+  "skillFinding.policyBypass.fix":
+    "Remover linguagem que tente desabilitar salvaguardas do modelo.",
+  "skillFinding.aiTitle": "Achado da IA",
+  "skillFinding.aiRecommendation": "Revisar o trecho apontado.",
 
   // ---- Erros de API (chaves devolvidas em errorKey) ----
   "err.unauthenticated": "Sessão expirada. Entre novamente.",
@@ -427,8 +591,19 @@ export const PT_BR = {
     "O banco de dados está desatualizado em relação à aplicação. Avise quem administra: faltam migrações.",
   "err.badRequest": "Dados inválidos.",
   "err.network": "Sem conexão com o servidor.",
+  // Mensagens específicas de rota: sem chave própria elas cairiam no genérico
+  // por status ("Dados inválidos.") e o usuário perderia o motivo real.
+  "err.csrf": "Token CSRF inválido.",
+  "err.emailTaken": "Já existe um usuário com este e-mail.",
+  "err.currentPasswordRequired":
+    "Informe a senha atual para alterar e-mail ou senha.",
+  "err.wrongCurrentPassword": "Senha atual incorreta.",
+  "err.cannotChangeOwnRole": "Não é possível alterar o próprio papel.",
+  "err.cannotDeleteOwnAccount": "Não é possível excluir a própria conta.",
+  "err.badExportFormat": "Formato inválido. Use sarif, csv ou json.",
+  "err.threatModelFailed": "Falha ao gerar a modelagem de ameaças.",
+  "err.skillsValidationFailed": "Falha ao validar as skills.",
 
-  // ---- Conta ----
   // ---- Relatório ----
   "report.title": "Sumário executivo",
   "report.docTitle": "StarGuard — Relatório de Segurança",
@@ -556,6 +731,7 @@ export const PT_BR = {
     "Salvos cifrados; usados para clonar repositórios privados e abrir PRs.",
   "account.token": "Token",
   "account.tokenNamePlaceholder": "Ex.: PAT pessoal",
+  "account.tokenPlaceholder": "ghp_…",
   "account.save": "Salvar",
   "account.noTokens": "Nenhum token salvo ainda.",
   "account.createdAt": "Criado",
@@ -584,7 +760,11 @@ export const PT_BR = {
 
 export type MessageKey = keyof typeof PT_BR;
 
-const EN: Partial<Record<MessageKey, string>> = {
+/**
+ * Inglês e espanhol são COMPLETOS por tipo (`Record`, não `Partial`): chave
+ * nova em português não compila até ser traduzida nos três idiomas.
+ */
+const EN: Record<MessageKey, string> = {
   "nav.newAnalysis": "New analysis",
   "nav.analyses": "Analyses",
   "nav.pullRequests": "Pull Requests",
@@ -602,6 +782,12 @@ const EN: Partial<Record<MessageKey, string>> = {
   "nav.activeAccount": "active account",
   "role.superadmin": "Superadmin",
   "role.admin": "Admin",
+  "role.change": "Change role",
+  "role.cannotChangeSelf": "You can't change your own role",
+
+  "meta.title": "StarGuard | Security Copilot",
+  "meta.description":
+    "AI-assisted security platform for secure software development — end-to-end, headless, AI-native DevSecOps.",
 
   "common.retry": "Try again",
   "common.refresh": "Refresh",
@@ -612,6 +798,10 @@ const EN: Partial<Record<MessageKey, string>> = {
   "common.new": "New",
   "common.loading": "Loading…",
   "common.language": "Language",
+  "common.moreInfo": "More information",
+  "common.total": "{n} in total",
+  "common.previousPage": "Previous page",
+  "common.nextPage": "Next page",
 
   "login.subtitle": "Security Copilot · AI-assisted DevSecOps",
   "login.email": "Email",
@@ -647,11 +837,13 @@ const EN: Partial<Record<MessageKey, string>> = {
   "results.phasesFailed": "{n} phase(s) failed:",
   "results.goToPhase": "See details",
   "results.loadFailed": "Failed to load the analysis.",
+  "results.progressLabel": "progress",
   "tab.overview": "Overview",
   "tab.fixes": "Fixes",
   "tab.deps": "Dependencies",
   "tab.threats": "Threats",
   "tab.skills": "Skills",
+  "tab.ariaLabel": "Analysis sections",
 
   "fixes.searchPlaceholder": "Search by file, rule or CWE…",
   "fixes.allSeverities": "Any severity",
@@ -672,6 +864,10 @@ const EN: Partial<Record<MessageKey, string>> = {
   "deps.selectPage": "Select the {n} on this page",
   "deps.selectAllFiltered": "Select all {n}",
   "deps.fixSelected": "Fix {n} with AI",
+  "deps.lockWarningWithCmd":
+    "The fix changes {manifest}; the lock file ({lockfile}) is NOT regenerated automatically — run `{cmd}` and include the lock in the commit before merging.",
+  "deps.lockWarning":
+    "The fix changes {manifest}; the lock file ({lockfile}) is NOT regenerated automatically — regenerate it with the project's package manager before merging.",
   "fixes.selectPage": "Select the {n} on this page",
   "fixes.selectAllFiltered": "Select all {n}",
   "fixes.clearAll": "Clear selection",
@@ -681,11 +877,13 @@ const EN: Partial<Record<MessageKey, string>> = {
   "fixes.emptyFilters": "No findings match the current filters.",
   "fixes.emptyResolved": "Every finding in this analysis has been resolved. 🎉",
   "fixes.emptyNoResolved": "No resolved findings yet.",
+  "fixes.empty": "No security fixes found. 🎉",
   "fixes.analyzing": "Analyzing the source code…",
   "fixes.noScanner":
     "No code analyzer ran. {reasons} This does not mean the repository is clean — it means it was not analyzed.",
   "fixes.coverage":
     "The AI review read {reviewed} of {eligible} eligible files (prioritizing auth, routes, database and the files SAST flagged). SAST and SCA analyzed the whole repository.",
+  "fixes.coverageTruncated": "{n} file(s) were truncated for size.",
 
   "card.line": "line {n}",
   "card.technicalDetails": "Technical details",
@@ -696,6 +894,7 @@ const EN: Partial<Record<MessageKey, string>> = {
   "card.originalText": "Tool's original text",
   "card.howToFix": "How to fix",
   "card.suggestion": "Suggested fix",
+  "card.recommendation": "Recommendation",
   "card.aiGenerated":
     "AI-generated from the analysed repository — check it before treating this as the tool's verdict.",
   "card.confidenceMedium": "medium confidence",
@@ -706,6 +905,9 @@ const EN: Partial<Record<MessageKey, string>> = {
   "filter.confidence": "Confidence",
   "filter.confidenceAll": "Any",
   "filter.confidenceHigh": "High only",
+  "filter.severity": "Severity",
+  "filter.source": "Source",
+  "filter.byStatus": "Filter by state",
   "card.fixWithAi": "Fix with AI",
   "card.viewFix": "View fix",
   "card.markFixed": "Already fixed",
@@ -736,6 +938,9 @@ const EN: Partial<Record<MessageKey, string>> = {
   "fix.snippetOnly":
     "The AI only received the snippet — the whole file could not be fetched.",
   "fix.failed": "Failed to generate the fix.",
+  "fix.guide":
+    "Fix only this security problem, without changing business logic, keeping the file's style and indentation.",
+  "fix.genericSuggestion": "Review the snippet against the recommendation.",
 
   "diff.showAll": "Show everything",
   "diff.onlyChanges": "Only what changed",
@@ -743,7 +948,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "diff.viewDiff": "View diff",
   "diff.noChange": "no changes",
   "diff.unchangedLines": "{n} unchanged lines",
-
 
   "onb.kicker": "New analysis",
   "onb.title": "Let us analyze your project",
@@ -769,6 +973,45 @@ const EN: Partial<Record<MessageKey, string>> = {
   "phase4.desc":
     "Phase 4 · Generates the fix and opens the Pull Request on GitHub.",
 
+  "threatInput.label": "System context",
+  "threatInput.help": "What to describe here",
+  "threatInput.helpText":
+    "Paste the system description, meeting notes or compliance requirements. This text becomes context for the 4 phases: threats, skill validation, scan and fix. E.g. sensitive data, login flows, payment integrations and business rules.",
+  "threatInput.placeholder":
+    "e.g. Telemedicine API storing health data (GDPR/LGPD). Email/password login, per-patient records, card payments (PCI). A doctor can only reach patients from their own clinic…",
+
+  "repo.label": "GitHub repository",
+  "repo.help": "Repository URL",
+  "repo.helpText":
+    "Only github.com is accepted (anti-SSRF allowlist). Without a repository, Phase 3 (code scan) does not run — the other phases proceed normally.",
+  "repo.placeholder": "https://github.com/starbridge/my-project",
+  "repo.invalid":
+    "Invalid URL. Use the format https://github.com/owner/repository — only github.com is accepted.",
+  "repo.tokenLabel": "Access token",
+  "repo.tokenHelp": "Personal Access Token",
+  "repo.tokenHelpText":
+    "Needed only for private repositories. The token lives in memory during the job and is never persisted nor returned to the client.",
+  "repo.tokenPlaceholder": "ghp_… (optional)",
+
+  "tokenPicker.help": "GitHub token",
+  "tokenPicker.helpText":
+    "Needed only for private repositories / opening a PR. Pick a saved token (encrypted in your account) or type a new one. A new token can be saved to the account for reuse — always encrypted, never in plain text.",
+  "tokenPicker.none": "None (public repository)",
+  "tokenPicker.new": "+ New token…",
+  "tokenPicker.saveToAccount": "Save to my account (encrypted)",
+  "tokenPicker.namePlaceholder": "Token name (e.g. personal PAT)",
+
+  "skillInput.label": "Skills to validate",
+  "skillInput.help": "Skill validation",
+  "skillInput.helpText":
+    "Upload SKILL.md, prompts or templates so Phase 2 can check for prompt injection, data exfiltration and policy bypass. Optional.",
+  "skillInput.namePlaceholder": "skill-name.md",
+  "skillInput.contentPlaceholder":
+    "Paste the skill/prompt content (SKILL.md, template…)",
+  "skillInput.remove": "Remove skill",
+  "skillInput.add": "+ Add skill",
+  "skillInput.upload": "Upload files",
+
   "list.historyKicker": "History",
   "list.analysesTitle": "Analyses",
   "list.analysesSubtitle": "Your security analyses, newest first.",
@@ -783,7 +1026,7 @@ const EN: Partial<Record<MessageKey, string>> = {
   "list.loadFailed": "Failed to load the analyses.",
   "list.prs": "{n} PR(s)",
   "list.openRepo": "Open repository",
-  // ---- Novo usuário (governança) ----
+
   "newUser.title": "New user",
   "newUser.subtitle": "Set the access and role for the new account.",
   "newUser.help": "Create user",
@@ -804,7 +1047,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "newUser.confirmDiscard":
     "You filled in the form and haven't created the user yet. Closing now discards what you typed. Close anyway?",
 
-  // ---- Stepper das 4 fases ----
   "pipe.ariaLabel": "Progress of the 4 phases",
   "pipe.status.pending": "Waiting",
   "pipe.status.running": "Running",
@@ -827,7 +1069,16 @@ const EN: Partial<Record<MessageKey, string>> = {
   "pipe.refactor.desc":
     "Code fix and Pull Request, generated on demand per finding.",
 
-  // ---- Pull Requests ----
+  "metric.threats": "threats",
+  "metric.requirements": "requirements",
+  "metric.skills": "skills",
+  "metric.rejected": "rejected",
+  "metric.sast": "SAST",
+  "metric.ai": "AI",
+  "metric.sca": "SCA",
+  "metric.fixes": "fixes",
+  "metric.prs": "PRs",
+
   "pr.tokenRequired": "Choose the GitHub token",
   "pr.tokenPrivateHint":
     "This repository is private, so the PR must be opened with a token of yours.",
@@ -846,6 +1097,12 @@ const EN: Partial<Record<MessageKey, string>> = {
   "pr.colOpened": "Opened",
   "pr.viewAnalysis": "Analysis",
   "pr.openOnGithub": "Open on GitHub",
+  "pr.fixTitle": "Security fix: {title}",
+  "pr.batchTitle": "StarGuard security fixes ({n})",
+  "pr.batchIntro":
+    "Security fixes generated by StarGuard ({findings} finding(s) across {files} file(s)).",
+  "pr.changedFiles": "Changed files: {files}",
+  "pr.reviewBeforeMerge": "Review every change before merging.",
 
   "export.label": "Export",
   "export.needScan": "Phase 3 (scan) hasn't produced findings to export yet.",
@@ -855,6 +1112,21 @@ const EN: Partial<Record<MessageKey, string>> = {
   "export.csvSub": "Spreadsheet (Excel, Sheets)",
   "export.json": "JSON",
   "export.jsonSub": "Raw data for pipelines",
+  "csv.id": "id",
+  "csv.source": "source",
+  "csv.severity": "severity",
+  "csv.rule": "rule",
+  "csv.cwe": "cwe",
+  "csv.owasp": "owasp",
+  "csv.file": "file",
+  "csv.line": "line",
+  "csv.title": "title",
+  "csv.description": "description",
+  "csv.howToFix": "how_to_fix",
+  "export.depUpgradeTo": "Upgrade to {version}",
+  "export.depNoFix": "No published fix",
+  "export.depUpgradeHelp": "Upgrade {pkg} to {version} or later.",
+  "export.depNoFixHelp": "No fixed version has been published for {pkg}.",
   "list.delete": "Delete",
   "list.deleteOf": "Delete the analysis {name}",
   "list.deleteConfirm":
@@ -872,6 +1144,8 @@ const EN: Partial<Record<MessageKey, string>> = {
   "filter.period": "Period",
   "filter.from": "From",
   "filter.to": "To",
+  "filter.since": "since {date}",
+  "filter.until": "until {date}",
   "filter.search": "Search…",
   "filter.clearSearch": "Clear search",
   "filter.allUsers": "All users",
@@ -907,7 +1181,9 @@ const EN: Partial<Record<MessageKey, string>> = {
   "batch.waiting": "Waiting for the fixes…",
   "batch.prOpened": "PR #{number} opened with {files} file(s).",
   "batch.nFindings": "{n} finding(s)",
-
+  "batch.nFiles": "{n} file(s)",
+  "batch.genFailed": "Failed to generate.",
+  "batch.prFailed": "Failed to open the PR.",
 
   "help.overview": "Overview",
   "help.overviewText":
@@ -923,7 +1199,7 @@ const EN: Partial<Record<MessageKey, string>> = {
     "Packages with a known CVE detected by software composition analysis. The fix is upgrading to the indicated fixed version.",
   "help.threats": "Threat modeling",
   "help.threatsText":
-    "The AI analyzes the system context and raises plausible threats (STRIDE, LGPD, OWASP) and the technical requirements that mitigate them.",
+    "The AI analyzes the system context and raises plausible threats (STRIDE, GDPR/LGPD, OWASP) and the technical requirements that mitigate them.",
   "help.skills": "Skill validation",
   "help.skillsText":
     "Each skill/prompt is checked against prompt injection, data exfiltration and policy bypass. The verdict tells whether it is safe to use.",
@@ -957,6 +1233,7 @@ const EN: Partial<Record<MessageKey, string>> = {
   "results.phaseFailed": "This phase failed.",
   "results.newAnalysisLink": "← New analysis",
 
+  "deps.title": "Dependencies · SCA",
   "deps.subtitle": "Vulnerable packages and the version that fixes them.",
   "deps.scanning": "Scanning dependencies…",
   "deps.empty": "No vulnerable dependencies found. 🎉",
@@ -970,9 +1247,55 @@ const EN: Partial<Record<MessageKey, string>> = {
   "skills.subtitle": "Security of the submitted skills/prompts.",
   "skills.validating": "Validating the skills…",
   "skills.empty": "No skills submitted for validation.",
+  "skills.verdictApproved": "Approved",
+  "skills.verdictReview": "Needs review",
+  "skills.verdictRejected": "Rejected",
 
   "fixes.noScannerTitle": "No code analyzer ran.",
   "card.businessRule": "Business rule",
+
+  "job.orphan":
+    "The analysis was interrupted before it started (the server restarted). Run it again — nothing was lost in the repository.",
+  "job.stale":
+    "The analysis showed no sign of life for too long and was terminated (the server likely restarted mid-run).",
+  "job.phaseFailed": "This step failed.",
+  "job.unexpected": "Unexpected failure in the analysis.",
+  "scan.noRepo": "No repository provided.",
+  "scan.sastOff": "SAST disabled by configuration (SAST_ENGINE=none).",
+  "scan.scaOff": "SCA disabled by configuration (SCA_ENGINE=none).",
+  "scan.sastNotRun": "SAST ({engine}) did not run.",
+
+  "depExplain.title": "Vulnerable dependency: {pkg}",
+  "depExplain.whatItIs":
+    "The version in use ({version}) has a known vulnerability, tracked as {cve}.",
+  "depExplain.whyItMatters":
+    "Third-party code runs with the same privileges as yours. A vulnerability with a public CVE already has a known exploit, and automated scanners look for it.",
+  "depExplain.howToFix":
+    "Upgrade `{pkg}` to {version} or later. If it is a transitive dependency, force the resolution in the lockfile.",
+  "depExplain.noFixedVersion":
+    "No fixed version yet. Consider replacing the dependency, isolating its use, or tracking progress on {cve}.",
+
+  "skillCheck.scope": "Declares a goal/scope",
+  "skillCheck.noExfiltration": "No data exfiltration instructions",
+  "skillCheck.noPolicyBypass": "No policy bypass attempt",
+  "skillCheck.noCommandExec": "No external command execution",
+  "skillFinding.heuristicDesc":
+    'Suspicious pattern detected by heuristic: "{match}".',
+  "skillFinding.promptInjection.title":
+    "Policy override instruction (prompt injection)",
+  "skillFinding.promptInjection.fix":
+    "Remove instructions asking the model to ignore system rules; skills must not override policy.",
+  "skillFinding.dataExfiltration.title": "Possible data/secret exfiltration",
+  "skillFinding.dataExfiltration.fix":
+    "Forbid reading secrets and making network calls inside skills; enforce an operation allowlist.",
+  "skillFinding.backdoor.title": "Embedded code/command execution",
+  "skillFinding.backdoor.fix":
+    "Skills must not run commands or evaluate arbitrary code. Remove the snippet.",
+  "skillFinding.policyBypass.title": "Policy bypass attempt",
+  "skillFinding.policyBypass.fix":
+    "Remove language that tries to disable the model's safeguards.",
+  "skillFinding.aiTitle": "AI finding",
+  "skillFinding.aiRecommendation": "Review the flagged snippet.",
 
   "err.unauthenticated": "Session expired. Please sign in again.",
   "err.forbidden": "You do not have permission for this action.",
@@ -986,8 +1309,17 @@ const EN: Partial<Record<MessageKey, string>> = {
     "The database is out of date with the application. Tell whoever administers it: migrations are missing.",
   "err.badRequest": "Invalid data.",
   "err.network": "No connection to the server.",
+  "err.csrf": "Invalid CSRF token.",
+  "err.emailTaken": "A user with this e-mail already exists.",
+  "err.currentPasswordRequired":
+    "Enter your current password to change the e-mail or the password.",
+  "err.wrongCurrentPassword": "Current password is incorrect.",
+  "err.cannotChangeOwnRole": "You cannot change your own role.",
+  "err.cannotDeleteOwnAccount": "You cannot delete your own account.",
+  "err.badExportFormat": "Invalid format. Use sarif, csv or json.",
+  "err.threatModelFailed": "Failed to generate the threat model.",
+  "err.skillsValidationFailed": "Failed to validate the skills.",
 
-  // ---- Relatório ----
   "report.title": "Executive summary",
   "report.docTitle": "StarGuard — Security Report",
   "report.project": "Project",
@@ -1017,7 +1349,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "report.metaEngines": "Engines",
   "report.loadFailed": "Failed to load the report.",
 
-  // ---- Eventos da trilha de auditoria (enum de domínio, FEAT-04) ----
   "auditEvent.login.success": "Sign-in",
   "auditEvent.login.fail": "Failed sign-in",
   "auditEvent.login.ratelimited": "Sign-in blocked (rate limit)",
@@ -1040,7 +1371,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "auditEvent.user.role.update": "Role changed",
   "auditEvent.user.delete": "User deleted",
 
-  // ---- Governança · monitoramento e análises globais ----
   "monitoring.subtitle": "Audit trail of everything that happens on the platform.",
   "monitoring.searchPlaceholder": "Search by event or detail…",
   "monitoring.category": "Category",
@@ -1059,7 +1389,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "adminAnalyses.subtitle": "Every analysis from every user.",
   "adminAnalyses.empty": "No analyses found.",
 
-  // ---- Governança · usuários ----
   "adminUsers.subtitle": "All accounts — manage roles and access.",
   "adminUsers.searchPlaceholder": "Search by name or e-mail…",
   "adminUsers.empty": "No users found.",
@@ -1075,10 +1404,8 @@ const EN: Partial<Record<MessageKey, string>> = {
   "adminUsers.roleFailed": "Failed to change the role.",
   "adminUsers.deleteFailed": "Failed to delete the user.",
 
-  // ---- Governança · painel ----
   "admin.dashTitle": "Global dashboard",
-  "admin.dashSubtitle":
-    "Consolidated view of every user, analysis and fix.",
+  "admin.dashSubtitle": "Consolidated view of every user, analysis and fix.",
   "admin.metricsFailed": "Failed to load metrics.",
   "admin.last7d": "in the last 7 days",
   "admin.running": "in progress",
@@ -1089,7 +1416,6 @@ const EN: Partial<Record<MessageKey, string>> = {
   "admin.usersHint": "{n} account(s) — see per-user metrics",
   "admin.analysesHint": "{n} analysis(es) from all users",
 
-  // ---- Conta (corpo da tela) ----
   "account.kicker": "Settings",
   "account.subtitle": "Your sign-in details and GitHub tokens.",
   "account.basics": "Basic details",
@@ -1114,6 +1440,7 @@ const EN: Partial<Record<MessageKey, string>> = {
     "Stored encrypted; used to clone private repositories and open PRs.",
   "account.token": "Token",
   "account.tokenNamePlaceholder": "e.g. personal PAT",
+  "account.tokenPlaceholder": "ghp_…",
   "account.save": "Save",
   "account.noTokens": "No tokens saved yet.",
   "account.createdAt": "Created",
@@ -1140,7 +1467,720 @@ const EN: Partial<Record<MessageKey, string>> = {
     "Applies to the interface and to AI-generated text in future analyses.",
 };
 
-export const MESSAGES: Record<Locale, Partial<Record<MessageKey, string>>> = {
+const ES: Record<MessageKey, string> = {
+  "nav.newAnalysis": "Nuevo análisis",
+  "nav.analyses": "Análisis",
+  "nav.pullRequests": "Pull Requests",
+  "nav.account": "Cuenta",
+  "nav.governance": "Gobernanza",
+  "nav.dashboard": "Panel",
+  "nav.users": "Usuarios",
+  "nav.globalAnalyses": "Análisis globales",
+  "nav.monitoring": "Monitoreo",
+  "nav.lightMode": "Modo claro",
+  "nav.darkMode": "Modo oscuro",
+  "nav.logout": "Salir",
+  "nav.menu": "Menú",
+  "nav.close": "Cerrar",
+  "nav.activeAccount": "cuenta activa",
+  "role.superadmin": "Superadmin",
+  "role.admin": "Admin",
+  "role.change": "Cambiar rol",
+  "role.cannotChangeSelf": "No puedes cambiar tu propio rol",
+
+  "meta.title": "StarGuard | Copiloto de Seguridad",
+  "meta.description":
+    "Plataforma de seguridad asistida por IA para el desarrollo seguro de software — DevSecOps de punta a punta, headless y AI-native.",
+
+  "common.retry": "Intentar de nuevo",
+  "common.refresh": "Actualizar",
+  "common.cancel": "Cancelar",
+  "common.close": "Cerrar",
+  "common.open": "Abrir",
+  "common.report": "Informe",
+  "common.new": "Nuevo",
+  "common.loading": "Cargando…",
+  "common.language": "Idioma",
+  "common.moreInfo": "Más información",
+  "common.total": "{n} en total",
+  "common.previousPage": "Página anterior",
+  "common.nextPage": "Página siguiente",
+
+  "login.subtitle": "Copiloto de Seguridad · DevSecOps asistido por IA",
+  "login.email": "Correo electrónico",
+  "login.password": "Contraseña",
+  "login.submit": "Entrar",
+  "login.hint":
+    "Acceso restringido. Usa las credenciales proporcionadas por el administrador.",
+  "login.failed": "No se pudo iniciar sesión.",
+
+  "severity.critical": "Crítica",
+  "severity.high": "Alta",
+  "severity.medium": "Media",
+  "severity.low": "Baja",
+  "severity.info": "Info",
+
+  "status.open": "Abierto",
+  "status.fixed": "Corregido",
+  "status.pr_open": "PR abierto",
+  "status.pr_merged": "PR fusionado",
+  "status.false_positive": "Falso positivo",
+  "status.accepted_risk": "Riesgo aceptado",
+  "status.inherited": "heredado",
+
+  "phase.running": "ejecutando…",
+  "phase.pending": "en espera",
+  "phase.error": "error",
+  "phase.done": "completado",
+
+  "results.kicker": "Análisis",
+  "results.doneSubtitle": "Análisis completado. Empieza por las correcciones de código.",
+  "results.runningSubtitle": "Ejecutando las 4 fases en tiempo real…",
+  "results.degraded":
+    "Conexión inestable — el seguimiento sigue reintentando por su cuenta.",
+  "results.refreshNow": "Actualizar ahora",
+  "results.phasesFailed": "{n} fase(s) fallaron:",
+  "results.goToPhase": "Ver detalles",
+  "results.loadFailed": "No se pudo cargar el análisis.",
+  "results.progressLabel": "progreso",
+  "tab.overview": "Vista general",
+  "tab.fixes": "Correcciones",
+  "tab.deps": "Dependencias",
+  "tab.threats": "Amenazas",
+  "tab.skills": "Skills",
+  "tab.ariaLabel": "Secciones del análisis",
+
+  "fixes.searchPlaceholder": "Buscar por archivo, regla o CWE…",
+  "fixes.allSeverities": "Toda severidad",
+  "fixes.allSources": "Todo origen",
+  "fixes.sourceSast": "SAST",
+  "fixes.sourceAi": "Revisión IA",
+  "fixes.filterOpen": "Abiertos ({n})",
+  "fixes.filterResolved": "Resueltos ({n})",
+  "fixes.filterAll": "Todos",
+  "deps.installed": "instalada",
+  "deps.fixedIn": "corregida en",
+  "deps.manifestHint": "Archivo que edita la corrección",
+  "deps.fixWithAi": "Corregir con IA",
+  "deps.noFixedVersion":
+    "Todavía no hay una versión corregida publicada para este paquete — no hay nada que proponer sin inventarlo.",
+  "deps.noManifest":
+    "No se pudo identificar el archivo donde se declara la dependencia.",
+  "deps.selectPage": "Seleccionar las {n} de esta página",
+  "deps.selectAllFiltered": "Seleccionar todas las {n}",
+  "deps.fixSelected": "Corregir {n} con IA",
+  "deps.lockWarningWithCmd":
+    "La corrección modifica {manifest}; el archivo de lock ({lockfile}) NO se regenera automáticamente — ejecuta `{cmd}` e incluye el lock en el commit antes de fusionar.",
+  "deps.lockWarning":
+    "La corrección modifica {manifest}; el archivo de lock ({lockfile}) NO se regenera automáticamente — regenéralo con el gestor de paquetes del proyecto antes de fusionar.",
+  "fixes.selectPage": "Seleccionar las {n} de esta página",
+  "fixes.selectAllFiltered": "Seleccionar todas las {n}",
+  "fixes.clearAll": "Limpiar selección",
+  "fixes.selectedCount": "{n} de {total} seleccionadas",
+  "fixes.fixWithAi": "Corregir {n} con IA",
+  "fixes.showMore": "Mostrar {n} más de {total} restantes",
+  "fixes.emptyFilters": "Ningún hallazgo para los filtros actuales.",
+  "fixes.emptyResolved": "Todos los hallazgos de este análisis ya se resolvieron. 🎉",
+  "fixes.emptyNoResolved": "Aún no hay hallazgos resueltos.",
+  "fixes.empty": "No se encontró ninguna corrección de seguridad. 🎉",
+  "fixes.analyzing": "Analizando el código fuente…",
+  "fixes.noScanner":
+    "Ningún analizador de código se ejecutó. {reasons} Esto no significa que el repositorio esté limpio — significa que no fue analizado.",
+  "fixes.coverage":
+    "La revisión por IA leyó {reviewed} de {eligible} archivos elegibles (priorizando autenticación, rutas, base de datos y los archivos que SAST señaló). SAST y SCA analizaron el repositorio completo.",
+  "fixes.coverageTruncated": "{n} archivo(s) se truncaron por tamaño.",
+
+  "card.line": "línea {n}",
+  "card.technicalDetails": "Detalles técnicos",
+  "card.technicalHint": "Fragmento de código y texto original de la herramienta",
+  "card.technicalHintWithAttack":
+    "Ruta de ataque, fragmento de código y texto original de la herramienta",
+  "card.attackScenario": "Cómo se explotaría",
+  "card.originalText": "Texto original de la herramienta",
+  "card.howToFix": "Cómo corregir",
+  "card.suggestion": "Sugerencia de corrección",
+  "card.recommendation": "Recomendación",
+  "card.aiGenerated":
+    "Texto generado por IA a partir del repositorio analizado — verifícalo antes de tratarlo como veredicto de la herramienta.",
+  "card.confidenceMedium": "confianza media",
+  "card.confidenceMediumHint":
+    "La revisión por IA no tuvo certeza sobre este hallazgo. Verifícalo antes de actuar.",
+  "card.openOnGitHubHint":
+    "Abrir en GitHub (código actual del repositorio — puede haber cambiado desde el análisis)",
+  "filter.confidence": "Confianza",
+  "filter.confidenceAll": "Toda",
+  "filter.confidenceHigh": "Solo alta",
+  "filter.severity": "Severidad",
+  "filter.source": "Origen",
+  "filter.byStatus": "Filtrar por estado",
+  "card.fixWithAi": "Corregir con IA",
+  "card.viewFix": "Ver corrección",
+  "card.markFixed": "Ya lo corregí",
+  "card.markFalsePositive": "Falso positivo",
+  "card.reopen": "Reabrir",
+  "card.selectToFix": 'Seleccionar "{title}" para corregir',
+
+  "fix.title": "Corregir con IA",
+  "fix.problem": "El problema",
+  "fix.instructions": "Instrucciones para la IA (opcional)",
+  "fix.generate": "Generar corrección",
+  "fix.regenerate": "Rehacer con estas instrucciones",
+  "fix.regenerateHint":
+    "Rehacer consume una nueva llamada de IA — la corrección actual ya está guardada.",
+  "fix.confirmDiscard":
+    "Escribiste instrucciones y todavía no generaste la corrección. Cerrar ahora descarta lo que escribiste. ¿Cerrar de todos modos?",
+  "fix.generating": "Generando corrección con IA…",
+  "fix.whatChanged": "Qué cambió y por qué",
+  "fix.changesIn": "Cambios en {file}",
+  "fix.noChange":
+    "La IA no propuso ningún cambio en el código. Ajusta las instrucciones y rehaz, o trata este hallazgo manualmente. No se puede abrir un PR sin cambios.",
+  "fix.openPr": "Abrir PR en GitHub",
+  "fix.needRepo": "Indica la URL del repositorio en la Pantalla 1 para abrir un PR.",
+  "fix.prOpened": "PR #{number} abierto ({branch}).",
+  "fix.viewOnGithub": "Ver en GitHub",
+  "fix.multiFile":
+    "El agente modificó {n} archivos — todos entran en el mismo PR: {files}",
+  "fix.wholeFile":
+    "La IA recibió el archivo completo; el PR guarda el contenido íntegro.",
+  "fix.snippetOnly":
+    "La IA solo recibió el fragmento — no se pudo obtener el archivo completo.",
+  "fix.failed": "No se pudo generar la corrección.",
+  "fix.guide":
+    "Corrige solo este problema de seguridad, sin cambiar la lógica de negocio, manteniendo el estilo y la indentación del archivo.",
+  "fix.genericSuggestion": "Revisa el fragmento según la recomendación.",
+
+  "diff.showAll": "Mostrar todo",
+  "diff.onlyChanges": "Solo lo que cambió",
+  "diff.fullFile": "Archivo completo",
+  "diff.viewDiff": "Ver diff",
+  "diff.noChange": "ningún cambio",
+  "diff.unchangedLines": "{n} líneas sin cambios",
+
+  "onb.kicker": "Nuevo análisis",
+  "onb.title": "Vamos a analizar tu proyecto",
+  "onb.subtitle":
+    "Describe el sistema y pulsa iniciar — StarGuard se encarga de las 4 fases.",
+  "onb.phases": "Las 4 fases",
+  "onb.projectName": "Nombre del proyecto",
+  "onb.projectPlaceholder": "Ej.: Portal del Paciente",
+  "onb.optional": "Repositorio y skills",
+  "onb.optionalHint": "Opcional — conecta GitHub y envía skills para validar",
+  "onb.submit": "Iniciar análisis",
+  "onb.failed": "No se pudo iniciar el análisis.",
+  "phase1.label": "Amenazas",
+  "phase1.desc":
+    "Fase 1 · Modela amenazas y requisitos de seguridad a partir de tu contexto.",
+  "phase2.label": "Skills",
+  "phase2.desc": "Fase 2 · Valida skills/prompts contra inyección y exfiltración.",
+  "phase3.label": "Software",
+  "phase3.desc":
+    "Fase 3 · SAST + SCA sobre el repositorio, priorizados por severidad.",
+  "phase4.label": "Corrección",
+  "phase4.desc": "Fase 4 · Genera la corrección y abre el Pull Request en GitHub.",
+
+  "threatInput.label": "Contexto del sistema",
+  "threatInput.help": "Qué describir aquí",
+  "threatInput.helpText":
+    "Pega la descripción del sistema, notas de reunión o requisitos de cumplimiento. Este texto se convierte en contexto para las 4 fases: amenazas, validación de skills, escaneo y corrección. Ej.: datos sensibles, flujos de inicio de sesión, integraciones de pago y reglas de negocio.",
+  "threatInput.placeholder":
+    "Ej.: API de telemedicina que almacena datos de salud (RGPD/LGPD). Inicio de sesión por correo y contraseña, historias clínicas por paciente, pago con tarjeta (PCI). Un médico solo accede a pacientes de su clínica…",
+
+  "repo.label": "Repositorio de GitHub",
+  "repo.help": "URL del repositorio",
+  "repo.helpText":
+    "Solo se acepta github.com (lista blanca anti-SSRF). Sin repositorio, la Fase 3 (escaneo de código) no se ejecuta — las demás fases siguen con normalidad.",
+  "repo.placeholder": "https://github.com/starbridge/mi-proyecto",
+  "repo.invalid":
+    "URL no válida. Usa el formato https://github.com/propietario/repositorio — solo se acepta github.com.",
+  "repo.tokenLabel": "Token de acceso",
+  "repo.tokenHelp": "Personal Access Token",
+  "repo.tokenHelpText":
+    "Necesario solo para repositorios privados. El token vive únicamente en memoria durante el trabajo y nunca se persiste ni se devuelve al cliente.",
+  "repo.tokenPlaceholder": "ghp_… (opcional)",
+
+  "tokenPicker.help": "Token de GitHub",
+  "tokenPicker.helpText":
+    "Necesario solo para repositorios privados / abrir un PR. Elige un token guardado (cifrado en tu cuenta) o escribe uno nuevo. Un token nuevo puede guardarse en la cuenta para reutilizarlo — siempre cifrado, nunca en texto plano.",
+  "tokenPicker.none": "Ninguno (repositorio público)",
+  "tokenPicker.new": "+ Nuevo token…",
+  "tokenPicker.saveToAccount": "Guardar en la cuenta (cifrado)",
+  "tokenPicker.namePlaceholder": "Nombre del token (ej.: PAT personal)",
+
+  "skillInput.label": "Skills a validar",
+  "skillInput.help": "Validación de skills",
+  "skillInput.helpText":
+    "Envía SKILL.md, prompts o plantillas para que la Fase 2 verifique prompt injection, exfiltración de datos y evasión de política. Opcional.",
+  "skillInput.namePlaceholder": "nombre-de-la-skill.md",
+  "skillInput.contentPlaceholder":
+    "Pega el contenido de la skill/prompt (SKILL.md, plantilla…)",
+  "skillInput.remove": "Quitar skill",
+  "skillInput.add": "+ Añadir skill",
+  "skillInput.upload": "Subir archivos",
+
+  "list.historyKicker": "Historial",
+  "list.analysesTitle": "Análisis",
+  "list.analysesSubtitle":
+    "Tus análisis de seguridad, del más reciente al más antiguo.",
+  "list.searchAnalyses": "Buscar por proyecto o repositorio…",
+  "list.colProject": "Proyecto",
+  "list.colSeverities": "Severidades",
+  "list.colFindings": "Hallazgos",
+  "list.colStatus": "Estado",
+  "list.colCreated": "Creado",
+  "list.empty": "Todavía no hay análisis.",
+  "list.startFirst": "Inicia el primero",
+  "list.loadFailed": "No se pudieron cargar los análisis.",
+  "list.prs": "{n} PR(s)",
+  "list.openRepo": "Abrir repositorio",
+
+  "newUser.title": "Nuevo usuario",
+  "newUser.subtitle": "Define el acceso y el rol de la nueva cuenta.",
+  "newUser.help": "Crear usuario",
+  "newUser.helpText":
+    "El usuario entra con el correo y la contraseña definidos aquí. El superadmin lo ve todo de todos; el admin solo ve su propio historial. La contraseña se guarda con hash Argon2id.",
+  "newUser.name": "Nombre",
+  "newUser.namePlaceholder": "Ej.: María Silva",
+  "newUser.email": "Correo electrónico",
+  "newUser.emailPlaceholder": "persona@empresa.com",
+  "newUser.password": "Contraseña",
+  "newUser.passwordPlaceholder": "mínimo 8 caracteres",
+  "newUser.passwordTooShort": "La contraseña necesita al menos 8 caracteres.",
+  "newUser.role": "Rol",
+  "newUser.roleAdminSub": "Solo ve su propio historial",
+  "newUser.roleSuperadminSub": "Lo ve todo de todos",
+  "newUser.submit": "Crear usuario",
+  "newUser.failed": "No se pudo crear el usuario.",
+  "newUser.confirmDiscard":
+    "Rellenaste el formulario y todavía no creaste el usuario. Cerrar ahora descarta lo que escribiste. ¿Cerrar de todos modos?",
+
+  "pipe.ariaLabel": "Progreso de las 4 fases",
+  "pipe.status.pending": "En espera",
+  "pipe.status.running": "Ejecutando",
+  "pipe.status.done": "Completado",
+  "pipe.status.error": "Error",
+  "pipe.plan.short": "Amenazas",
+  "pipe.plan.phase": "Fase 1 · Plan",
+  "pipe.plan.desc":
+    "Modela amenazas y deriva requisitos de seguridad a partir del contexto del sistema.",
+  "pipe.skills.short": "Skills",
+  "pipe.skills.phase": "Fase 2 · Code",
+  "pipe.skills.desc":
+    "Valida skills/prompts contra prompt injection, exfiltración y evasión de política.",
+  "pipe.software.short": "Software",
+  "pipe.software.phase": "Fase 3 · Code",
+  "pipe.software.desc":
+    "Ejecuta SAST + SCA sobre el repositorio y prioriza los hallazgos por severidad.",
+  "pipe.refactor.short": "Corrección",
+  "pipe.refactor.phase": "Fase 4 · Refactor",
+  "pipe.refactor.desc":
+    "Corrección del código y apertura del Pull Request, bajo demanda por hallazgo.",
+
+  "metric.threats": "amenazas",
+  "metric.requirements": "requisitos",
+  "metric.skills": "skills",
+  "metric.rejected": "rechazadas",
+  "metric.sast": "SAST",
+  "metric.ai": "IA",
+  "metric.sca": "SCA",
+  "metric.fixes": "correcciones",
+  "metric.prs": "PRs",
+
+  "pr.tokenRequired": "Elige el token de GitHub",
+  "pr.tokenPrivateHint":
+    "Este repositorio es privado, así que el PR debe abrirse con un token tuyo.",
+  "pr.savedTokens": "Tokens guardados",
+  "pr.newToken": "+ Usar un token nuevo…",
+  "pr.retryWithToken": "Abrir PR con este token",
+  "pr.tokenScopeHint":
+    "Necesita permiso de escritura. Un repositorio público usa el token del servidor automáticamente.",
+  "pr.kicker": "Correcciones enviadas",
+  "pr.subtitle": "PRs de corrección que abriste a partir de los análisis.",
+  "pr.empty":
+    "Todavía no abriste ningún Pull Request. Genera correcciones en un análisis y abre un PR — aparecerá aquí.",
+  "pr.loadFailed": "No se pudieron cargar los Pull Requests.",
+  "pr.colRepo": "Repositorio",
+  "pr.colFiles": "Archivos",
+  "pr.colOpened": "Abierto",
+  "pr.viewAnalysis": "Análisis",
+  "pr.openOnGithub": "Abrir en GitHub",
+  "pr.fixTitle": "Corrección de seguridad: {title}",
+  "pr.batchTitle": "Correcciones de seguridad StarGuard ({n})",
+  "pr.batchIntro":
+    "Correcciones de seguridad generadas por StarGuard ({findings} hallazgo(s) en {files} archivo(s)).",
+  "pr.changedFiles": "Archivos modificados: {files}",
+  "pr.reviewBeforeMerge": "Revisa cada cambio antes de fusionar.",
+
+  "export.label": "Exportar",
+  "export.needScan": "La Fase 3 (escaneo) todavía no produjo hallazgos para exportar.",
+  "export.sarif": "SARIF 2.1.0",
+  "export.sarifSub": "Se sube directo a GitHub Code Scanning",
+  "export.csv": "CSV",
+  "export.csvSub": "Hoja de cálculo (Excel, Sheets)",
+  "export.json": "JSON",
+  "export.jsonSub": "Datos crudos para pipelines",
+  "csv.id": "id",
+  "csv.source": "origen",
+  "csv.severity": "severidad",
+  "csv.rule": "regla",
+  "csv.cwe": "cwe",
+  "csv.owasp": "owasp",
+  "csv.file": "archivo",
+  "csv.line": "linea",
+  "csv.title": "titulo",
+  "csv.description": "descripcion",
+  "csv.howToFix": "como_corregir",
+  "export.depUpgradeTo": "Actualizar a {version}",
+  "export.depNoFix": "Sin corrección publicada",
+  "export.depUpgradeHelp": "Actualiza {pkg} a {version} o superior.",
+  "export.depNoFixHelp": "No hay versión corregida publicada para {pkg}.",
+  "list.delete": "Eliminar",
+  "list.deleteOf": "Eliminar el análisis {name}",
+  "list.deleteConfirm":
+    "¿Eliminar el análisis “{name}”? Sale de tu lista; los hallazgos y la traza de auditoría se conservan.",
+  "list.deleteFailed": "No se pudo eliminar el análisis.",
+  "filter.all": "Todos",
+  "filter.done": "Completados",
+  "filter.running": "En ejecución",
+  "filter.error": "Error",
+  "filter.queued": "En cola",
+  "filter.anyDate": "Cualquier fecha",
+  "filter.today": "Hoy",
+  "filter.last7": "Últimos 7 días",
+  "filter.last30": "Últimos 30 días",
+  "filter.period": "Periodo",
+  "filter.from": "Desde",
+  "filter.to": "Hasta",
+  "filter.since": "desde {date}",
+  "filter.until": "hasta {date}",
+  "filter.search": "Buscar…",
+  "filter.clearSearch": "Limpiar búsqueda",
+  "filter.allUsers": "Todos los usuarios",
+  "filter.filterUsers": "Filtrar usuarios…",
+  "filter.noUsers": "Ningún usuario.",
+
+  "batch.title": "Corregir en lote",
+  "batch.whatHappens": "Qué va a pasar",
+  "batch.plan":
+    "{findings} hallazgo(s) en {files} archivo(s) ⇒ {calls} llamada(s) de IA.",
+  "batch.grouped":
+    "Los hallazgos del mismo archivo se corrigen juntos, en una sola llamada.",
+  "batch.costHint":
+    "Cada llamada consume tokens del proveedor configurado. Con el motor de agente, cada una también clona el repositorio — lo que lleva algunos minutos por archivo.",
+  "batch.start": "Generar {n} corrección(es)",
+  "batch.generating": "Generando correcciones… {done}/{total}",
+  "batch.summary": "{done} lista(s) de {total}",
+  "batch.cancel": "Cancelar generación",
+  "batch.cancelHint": "Lo que ya está listo permanece guardado.",
+  "batch.confirmClose":
+    "Las correcciones todavía se están generando. Cerrar ahora cancela lo que falta. ¿Continuar?",
+  "batch.statusQueued": "En cola",
+  "batch.statusRunning": "Generando…",
+  "batch.statusDone": "Lista",
+  "batch.statusError": "Error",
+  "batch.statusCancelled": "Cancelada",
+  "batch.groupedWith":
+    "Corregida junto a {n} hallazgo(s) más de este mismo archivo, en un único cambio.",
+  "batch.noChangeItem":
+    "La IA no propuso cambios en este archivo — queda fuera del PR.",
+  "batch.noChangeCount":
+    "{n} archivo(s) sin cambios propuestos por la IA — no entran en el PR.",
+  "batch.openPr": "Abrir 1 PR con {n} archivo(s)",
+  "batch.waiting": "Espera a que terminen las correcciones…",
+  "batch.prOpened": "PR #{number} abierto con {files} archivo(s).",
+  "batch.nFindings": "{n} hallazgo(s)",
+  "batch.nFiles": "{n} archivo(s)",
+  "batch.genFailed": "No se pudo generar.",
+  "batch.prFailed": "No se pudo abrir el PR.",
+
+  "help.overview": "Vista general",
+  "help.overviewText":
+    "Resumen de lo que encontró el análisis. Empieza por las correcciones de código — es donde resuelves los problemas y abres un PR.",
+  "help.fixes": "Correcciones de seguridad",
+  "help.fixesText":
+    "Reúne las vulnerabilidades del escáner (SAST) y los hallazgos de la revisión por IA (regla de negocio, IDOR/autorización, lógica multiarchivo). Los hallazgos de la IA que repetirían uno de SAST se descartan. Selecciona lo que quieras resolver y genera correcciones con IA — cada una puede convertirse en un Pull Request.",
+  "help.batch": "Corrección en lote",
+  "help.batchText":
+    "Selecciona los hallazgos y genera las correcciones de una vez. Al final abres un único Pull Request con todas. O usa “Corregir con IA” en cada tarjeta para una sola.",
+  "help.deps": "Dependencias (SCA)",
+  "help.depsText":
+    "Paquetes con CVE conocido detectados por el análisis de composición de software. La corrección es actualizar a la versión corregida indicada.",
+  "help.threats": "Modelado de amenazas",
+  "help.threatsText":
+    "La IA analiza el contexto del sistema y plantea amenazas plausibles (STRIDE, RGPD/LGPD, OWASP) y los requisitos técnicos que las mitigan.",
+  "help.skills": "Validación de skills",
+  "help.skillsText":
+    "Cada skill/prompt se comprueba contra prompt injection, exfiltración de datos y evasión de política. El veredicto indica si es seguro usarla.",
+  "help.batchModal": "Cómo funciona",
+  "help.batchModalText":
+    "Los hallazgos se agrupan por archivo: cada archivo recibe UNA corrección que resuelve todos sus problemas de una vez — así una corrección no sobrescribe a otra. Al final abres un único Pull Request con todos los archivos.",
+  "help.customizeFix": "Personaliza la corrección",
+  "help.customizeFixText":
+    "Orienta a la IA: qué biblioteca usar, mantener la firma de una función, seguir un patrón del proyecto, etc. La IA recibe el archivo completo más el contexto del error y corrige solo el problema de seguridad, sin cambiar la lógica de negocio.",
+  "fix.instructionsPlaceholder":
+    "Ej.: usa consultas parametrizadas del driver pg, mantén la firma de la función y el estilo del archivo. No modifiques las demás rutas.",
+
+  "results.done": "Análisis completado.",
+  "results.inProgress": "Análisis en curso…",
+  "results.sections": "Secciones",
+  "results.bySeverity": "Hallazgos por severidad",
+  "results.ctaTitle": "{n} corrección(es) de seguridad por aplicar",
+  "results.ctaSub":
+    "{n} crítica(s). Genera correcciones con IA y abre un Pull Request.",
+  "results.goToFixes": "Ir a las correcciones",
+  "results.rowFixes": "Correcciones de seguridad",
+  "results.rowDeps": "Dependencias (SCA)",
+  "results.rowThreats": "Amenazas",
+  "results.rowSkills": "Skills",
+  "results.nFixes": "{n} corrección(es)",
+  "results.nCves": "{n} con CVE",
+  "results.nThreats": "{threats} amenazas · {reqs} requisitos",
+  "results.nSkills": "{n} validada(s)",
+  "results.selectItems": "Selecciona los elementos y aplica correcciones con IA.",
+  "results.includesAi": "Incluye {n} hallazgo(s) de la revisión por IA.",
+  "results.waitingPrevious": "Esperando a las fases anteriores…",
+  "results.phaseFailed": "Esta fase falló.",
+  "results.newAnalysisLink": "← Nuevo análisis",
+
+  "deps.title": "Dependencias · SCA",
+  "deps.subtitle": "Paquetes vulnerables y la versión que los corrige.",
+  "deps.scanning": "Escaneando las dependencias…",
+  "deps.empty": "No se encontraron dependencias vulnerables. 🎉",
+  "deps.notRun": "El SCA ({engine}) no se ejecutó.",
+  "deps.notRunHint": "Las dependencias no fueron verificadas.",
+
+  "threats.modeling": "Modelando las amenazas…",
+  "threats.requirements": "Requisitos técnicos de seguridad",
+  "unverified.title": "Reglas declaradas que no se pudieron verificar",
+
+  "skills.subtitle": "Seguridad de las skills/prompts enviados.",
+  "skills.validating": "Validando las skills…",
+  "skills.empty": "Ninguna skill enviada para validación.",
+  "skills.verdictApproved": "Validada",
+  "skills.verdictReview": "Requiere revisión",
+  "skills.verdictRejected": "Rechazada",
+
+  "fixes.noScannerTitle": "Ningún analizador de código se ejecutó.",
+  "card.businessRule": "Regla de negocio",
+
+  "job.orphan":
+    "El análisis se interrumpió antes de empezar (el servidor se reinició). Ejecútalo de nuevo — no se perdió nada en el repositorio.",
+  "job.stale":
+    "El análisis no dio señales de vida durante demasiado tiempo y se dio por terminado (probable reinicio del servidor durante el procesamiento).",
+  "job.phaseFailed": "Falla en la etapa.",
+  "job.unexpected": "Falla inesperada en el análisis.",
+  "scan.noRepo": "No se indicó ningún repositorio.",
+  "scan.sastOff": "SAST desactivado por configuración (SAST_ENGINE=none).",
+  "scan.scaOff": "SCA desactivado por configuración (SCA_ENGINE=none).",
+  "scan.sastNotRun": "El SAST ({engine}) no se ejecutó.",
+
+  "depExplain.title": "Dependencia vulnerable: {pkg}",
+  "depExplain.whatItIs":
+    "La versión en uso ({version}) tiene una vulnerabilidad conocida, registrada como {cve}.",
+  "depExplain.whyItMatters":
+    "El código de terceros se ejecuta con los mismos privilegios que el tuyo. Una vulnerabilidad con CVE público ya tiene un exploit conocido y los escáneres automáticos la buscan.",
+  "depExplain.howToFix":
+    "Actualiza `{pkg}` a {version} o superior. Si es una dependencia transitiva, fuerza la resolución en el lockfile.",
+  "depExplain.noFixedVersion":
+    "Todavía no hay versión corregida. Evalúa reemplazar la dependencia, aislar su uso o seguir el avance de {cve}.",
+
+  "skillCheck.scope": "Declara un objetivo/alcance",
+  "skillCheck.noExfiltration": "Sin instrucciones de exfiltración de datos",
+  "skillCheck.noPolicyBypass": "Sin intento de evasión de política",
+  "skillCheck.noCommandExec": "Sin ejecución de comandos externos",
+  "skillFinding.heuristicDesc":
+    'Patrón sospechoso detectado por heurística: "{match}".',
+  "skillFinding.promptInjection.title":
+    "Instrucción de anulación de política (prompt injection)",
+  "skillFinding.promptInjection.fix":
+    "Elimina las instrucciones que piden al modelo ignorar las reglas del sistema; las skills no deben anular la política.",
+  "skillFinding.dataExfiltration.title": "Posible exfiltración de datos/secretos",
+  "skillFinding.dataExfiltration.fix":
+    "Prohíbe la lectura de secretos y las llamadas de red dentro de las skills; aplica una lista blanca de operaciones.",
+  "skillFinding.backdoor.title": "Ejecución de código/comandos incrustada",
+  "skillFinding.backdoor.fix":
+    "Las skills no deben ejecutar comandos ni evaluar código arbitrario. Elimina el fragmento.",
+  "skillFinding.policyBypass.title": "Intento de evasión de política",
+  "skillFinding.policyBypass.fix":
+    "Elimina el lenguaje que intenta desactivar las salvaguardas del modelo.",
+  "skillFinding.aiTitle": "Hallazgo de la IA",
+  "skillFinding.aiRecommendation": "Revisa el fragmento señalado.",
+
+  "err.unauthenticated": "Sesión expirada. Vuelve a iniciar sesión.",
+  "err.forbidden": "No tienes permiso para esta acción.",
+  "err.notFound": "No encontrado.",
+  "err.conflict": "Conflicto con un registro existente.",
+  "err.tooManyRequests": "Demasiadas solicitudes. Espera unos instantes.",
+  "err.server": "Error en el servidor. Inténtalo de nuevo.",
+  "err.githubTokenRequired":
+    "Indica un token de GitHub con permiso de escritura para abrir el pull request.",
+  "err.schemaOutdated":
+    "La base de datos está desactualizada respecto a la aplicación. Avisa a quien la administra: faltan migraciones.",
+  "err.badRequest": "Datos no válidos.",
+  "err.network": "Sin conexión con el servidor.",
+  "err.csrf": "Token CSRF no válido.",
+  "err.emailTaken": "Ya existe un usuario con este correo.",
+  "err.currentPasswordRequired":
+    "Indica la contraseña actual para cambiar el correo o la contraseña.",
+  "err.wrongCurrentPassword": "La contraseña actual es incorrecta.",
+  "err.cannotChangeOwnRole": "No se puede cambiar el propio rol.",
+  "err.cannotDeleteOwnAccount": "No se puede eliminar la propia cuenta.",
+  "err.badExportFormat": "Formato no válido. Usa sarif, csv o json.",
+  "err.threatModelFailed": "No se pudo generar el modelado de amenazas.",
+  "err.skillsValidationFailed": "No se pudieron validar las skills.",
+
+  "report.title": "Resumen ejecutivo",
+  "report.docTitle": "StarGuard — Informe de Seguridad",
+  "report.project": "Proyecto",
+  "report.back": "Volver",
+  "report.print": "Exportar / Imprimir",
+  "report.bySeverity": "Vulnerabilidades por severidad",
+  "report.requirements": "Requisitos técnicos de seguridad (Fase 1)",
+  "report.skills": "Validación de skills (Fase 2)",
+  "report.skillRejected": "Rechazada",
+  "report.skillReview": "Revisar",
+  "report.skillApproved": "Validada",
+  "report.findingCount": "{n} hallazgo(s)",
+  "report.noSkills": "Ninguna skill validada en este análisis.",
+  "report.findings": "Hallazgos de seguridad (Fase 3)",
+  "report.noFindings": "Sin hallazgos de código/dependencias.",
+  "report.fixedIn": "corrige en {v}",
+  "report.aiReview": "Revisión por IA · reglas de negocio (Fase 3)",
+  "report.noExtraFindings": "Sin hallazgos adicionales más allá de SAST/SCA.",
+  "report.reviewNotRun": "La revisión por IA no se ejecutó.",
+  "report.fixes": "Correcciones aplicadas (Fase 4)",
+  "report.fixesOnDemand":
+    "Las correcciones se generan bajo demanda, hallazgo a hallazgo, en la pantalla de resultados — ninguna se genera automáticamente.",
+  "report.footer": "Generado por StarGuard · Copiloto de Seguridad",
+  "report.metaAnalysis": "Análisis",
+  "report.metaRunAt": "Ejecutado el",
+  "report.metaPrintedAt": "Emitido el",
+  "report.metaEngines": "Motores",
+  "report.loadFailed": "No se pudo cargar el informe.",
+
+  "auditEvent.login.success": "Inicio de sesión",
+  "auditEvent.login.fail": "Inicio de sesión fallido",
+  "auditEvent.login.ratelimited": "Inicio de sesión bloqueado (límite)",
+  "auditEvent.logout": "Cierre de sesión",
+  "auditEvent.token.refresh": "Sesión renovada",
+  "auditEvent.session.revoked": "Sesiones revocadas",
+  "auditEvent.analyze.start": "Análisis iniciado",
+  "auditEvent.finding.status": "Hallazgo actualizado",
+  "auditEvent.fix.generate": "Corrección generada",
+  "auditEvent.fix.cached": "Corrección reutilizada",
+  "auditEvent.analyze.done": "Análisis completado",
+  "auditEvent.analysis.delete": "Análisis eliminado",
+  "auditEvent.analysis.export": "Hallazgos exportados",
+  "auditEvent.pr.open": "PR abierto",
+  "auditEvent.pr.batch": "PR en lote",
+  "auditEvent.token.create": "Token creado",
+  "auditEvent.token.delete": "Token eliminado",
+  "auditEvent.account.update": "Cuenta actualizada",
+  "auditEvent.user.create": "Usuario creado",
+  "auditEvent.user.role.update": "Rol cambiado",
+  "auditEvent.user.delete": "Usuario eliminado",
+
+  "monitoring.subtitle":
+    "Traza de auditoría de todo lo que ocurre en la plataforma.",
+  "monitoring.searchPlaceholder": "Buscar por evento o detalle…",
+  "monitoring.category": "Categoría",
+  "monitoring.empty": "Ningún registro para los filtros actuales.",
+  "monitoring.colWhen": "Cuándo",
+  "monitoring.colEvent": "Evento",
+  "monitoring.colDetail": "Detalle",
+  "monitoring.colOrigin": "Origen",
+  "monitoring.loadFailed": "No se pudieron cargar los registros.",
+  "auditCategory.auth": "Autenticación",
+  "auditCategory.analise": "Análisis",
+  "auditCategory.pr": "Pull Requests",
+  "auditCategory.conta": "Cuenta",
+  "auditCategory.usuario": "Usuarios",
+  "auditCategory.sistema": "Sistema",
+  "adminAnalyses.subtitle": "Todos los análisis de todos los usuarios.",
+  "adminAnalyses.empty": "No se encontró ningún análisis.",
+
+  "adminUsers.subtitle": "Todas las cuentas — gestiona roles y accesos.",
+  "adminUsers.searchPlaceholder": "Buscar por nombre o correo…",
+  "adminUsers.empty": "No se encontró ningún usuario.",
+  "adminUsers.colUser": "Usuario",
+  "adminUsers.colPrs": "PRs",
+  "adminUsers.colLastActivity": "Última actividad",
+  "adminUsers.you": "tú",
+  "adminUsers.deleteUser": "Eliminar usuario",
+  "adminUsers.cannotDeleteSelf": "No puedes eliminarte a ti mismo",
+  "adminUsers.deleteConfirm":
+    "¿Eliminar \"{name}\"? La cuenta se desactiva (soft delete) y la persona ya no podrá entrar. Sus análisis permanecen en el historial.",
+  "adminUsers.loadFailed": "No se pudieron cargar los usuarios.",
+  "adminUsers.roleFailed": "No se pudo cambiar el rol.",
+  "adminUsers.deleteFailed": "No se pudo eliminar el usuario.",
+
+  "admin.dashTitle": "Panel global",
+  "admin.dashSubtitle":
+    "Vista consolidada de todos los usuarios, análisis y correcciones.",
+  "admin.metricsFailed": "No se pudieron cargar las métricas.",
+  "admin.last7d": "en los últimos 7 días",
+  "admin.running": "en curso",
+  "admin.doneCount": "completados",
+  "admin.errorCount": "con error",
+  "admin.sumOfAll": "Suma de todos los análisis.",
+  "admin.noFindings": "Todavía no hay hallazgos registrados.",
+  "admin.usersHint": "{n} cuenta(s) — ver métricas por usuario",
+  "admin.analysesHint": "{n} análisis de todos los usuarios",
+
+  "account.kicker": "Configuración",
+  "account.subtitle": "Tus datos de acceso y los tokens de GitHub.",
+  "account.basics": "Datos básicos",
+  "account.name": "Nombre",
+  "account.login": "Usuario (correo)",
+  "account.loginHelp": "Cambiar el usuario",
+  "account.loginHelpText":
+    "Este correo es tu usuario. Para cambiarlo, confirma con la contraseña actual. Los próximos inicios de sesión usan el nuevo correo.",
+  "account.currentPasswordToConfirm":
+    "Contraseña actual (para confirmar el nuevo usuario)",
+  "account.currentPasswordPlaceholder": "tu contraseña actual",
+  "account.saveProfile": "Guardar datos",
+  "account.changePassword": "Cambiar contraseña",
+  "account.currentPassword": "Contraseña actual",
+  "account.newPassword": "Nueva contraseña",
+  "account.confirmNewPassword": "Confirmar nueva contraseña",
+  "account.min8": "mínimo 8 caracteres",
+  "account.tokens": "Tokens de GitHub",
+  "account.tokensHelp": "Tokens cifrados",
+  "account.tokensHelpText":
+    "Los tokens se guardan cifrados (AES-256-GCM) y nunca vuelven en texto plano. Solo mostramos el nombre y los últimos 4 caracteres. Puedes tener varios y elegir cuál usar al iniciar un análisis.",
+  "account.tokensHint":
+    "Guardados cifrados; se usan para clonar repositorios privados y abrir PRs.",
+  "account.token": "Token",
+  "account.tokenNamePlaceholder": "Ej.: PAT personal",
+  "account.tokenPlaceholder": "ghp_…",
+  "account.save": "Guardar",
+  "account.noTokens": "Todavía no hay tokens guardados.",
+  "account.createdAt": "Creado",
+  "account.lastUsed": "Último uso",
+  "account.remove": "Quitar",
+  "account.nothingToUpdate": "Nada que actualizar.",
+  "account.needCurrentPassword":
+    "Indica la contraseña actual para cambiar el usuario (correo).",
+  "account.profileUpdated": "Datos actualizados.",
+  "account.updateFailed": "No se pudo actualizar.",
+  "account.enterCurrentPassword": "Indica la contraseña actual.",
+  "account.newPasswordTooShort":
+    "La nueva contraseña necesita al menos 8 caracteres.",
+  "account.confirmMismatch": "La confirmación no coincide.",
+  "account.passwordChanged": "Contraseña cambiada correctamente.",
+  "account.changePasswordFailed": "No se pudo cambiar la contraseña.",
+  "account.tokenSaved": "Token guardado de forma segura (cifrado).",
+  "account.saveTokenFailed": "No se pudo guardar el token.",
+  "account.removeTokenConfirm":
+    "¿Quitar este token? Los análisis futuros ya no podrán usarlo.",
+  "account.removeTokenFailed": "No se pudo quitar el token.",
+  "account.loadTokensFailed": "No se pudieron cargar los tokens.",
+  "account.language": "Idioma de la interfaz",
+  "account.languageHint":
+    "Vale para la interfaz y para los textos generados por IA en los próximos análisis.",
+};
+
+export const MESSAGES: Record<Locale, Record<MessageKey, string>> = {
   "pt-BR": PT_BR,
   en: EN,
+  es: ES,
 };

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 import { I18nProvider } from "@/lib/i18n";
+import { translate } from "@/lib/i18n/translate";
 import { getLocale } from "@/lib/i18n/server";
 
 const inter = Inter({
@@ -17,11 +18,16 @@ const poppins = Poppins({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "StarGuard | Copilot de Segurança",
-  description:
-    "Plataforma de segurança assistida por IA para desenvolvimento seguro de software — DevSecOps ponta a ponta, headless e AI-native.",
-};
+// Título e descrição eram constantes em português: a aba do navegador, o
+// histórico e o cartão de compartilhamento ignoravam o idioma escolhido.
+// `generateMetadata` roda por requisição e lê o mesmo cookie que o `<html lang>`.
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  return {
+    title: translate(locale, "meta.title"),
+    description: translate(locale, "meta.description"),
+  };
+}
 
 // Aplica o tema salvo antes da hidratação para evitar flash.
 const themeInitScript = `

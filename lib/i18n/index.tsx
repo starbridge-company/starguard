@@ -8,27 +8,13 @@ import {
   normalizeLocale,
   type Locale,
 } from "./config";
-import { MESSAGES, PT_BR, type MessageKey } from "./messages";
+import { PT_BR, type MessageKey } from "./messages";
+// A tradução em si mora num módulo PURO: o servidor também precisa dela e não
+// pode importar nada daqui (este arquivo é "use client"). Ver ./translate.ts.
+import { translate, type Values } from "./translate";
 
-export type Values = Record<string, string | number>;
-
-/** Substitui `{chave}` pelos valores informados. */
-function interpolate(template: string, values?: Values): string {
-  if (!values) return template;
-  return template.replace(/\{(\w+)\}/g, (m, k) =>
-    k in values ? String(values[k]) : m
-  );
-}
-
-export function translate(
-  locale: Locale,
-  key: MessageKey,
-  values?: Values
-): string {
-  // Português é a referência; inglês incompleto cai nele em vez de sumir.
-  const raw = MESSAGES[locale]?.[key] ?? PT_BR[key] ?? key;
-  return interpolate(raw, values);
-}
+export type { Values };
+export { translate };
 
 interface Ctx {
   locale: Locale;

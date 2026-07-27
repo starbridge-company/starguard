@@ -18,6 +18,7 @@ import "server-only";
 import { runAI, extractJSON } from "@/lib/ai";
 import { lookupCatalog } from "@/lib/catalog";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
+import { translate } from "@/lib/i18n/translate";
 import type { FindingExplain, Vulnerability, DependencyVuln } from "@/types";
 
 /** Teto de regras distintas enviadas à IA numa passada. */
@@ -55,38 +56,30 @@ function ruleKeyOf(v: Vulnerability): string {
  * por template, no idioma do sistema, com custo zero.
  * Ver AUDITORIA.md#PEND-15.
  */
+// Um `pt ? … : …` ternário não estica para três idiomas sem virar sopa: as
+// frases passam a sair do dicionário, com os dados do Trivy interpolados.
 export function enrichDependencies(
   deps: DependencyVuln[],
   locale: Locale = DEFAULT_LOCALE
 ): DependencyVuln[] {
-  const pt = locale === "pt-BR";
-  return deps.map((d) => {
-    const versao = `${d.package}@${d.installedVersion}`;
-    const howToFix = d.fixedVersion
-      ? pt
-        ? `Atualize \`${d.package}\` para ${d.fixedVersion} ou superior. Se for dependência transitiva, force a resolução no lockfile.`
-        : `Upgrade \`${d.package}\` to ${d.fixedVersion} or later. If it is a transitive dependency, force the resolution in the lockfile.`
-      : pt
-        ? `Ainda não há versão corrigida. Avalie substituir a dependência, isolar o uso dela, ou acompanhar o avanço do ${d.cve}.`
-        : `No fixed version yet. Consider replacing the dependency, isolating its use, or tracking progress on ${d.cve}.`;
-
-    return {
-      ...d,
-      explain: {
-        title: pt
-          ? `Dependência vulnerável: ${d.package}`
-          : `Vulnerable dependency: ${d.package}`,
-        whatItIs: pt
-          ? `A versão em uso (${versao}) tem uma vulnerabilidade conhecida, registrada como ${d.cve}.`
-          : `The version in use (${versao}) has a known vulnerability, tracked as ${d.cve}.`,
-        whyItMatters: pt
-          ? "Código de terceiro roda com os mesmos privilégios do seu. Vulnerabilidade com CVE público já tem exploit conhecido e varredores automáticos procuram por ela."
-          : "Third-party code runs with the same privileges as yours. A vulnerability with a public CVE already has a known exploit, and automated scanners look for it.",
-        howToFix,
-        source: "catalog",
-      },
-    };
-  });
+  return deps.map((d) => ({
+    ...d,
+    explain: {
+      title: translate(locale, "depExplain.title", { pkg: d.package }),
+      whatItIs: translate(locale, "depExplain.whatItIs", {
+        version: `${d.package}@${d.installedVersion}`,
+        cve: d.cve,
+      }),
+      whyItMatters: translate(locale, "depExplain.whyItMatters"),
+      howToFix: d.fixedVersion
+        ? translate(locale, "depExplain.howToFix", {
+            pkg: d.package,
+            version: d.fixedVersion,
+          })
+        : translate(locale, "depExplain.noFixedVersion", { cve: d.cve }),
+      source: "catalog",
+    },
+  }));
 }
 
 /**

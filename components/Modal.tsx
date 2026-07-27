@@ -8,6 +8,7 @@
 // correção que custou minutos e dinheiro. Ver AUDITORIA.md#UX-03 e #UX-04.
 // ============================================================
 import { useCallback, useEffect, useId, useRef } from "react";
+import { useT } from "@/lib/i18n";
 import { IconX } from "@/lib/icons";
 
 const FOCUSABLE =
@@ -32,6 +33,7 @@ export default function Modal({
   confirmClose?: () => string | null;
   locked?: boolean;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -115,7 +117,7 @@ export default function Modal({
           <button
             className="modal-close"
             onClick={requestClose}
-            aria-label="Fechar"
+            aria-label={t("common.close")}
             disabled={locked}
           >
             <IconX />
