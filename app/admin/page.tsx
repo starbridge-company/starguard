@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import { apiGet, ApiError } from "@/lib/client";
+import { useT, type MessageKey } from "@/lib/i18n";
+import { fmtNum } from "@/components/listing";
 import {
   IconUsers,
   IconScan,
@@ -29,14 +31,15 @@ interface Metrics {
   last7dAnalyses: number;
 }
 
-const SEVS: { key: keyof Metrics; label: string; cls: string }[] = [
-  { key: "critical", label: "Críticas", cls: "sev-critical" },
-  { key: "high", label: "Altas", cls: "sev-high" },
-  { key: "medium", label: "Médias", cls: "sev-medium" },
-  { key: "low", label: "Baixas", cls: "sev-low" },
+const SEVS: { key: keyof Metrics; labelKey: MessageKey; cls: string }[] = [
+  { key: "critical", labelKey: "severity.critical", cls: "sev-critical" },
+  { key: "high", labelKey: "severity.high", cls: "sev-high" },
+  { key: "medium", labelKey: "severity.medium", cls: "sev-medium" },
+  { key: "low", labelKey: "severity.low", cls: "sev-low" },
 ];
 
 export default function AdminDashboardPage() {
+  const t = useT();
   const [m, setM] = useState<Metrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,18 +47,18 @@ export default function AdminDashboardPage() {
     apiGet<Metrics>("/api/admin/metrics")
       .then(setM)
       .catch((e) =>
-        setError(e instanceof ApiError ? e.message : "Falha ao carregar métricas.")
+        setError(e instanceof ApiError ? e.message : t("admin.metricsFailed"))
       );
-  }, []);
+  }, [t]);
 
   const sevTotal = m ? m.critical + m.high + m.medium + m.low : 0;
 
   const kpis = m
     ? [
-        { Icon: IconUsers, label: "Usuários", value: m.totalUsers, href: "/admin/users" },
-        { Icon: IconScan, label: "Análises", value: m.totalAnalyses, href: "/admin/analyses" },
-        { Icon: IconShieldAlert, label: "Achados", value: m.totalFindings, href: "/admin/analyses" },
-        { Icon: IconPullRequest, label: "Pull Requests", value: m.totalPRs, href: null },
+        { Icon: IconUsers, label: t("nav.users"), value: m.totalUsers, href: "/admin/users" },
+        { Icon: IconScan, label: t("nav.analyses"), value: m.totalAnalyses, href: "/admin/analyses" },
+        { Icon: IconShieldAlert, label: t("list.colFindings"), value: m.totalFindings, href: "/admin/analyses" },
+        { Icon: IconPullRequest, label: t("nav.pullRequests"), value: m.totalPRs, href: null },
       ]
     : [];
 
@@ -63,11 +66,9 @@ export default function AdminDashboardPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Governança</span>
-          <h1>Painel global</h1>
-          <p className="page-subtitle">
-            Visão consolidada de todos os usuários, análises e correções.
-          </p>
+          <span className="page-kicker">{t("nav.governance")}</span>
+          <h1>{t("admin.dashTitle")}</h1>
+          <p className="page-subtitle">{t("admin.dashSubtitle")}</p>
         </div>
       </header>
 
@@ -85,7 +86,7 @@ export default function AdminDashboardPage() {
                   <span className="kpi-icon">
                     <k.Icon />
                   </span>
-                  <span className="kpi-value">{k.value.toLocaleString("pt-BR")}</span>
+                  <span className="kpi-value">{fmtNum(k.value)}</span>
                   <span className="kpi-label">{k.label}</span>
                   {k.href && <IconChevronRight className="kpi-arrow" />}
                 </>
@@ -106,19 +107,19 @@ export default function AdminDashboardPage() {
           <div className="stat-row">
             <div className="stat-chip">
               <IconClock />
-              <span className="num">{m.last7dAnalyses}</span> nos últimos 7 dias
+              <span className="num">{m.last7dAnalyses}</span> {t("admin.last7d")}
             </div>
             <div className="stat-chip">
               <span className="dot run" />
-              <span className="num">{m.running}</span> em andamento
+              <span className="num">{m.running}</span> {t("admin.running")}
             </div>
             <div className="stat-chip">
               <span className="dot ok" />
-              <span className="num">{m.done}</span> concluídas
+              <span className="num">{m.done}</span> {t("admin.doneCount")}
             </div>
             <div className="stat-chip">
               <span className="dot err" />
-              <span className="num">{m.error}</span> com erro
+              <span className="num">{m.error}</span> {t("admin.errorCount")}
             </div>
           </div>
 
@@ -127,14 +128,14 @@ export default function AdminDashboardPage() {
             <div className="panel-header">
               <div>
                 <h2 className="panel-title-row">
-                  <IconChart /> Achados por severidade
+                  <IconChart /> {t("results.bySeverity")}
                 </h2>
-                <p className="muted">Somatório de todas as análises.</p>
+                <p className="muted">{t("admin.sumOfAll")}</p>
               </div>
             </div>
 
             {sevTotal === 0 ? (
-              <div className="empty-state">Nenhum achado registrado ainda.</div>
+              <div className="empty-state">{t("admin.noFindings")}</div>
             ) : (
               <>
                 <div className="sev-bar" aria-hidden>
@@ -146,7 +147,7 @@ export default function AdminDashboardPage() {
                         key={s.key}
                         className={`sev-bar-seg ${s.cls}`}
                         style={{ width: `${pct}%` }}
-                        title={`${s.label}: ${n}`}
+                        title={`${t(s.labelKey)}: ${n}`}
                       />
                     ) : null;
                   })}
@@ -155,8 +156,8 @@ export default function AdminDashboardPage() {
                   {SEVS.map((s) => (
                     <div className="sev-legend-item" key={s.key}>
                       <span className={`sev-dot ${s.cls}`} />
-                      <span className="num">{(m[s.key] as number).toLocaleString("pt-BR")}</span>
-                      <span className="muted">{s.label}</span>
+                      <span className="num">{fmtNum(m[s.key] as number)}</span>
+                      <span className="muted">{t(s.labelKey)}</span>
                     </div>
                   ))}
                 </div>
@@ -170,9 +171,9 @@ export default function AdminDashboardPage() {
               <span className="overview-row-icon">
                 <IconUsers />
               </span>
-              <span className="overview-row-label">Usuários</span>
+              <span className="overview-row-label">{t("nav.users")}</span>
               <span className="muted overview-row-value">
-                {m.totalUsers} conta(s) — ver métricas por usuário
+                {t("admin.usersHint", { n: m.totalUsers })}
               </span>
               <IconChevronRight />
             </Link>
@@ -180,9 +181,9 @@ export default function AdminDashboardPage() {
               <span className="overview-row-icon">
                 <IconScan />
               </span>
-              <span className="overview-row-label">Análises (global)</span>
+              <span className="overview-row-label">{t("nav.globalAnalyses")}</span>
               <span className="muted overview-row-value">
-                {m.totalAnalyses} análise(s) de todos os usuários
+                {t("admin.analysesHint", { n: m.totalAnalyses })}
               </span>
               <IconChevronRight />
             </Link>

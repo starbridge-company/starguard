@@ -14,7 +14,8 @@ import { apiGet, ApiError, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate, AuditBadge } from "@/components/listing";
-import { CATEGORY_META, CATEGORY_ORDER } from "@/lib/audit-events";
+import { CATEGORY_ORDER } from "@/lib/audit-events";
+import { useT, type MessageKey } from "@/lib/i18n";
 import { IconRefresh } from "@/lib/icons";
 
 interface Row {
@@ -28,13 +29,16 @@ interface Row {
   userEmail: string | null;
 }
 
-const CAT_SEG = [
-  { value: "", label: "Todos" },
-  ...CATEGORY_ORDER.filter((c) => c !== "sistema").map((c) => ({
-    value: c,
-    label: CATEGORY_META[c].label,
-  })),
-];
+// Montado dentro do componente: os rótulos passam pelo `t()`.
+function catSegments(t: (k: MessageKey) => string) {
+  return [
+    { value: "", label: t("filter.all") },
+    ...CATEGORY_ORDER.filter((c) => c !== "sistema").map((c) => ({
+      value: c,
+      label: t(`auditCategory.${c}` as MessageKey),
+    })),
+  ];
+}
 
 function formatMeta(meta: Record<string, unknown> | null): string {
   if (!meta) return "";
@@ -49,6 +53,7 @@ export default function MonitoringPage() {
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
+  const t = useT();
   const [category, setCategory] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -84,12 +89,12 @@ export default function MonitoringPage() {
         setData(await apiGet<Paged<Row>>(`/api/admin/audit?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return;
-        setError(e instanceof ApiError ? e.message : "Falha ao carregar os logs.");
+        setError(e instanceof ApiError ? e.message : t("monitoring.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced, category, from, to, userId]
+    [page, qDebounced, category, from, to, userId, t]
   );
 
   useEffect(() => {
@@ -104,15 +109,13 @@ export default function MonitoringPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Governança</span>
-          <h1>Monitoramento</h1>
-          <p className="page-subtitle">
-            Trilha de auditoria de tudo o que acontece na plataforma.
-          </p>
+          <span className="page-kicker">{t("nav.governance")}</span>
+          <h1>{t("nav.monitoring")}</h1>
+          <p className="page-subtitle">{t("monitoring.subtitle")}</p>
         </div>
         <div className="header-actions">
           <button type="button" className="button ghost" onClick={() => void load()}>
-            <IconRefresh /> Atualizar
+            <IconRefresh /> {t("common.refresh")}
           </button>
         </div>
       </header>
@@ -122,13 +125,13 @@ export default function MonitoringPage() {
           <SearchBox
             value={q}
             onChange={(v) => onFilter(() => setQ(v))}
-            placeholder="Buscar por evento ou detalhe…"
+            placeholder={t("monitoring.searchPlaceholder")}
           />
           <Segmented
-            options={CAT_SEG}
+            options={catSegments(t)}
             value={category}
             onChange={(v) => onFilter(() => setCategory(v))}
-            ariaLabel="Categoria"
+            ariaLabel={t("monitoring.category")}
           />
           <DateRange
             from={from}
@@ -152,17 +155,17 @@ export default function MonitoringPage() {
         {loading && !data ? (
           <div className="skeleton" style={{ height: 260 }} />
         ) : rows.length === 0 ? (
-          <div className="empty-state">Nenhum registro para os filtros atuais.</div>
+          <div className="empty-state">{t("monitoring.empty")}</div>
         ) : (
           <div className="table-wrap">
             <table className="data-table audit-table">
               <thead>
                 <tr>
-                  <th>Quando</th>
-                  <th>Evento</th>
-                  <th>Usuário</th>
-                  <th>Detalhe</th>
-                  <th>Origem</th>
+                  <th>{t("monitoring.colWhen")}</th>
+                  <th>{t("monitoring.colEvent")}</th>
+                  <th>{t("adminUsers.colUser")}</th>
+                  <th>{t("monitoring.colDetail")}</th>
+                  <th>{t("monitoring.colOrigin")}</th>
                 </tr>
               </thead>
               <tbody>

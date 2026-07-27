@@ -37,6 +37,23 @@ describe("parseGitHubRepo · anti-SSRF", () => {
     expect(parseGitHubRepo("https://notgithub.com/a/b")).toBeNull();
     expect(parseGitHubRepo("https://github.com.evil.io/a/b")).toBeNull();
   });
+
+  // Havia um teste de IP interno rodando DEPOIS da allowlist — inalcançável,
+  // e portanto proteção nenhuma (AUDITORIA.md#BUG-18). O que barra destino
+  // interno é a allowlist; este teste trava esse contrato.
+  it("destino interno é barrado pela allowlist, não por regex de IP", () => {
+    for (const host of [
+      "localhost",
+      "127.0.0.1",
+      "10.0.0.1",
+      "192.168.1.1",
+      "169.254.169.254", // metadados de nuvem — o alvo clássico de SSRF
+      "172.16.0.1",
+      "[::1]",
+    ]) {
+      expect(parseGitHubRepo(`https://${host}/a/b`)).toBeNull();
+    }
+  });
 });
 
 // AUDITORIA.md#BUG-06 — vários achados do mesmo arquivo numa passada só.

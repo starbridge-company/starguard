@@ -15,6 +15,7 @@ import { apiGet, ApiError } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
 import { IconReport } from "@/lib/icons";
+import { useT } from "@/lib/i18n";
 
 interface Row {
   id: string;
@@ -35,14 +36,15 @@ interface Row {
 }
 
 const STATUS_SEG = [
-  { value: "", label: "Todas" },
-  { value: "done", label: "Concluídas" },
-  { value: "running", label: "Rodando" },
-  { value: "error", label: "Erro" },
-  { value: "pending", label: "Fila" },
-];
+  { value: "", key: "filter.all" },
+  { value: "done", key: "filter.done" },
+  { value: "running", key: "filter.running" },
+  { value: "error", key: "filter.error" },
+  { value: "pending", key: "filter.queued" },
+] as const;
 
 export default function AdminAnalysesPage() {
+  const t = useT();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -82,11 +84,11 @@ export default function AdminAnalysesPage() {
       if (userId) params.set("userId", userId);
       setData(await apiGet<Paged<Row>>(`/api/admin/analyses?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar as análises.");
+      setError(e instanceof ApiError ? e.message : t("list.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, q, status, from, to, userId]);
+  }, [page, q, status, from, to, userId, t]);
 
   useEffect(() => {
     load();
@@ -98,9 +100,9 @@ export default function AdminAnalysesPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Governança</span>
-          <h1>Análises (global)</h1>
-          <p className="page-subtitle">Todas as análises de todos os usuários.</p>
+          <span className="page-kicker">{t("nav.governance")}</span>
+          <h1>{t("nav.globalAnalyses")}</h1>
+          <p className="page-subtitle">{t("adminAnalyses.subtitle")}</p>
         </div>
       </header>
 
@@ -109,13 +111,13 @@ export default function AdminAnalysesPage() {
           <SearchBox
             value={q}
             onChange={(v) => onFilter(() => setQ(v))}
-            placeholder="Buscar por projeto ou repositório…"
+            placeholder={t("list.searchAnalyses")}
           />
           <Segmented
-            options={STATUS_SEG}
+            options={STATUS_SEG.map((o) => ({ value: o.value, label: t(o.key) }))}
             value={status}
             onChange={(v) => onFilter(() => setStatus(v))}
-            ariaLabel="Status"
+            ariaLabel={t("list.colStatus")}
           />
           <DateRange
             from={from}
@@ -139,16 +141,16 @@ export default function AdminAnalysesPage() {
         {loading && !data ? (
           <div className="skeleton" style={{ height: 220 }} />
         ) : rows.length === 0 ? (
-          <div className="empty-state">Nenhuma análise encontrada.</div>
+          <div className="empty-state">{t("adminAnalyses.empty")}</div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Projeto</th>
-                  <th>Usuário</th>
-                  <th>Severidades</th>
-                  <th>Status</th>
+                  <th>{t("list.colProject")}</th>
+                  <th>{t("adminUsers.colUser")}</th>
+                  <th>{t("list.colSeverities")}</th>
+                  <th>{t("list.colStatus")}</th>
                   <th>Criada</th>
                   <th />
                 </tr>

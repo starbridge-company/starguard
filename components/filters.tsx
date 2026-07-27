@@ -359,3 +359,97 @@ export function RoleSelect({
     </div>
   );
 }
+
+// ---- Seletor genérico (substitui o <select> nativo) ----
+// A convenção do projeto está declarada no topo deste arquivo: "seletor via
+// popover próprio (sem <select> nativo)". Dois lugares ainda usavam o nativo —
+// TokenPicker e NewUserModal — e destoavam do resto da interface.
+// Ver AUDITORIA.md#UX-11.
+export interface PickerOption {
+  value: string;
+  label: string;
+  /** Segunda linha, para explicar a opção sem inflar o rótulo. */
+  sub?: string;
+  /** Cabeçalho de grupo exibido acima desta opção. */
+  group?: string;
+}
+
+export function Picker({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  id,
+  icon,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  options: PickerOption[];
+  onChange: (v: string) => void;
+  ariaLabel?: string;
+  id?: string;
+  icon?: React.ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const { open, setOpen, ref } = useDropdown();
+  const selected = options.find((o) => o.value === value);
+
+  // Grupos só ganham cabeçalho quando MUDAM — assim a lista plana não vira uma
+  // sequência de títulos repetidos. Calculado antes do JSX: acumular numa
+  // variável durante o render é reatribuição pós-render (o ESLint reclama, com
+  // razão — o Strict Mode do React renderiza duas vezes).
+  const rows = options.map((o, i) => ({
+    ...o,
+    head: o.group && o.group !== options[i - 1]?.group ? o.group : null,
+  }));
+
+  return (
+    <div className="flt-dd block" ref={ref}>
+      <button
+        id={id}
+        type="button"
+        className={`flt-trigger wide ${value ? "has-value" : ""}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        disabled={disabled}
+      >
+        {icon}
+        <span className="flt-trigger-label">
+          {selected ? selected.label : placeholder || ""}
+        </span>
+        <IconChevronDown className="flt-caret" />
+      </button>
+      {open && (
+        <div className="flt-pop flt-pop-wide" role="listbox" aria-label={ariaLabel}>
+          <div className="flt-options">
+            {rows.map((o) => (
+              <div key={o.value}>
+                {o.head && <div className="flt-group">{o.head}</div>}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={value === o.value}
+                  className={`flt-option ${value === o.value ? "active" : ""}`}
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="flt-option-main">
+                    {o.label}
+                    {o.sub && <span className="flt-option-sub">{o.sub}</span>}
+                  </span>
+                  {value === o.value && <IconCheck />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

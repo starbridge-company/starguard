@@ -90,8 +90,40 @@ describe("openPullRequest", () => {
         fixedCode: "x",
         title: "t",
       })
-    ).rejects.toThrow(/GITHUB_TOKEN/);
+    ).rejects.toThrow(/token do GitHub/i);
     process.env = semToken;
+  });
+
+  // O token do servidor não pode abrir PR em nome de quem não o forneceu num
+  // deploy multi-usuário. Ver AUDITORIA.md#SEC-06.
+  it("com GITHUB_TOKEN no servidor e sem SINGLE_TENANT, ainda recusa", async () => {
+    const antes = { ...process.env };
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    delete process.env.SINGLE_TENANT;
+    await expect(
+      openPullRequest({
+        repoUrl: "https://github.com/acme/app",
+        file: "a.js",
+        fixedCode: "x",
+        title: "t",
+      })
+    ).rejects.toThrow(/token do GitHub/i);
+    expect(prsAbertos).toHaveLength(0);
+    process.env = antes;
+  });
+
+  it("com SINGLE_TENANT=true o token do servidor volta a valer", async () => {
+    const antes = { ...process.env };
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    process.env.SINGLE_TENANT = "true";
+    await openPullRequest({
+      repoUrl: "https://github.com/acme/app",
+      file: "a.js",
+      fixedCode: "x",
+      title: "t",
+    });
+    expect(prsAbertos).toHaveLength(1);
+    process.env = antes;
   });
 
   it("recusa URL fora da allowlist (anti-SSRF)", async () => {

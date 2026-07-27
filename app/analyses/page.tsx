@@ -5,10 +5,10 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import Pagination from "@/components/Pagination";
 import { SearchBox, Segmented, DateRange } from "@/components/filters";
-import { apiGet, ApiError, isAbortError } from "@/lib/client";
+import { apiGet, apiDelete, ApiError, isAbortError } from "@/lib/client";
 import { useDebounced } from "@/lib/useDebounced";
 import type { Paged } from "@/lib/pagination";
-import { IconReport, IconBolt, IconExternal } from "@/lib/icons";
+import { IconReport, IconBolt, IconExternal, IconTrash } from "@/lib/icons";
 import { useT } from "@/lib/i18n";
 import { fmtDate, StatusPill, SevChips } from "@/components/listing";
 
@@ -83,6 +83,23 @@ export default function AnalysesPage() {
   const onFilter = (fn: () => void) => {
     setPage(1);
     fn();
+  };
+
+  // Exclusão (soft delete) — a análise some da lista mas continua no banco.
+  // Ver AUDITORIA.md#BUG-22.
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const remove = async (r: Row) => {
+    if (!window.confirm(t("list.deleteConfirm", { name: r.projectName }))) return;
+    setDeleting(r.id);
+    setError(null);
+    try {
+      await apiDelete(`/api/analyses/${r.id}`);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t("list.deleteFailed"));
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const rows = data?.items || [];
@@ -201,6 +218,16 @@ export default function AnalysesPage() {
                           <IconExternal />
                         </a>
                       )}
+                      <button
+                        type="button"
+                        className="icon-btn danger"
+                        title={t("list.delete")}
+                        aria-label={t("list.deleteOf", { name: r.projectName })}
+                        disabled={deleting === r.id}
+                        onClick={() => void remove(r)}
+                      >
+                        <IconTrash />
+                      </button>
                     </td>
                   </tr>
                 ))}

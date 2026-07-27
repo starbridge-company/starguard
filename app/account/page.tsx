@@ -77,11 +77,11 @@ export default function AccountPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: "10" });
       setData(await apiGet<Paged<TokenView>>(`/api/account/tokens?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar os tokens.");
+      setError(e instanceof ApiError ? e.message : t("account.loadTokensFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, t]);
 
   useEffect(() => {
     load();
@@ -100,11 +100,11 @@ export default function AccountPage() {
     if (nameChanged && pName.trim()) body.name = pName.trim();
     if (emailChanged && pEmail.trim()) body.email = pEmail.trim();
     if (Object.keys(body).length === 0) {
-      setProfileOk("Nada para atualizar.");
+      setProfileOk(t("account.nothingToUpdate"));
       return;
     }
     if (body.email && !pCurrentPw) {
-      setProfileError("Informe a senha atual para alterar o login (e-mail).");
+      setProfileError(t("account.needCurrentPassword"));
       return;
     }
     if (pCurrentPw) body.currentPassword = pCurrentPw;
@@ -116,10 +116,10 @@ export default function AccountPage() {
       setPEmail(updated.email);
       setPCurrentPw("");
       clearMe();
-      setProfileOk("Dados atualizados.");
+      setProfileOk(t("account.profileUpdated"));
     } catch (err) {
       setProfileError(
-        err instanceof ApiError ? err.message : "Falha ao atualizar."
+        err instanceof ApiError ? err.message : t("account.updateFailed")
       );
     } finally {
       setSavingProfile(false);
@@ -130,10 +130,10 @@ export default function AccountPage() {
     e.preventDefault();
     setPwError(null);
     setPwOk(null);
-    if (!cpCurrent) return setPwError("Informe a senha atual.");
+    if (!cpCurrent) return setPwError(t("account.enterCurrentPassword"));
     if (cpNew.length < 8)
-      return setPwError("A nova senha precisa de ao menos 8 caracteres.");
-    if (cpNew !== cpConfirm) return setPwError("A confirmação não confere.");
+      return setPwError(t("account.newPasswordTooShort"));
+    if (cpNew !== cpConfirm) return setPwError(t("account.confirmMismatch"));
     setSavingPw(true);
     try {
       await apiPatch("/api/account/profile", {
@@ -144,9 +144,9 @@ export default function AccountPage() {
       setCpNew("");
       setCpConfirm("");
       clearMe();
-      setPwOk("Senha alterada com sucesso.");
+      setPwOk(t("account.passwordChanged"));
     } catch (err) {
-      setPwError(err instanceof ApiError ? err.message : "Falha ao alterar a senha.");
+      setPwError(err instanceof ApiError ? err.message : t("account.changePasswordFailed"));
     } finally {
       setSavingPw(false);
     }
@@ -162,24 +162,24 @@ export default function AccountPage() {
       await apiPost("/api/account/tokens", { name: name.trim(), token: token.trim() });
       setName("");
       setToken("");
-      setOkMsg("Token salvo com segurança (cifrado).");
+      setOkMsg(t("account.tokenSaved"));
       setPage(1);
       await load();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Falha ao salvar o token.");
+      setFormError(err instanceof ApiError ? err.message : t("account.saveTokenFailed"));
     } finally {
       setSaving(false);
     }
   };
 
   const removeToken = async (id: string) => {
-    if (!confirm("Remover este token? Análises futuras deixarão de poder usá-lo.")) return;
+    if (!confirm(t("account.removeTokenConfirm"))) return;
     setDeleting(id);
     try {
       await apiDelete(`/api/account/tokens/${id}`);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha ao remover o token.");
+      setError(err instanceof ApiError ? err.message : t("account.removeTokenFailed"));
     } finally {
       setDeleting(null);
     }
@@ -191,9 +191,9 @@ export default function AccountPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Configurações</span>
-          <h1>Conta</h1>
-          <p className="page-subtitle">Seus dados de acesso e os tokens do GitHub.</p>
+          <span className="page-kicker">{t("account.kicker")}</span>
+          <h1>{t("nav.account")}</h1>
+          <p className="page-subtitle">{t("account.subtitle")}</p>
         </div>
       </header>
 
@@ -233,13 +233,13 @@ export default function AccountPage() {
           {(display || me) && <RoleBadge role={display?.role || me!.role} />}
         </div>
 
-        <h3 className="section-subtitle">Dados básicos</h3>
+        <h3 className="section-subtitle">{t("account.basics")}</h3>
         <form className="settings-form" onSubmit={saveProfile}>
           {profileError && <div className="alert error">{profileError}</div>}
           {profileOk && <div className="alert success">{profileOk}</div>}
           <div className="settings-grid">
             <div className="field">
-              <label htmlFor="p-name">Nome</label>
+              <label htmlFor="p-name">{t("account.name")}</label>
               <input
                 id="p-name"
                 className="input"
@@ -250,10 +250,10 @@ export default function AccountPage() {
             </div>
             <div className="field">
               <label htmlFor="p-email" className="field-label-row">
-                <span>Login (e-mail)</span>
+                <span>{t("account.login")}</span>
                 <InfoTip
-                  title="Alterar o login"
-                  content="Este e-mail é o seu login. Para alterá-lo, confirme com a senha atual. As próximas entradas usam o novo e-mail."
+                  title={t("account.loginHelp")}
+                  content={t("account.loginHelpText")}
                 />
               </label>
               <input
@@ -268,13 +268,13 @@ export default function AccountPage() {
           </div>
           {emailChanged && (
             <div className="field">
-              <label htmlFor="p-current">Senha atual (para confirmar o novo login)</label>
+              <label htmlFor="p-current">{t("account.currentPasswordToConfirm")}</label>
               <input
                 id="p-current"
                 className="input"
                 type="password"
                 autoComplete="current-password"
-                placeholder="sua senha atual"
+                placeholder={t("account.currentPasswordPlaceholder")}
                 value={pCurrentPw}
                 onChange={(e) => setPCurrentPw(e.target.value)}
               />
@@ -288,7 +288,7 @@ export default function AccountPage() {
               aria-busy={savingProfile}
             >
               {savingProfile ? <span className="button-spinner" /> : null}
-              Salvar dados
+              {t("account.saveProfile")}
             </button>
           </div>
         </form>
@@ -296,13 +296,13 @@ export default function AccountPage() {
         <div className="settings-divider" />
 
         <h3 className="section-subtitle">
-          <IconLock /> Alterar senha
+          <IconLock /> {t("account.changePassword")}
         </h3>
         <form className="settings-form" onSubmit={savePassword}>
           {pwError && <div className="alert error">{pwError}</div>}
           {pwOk && <div className="alert success">{pwOk}</div>}
           <div className="field">
-            <label htmlFor="cp-current">Senha atual</label>
+            <label htmlFor="cp-current">{t("account.currentPassword")}</label>
             <input
               id="cp-current"
               className="input"
@@ -314,19 +314,19 @@ export default function AccountPage() {
           </div>
           <div className="settings-grid">
             <div className="field">
-              <label htmlFor="cp-new">Nova senha</label>
+              <label htmlFor="cp-new">{t("account.newPassword")}</label>
               <input
                 id="cp-new"
                 className="input"
                 type="password"
                 autoComplete="new-password"
-                placeholder="mínimo 8 caracteres"
+                placeholder={t("account.min8")}
                 value={cpNew}
                 onChange={(e) => setCpNew(e.target.value)}
               />
             </div>
             <div className="field">
-              <label htmlFor="cp-confirm">Confirmar nova senha</label>
+              <label htmlFor="cp-confirm">{t("account.confirmNewPassword")}</label>
               <input
                 id="cp-confirm"
                 className="input"
@@ -345,7 +345,7 @@ export default function AccountPage() {
               aria-busy={savingPw}
             >
               {savingPw ? <span className="button-spinner" /> : null}
-              Alterar senha
+              {t("account.changePassword")}
             </button>
           </div>
         </form>
@@ -356,15 +356,13 @@ export default function AccountPage() {
         <div className="panel-header">
           <div>
             <h2 className="panel-title-row">
-              <IconKey /> Tokens do GitHub
+              <IconKey /> {t("account.tokens")}
               <InfoTip
-                title="Tokens cifrados"
-                content="Os tokens são guardados cifrados (AES-256-GCM) e nunca voltam em texto puro. Mostramos apenas o nome e os últimos 4 caracteres. Você pode ter vários e escolher qual usar ao iniciar uma análise."
+                title={t("account.tokensHelp")}
+                content={t("account.tokensHelpText")}
               />
             </h2>
-            <p className="muted">
-              Salvos cifrados; usados para clonar repositórios privados e abrir PRs.
-            </p>
+            <p className="muted">{t("account.tokensHint")}</p>
           </div>
         </div>
 
@@ -373,18 +371,18 @@ export default function AccountPage() {
           {okMsg && <div className="alert success">{okMsg}</div>}
           <div className="token-form-grid">
             <div className="field">
-              <label htmlFor="tk-name">Nome</label>
+              <label htmlFor="tk-name">{t("account.name")}</label>
               <input
                 id="tk-name"
                 className="input"
-                placeholder="Ex.: PAT pessoal"
+                placeholder={t("account.tokenNamePlaceholder")}
                 value={name}
                 maxLength={100}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <div className="field">
-              <label htmlFor="tk-token">Token</label>
+              <label htmlFor="tk-token">{t("account.token")}</label>
               <input
                 id="tk-token"
                 className="input"
@@ -401,7 +399,7 @@ export default function AccountPage() {
               disabled={saving || !name.trim() || !token.trim()}
               aria-busy={saving}
             >
-              {saving ? <span className="button-spinner" /> : <IconPlus />} Salvar
+              {saving ? <span className="button-spinner" /> : <IconPlus />} {t("account.save")}
             </button>
           </div>
         </form>
@@ -411,33 +409,34 @@ export default function AccountPage() {
         {loading && !data ? (
           <div className="skeleton" style={{ height: 120 }} />
         ) : tokens.length === 0 ? (
-          <div className="empty-state">Nenhum token salvo ainda.</div>
+          <div className="empty-state">{t("account.noTokens")}</div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Nome</th>
-                  <th>Token</th>
-                  <th>Criado</th>
-                  <th>Último uso</th>
+                  <th>{t("account.name")}</th>
+                  <th>{t("account.token")}</th>
+                  <th>{t("account.createdAt")}</th>
+                  <th>{t("account.lastUsed")}</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {tokens.map((t) => (
-                  <tr key={t.id}>
-                    <td className="cell-strong">{t.name}</td>
-                    <td className="mono">••••{t.last4}</td>
-                    <td className="muted">{fmtDate(t.createdAt)}</td>
-                    <td className="muted">{fmtDate(t.lastUsedAt)}</td>
+                {/* `tk`, não `t`: o `t` deste escopo é a função de tradução. */}
+                {tokens.map((tk) => (
+                  <tr key={tk.id}>
+                    <td className="cell-strong">{tk.name}</td>
+                    <td className="mono">••••{tk.last4}</td>
+                    <td className="muted">{fmtDate(tk.createdAt)}</td>
+                    <td className="muted">{fmtDate(tk.lastUsedAt)}</td>
                     <td className="row-actions">
                       <button
                         type="button"
                         className="icon-btn danger"
-                        title="Remover"
-                        disabled={deleting === t.id}
-                        onClick={() => removeToken(t.id)}
+                        title={t("account.remove")}
+                        disabled={deleting === tk.id}
+                        onClick={() => removeToken(tk.id)}
                       >
                         <IconTrash />
                       </button>

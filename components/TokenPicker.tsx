@@ -4,6 +4,7 @@
 // ou digitar um novo — com opção de salvá-lo na conta de forma transparente.
 import { useEffect, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { Picker } from "@/components/filters";
 import { apiGet } from "@/lib/client";
 import { IconKey } from "@/lib/icons";
 
@@ -59,23 +60,24 @@ export default function TokenPicker({
         />
       </label>
 
-      <select
-        className="input select"
+      {/* Popover próprio, no visual do site — a convenção declarada em
+          components/filters.tsx. Ver AUDITORIA.md#UX-11. */}
+      <Picker
         value={mode}
-        onChange={(e) => selectMode(e.target.value)}
-      >
-        <option value={NONE}>Nenhum (repositório público)</option>
-        {saved.length > 0 && (
-          <optgroup label="Tokens salvos">
-            {saved.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} · ••••{t.last4}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        <option value={NEW}>+ Novo token…</option>
-      </select>
+        ariaLabel="Token de acesso"
+        icon={<IconKey />}
+        onChange={selectMode}
+        options={[
+          { value: NONE, label: "Nenhum (repositório público)" },
+          ...saved.map((t) => ({
+            value: t.id,
+            label: t.name,
+            sub: `••••${t.last4}`,
+            group: "Tokens salvos",
+          })),
+          { value: NEW, label: "+ Novo token…" },
+        ]}
+      />
 
       {mode === NEW && (
         <div className="token-inline">

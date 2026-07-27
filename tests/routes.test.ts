@@ -32,7 +32,18 @@ vi.mock("@/lib/auth", async () => {
   return { ...real, audit: vi.fn() };
 });
 
+const analysesRepo = {
+  softDelete: vi.fn(async () => true),
+};
+vi.mock("@/lib/repos/analyses", () => analysesRepo);
+
+const jobs = {
+  getAnalysisOwner: vi.fn(async (): Promise<string | undefined> => "user-1"),
+};
+vi.mock("@/lib/jobs", () => jobs);
+
 const { PATCH } = await import("@/app/api/findings/[id]/route");
+const { DELETE } = await import("@/app/api/analyses/[id]/route");
 
 const ID_VALIDO = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -54,6 +65,8 @@ beforeEach(() => {
   acesso.mockReturnValue(true);
   findingsRepo.ownerOfFinding.mockResolvedValue("user-1");
   findingsRepo.setStatus.mockResolvedValue(undefined);
+  jobs.getAnalysisOwner.mockResolvedValue("user-1");
+  analysesRepo.softDelete.mockResolvedValue(true);
 });
 
 describe("PATCH /api/findings/[id] · FEAT-01", () => {
@@ -108,5 +121,50 @@ describe("PATCH /api/findings/[id] · FEAT-01", () => {
     sessao.mockResolvedValue(null);
     const body = await (await PATCH(req({ status: "fixed" }), params())).json();
     expect(body.errorKey).toBe("err.unauthenticated");
+  });
+});
+
+// A coluna `deleted_at` existia e era filtrada em toda consulta, mas nenhuma
+// rota a preenchia. Ver AUDITORIA.md#BUG-22.
+describe("DELETE /api/analyses/[id] · BUG-22", () => {
+  const del = (id = ID_VALIDO) => DELETE(req(null), params(id));
+
+  it("dono exclui a própria análise", async () => {
+    const res = await del();
+    expect(res.status).toBe(200);
+    expect(analysesRepo.softDelete).toHaveBeenCalledWith(ID_VALIDO);
+  });
+
+  it("sem sessão -> 401, sem tocar no banco", async () => {
+    sessao.mockResolvedValue(null);
+    expect((await del()).status).toBe(401);
+    expect(analysesRepo.softDelete).not.toHaveBeenCalled();
+  });
+
+  it("sem CSRF -> 403 (método mutante exige o header)", async () => {
+    csrf.mockReturnValue(false);
+    expect((await del()).status).toBe(403);
+    expect(analysesRepo.softDelete).not.toHaveBeenCalled();
+  });
+
+  it("análise de OUTRO usuário -> 404 e nada é excluído", async () => {
+    acesso.mockReturnValue(false);
+    expect((await del()).status).toBe(404);
+    expect(analysesRepo.softDelete).not.toHaveBeenCalled();
+  });
+
+  it("id malformado -> 404, sem consultar o dono", async () => {
+    expect((await del("nao-e-uuid")).status).toBe(404);
+    expect(jobs.getAnalysisOwner).not.toHaveBeenCalled();
+  });
+
+  it("análise inexistente -> 404", async () => {
+    jobs.getAnalysisOwner.mockResolvedValue(undefined);
+    expect((await del()).status).toBe(404);
+  });
+
+  it("já excluída -> 404, não 200 mentindo que apagou de novo", async () => {
+    analysesRepo.softDelete.mockResolvedValue(false);
+    expect((await del()).status).toBe(404);
   });
 });

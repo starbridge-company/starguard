@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import type { PhaseKey, StepStatus, StepAIConfig } from "@/types";
 import InfoTip from "@/components/InfoTip";
+import { useT, type MessageKey } from "@/lib/i18n";
 import {
   IconPlan,
   IconSkills,
@@ -12,41 +13,46 @@ import {
   IconX,
 } from "@/lib/icons";
 
+// Rótulos por chave de tradução — o stepper aparece na tela de resultados, que
+// é fluxo principal, e era a última peça dela ainda em português fixo.
+// Ver AUDITORIA.md#PEND-23.
 const PHASE_META: Record<
   PhaseKey,
-  { Icon: typeof IconPlan; short: string; phase: string; desc: string }
+  { Icon: typeof IconPlan; shortKey: MessageKey; phaseKey: MessageKey; descKey: MessageKey }
 > = {
   plan: {
     Icon: IconPlan,
-    short: "Ameaças",
-    phase: "Fase 1 · Plan",
-    desc: "Modela ameaças e deriva requisitos de segurança a partir do contexto do sistema.",
+    shortKey: "pipe.plan.short",
+    phaseKey: "pipe.plan.phase",
+    descKey: "pipe.plan.desc",
   },
   skills: {
     Icon: IconSkills,
-    short: "Skills",
-    phase: "Fase 2 · Code",
-    desc: "Valida skills/prompts contra prompt-injection, exfiltração e desvio de política.",
+    shortKey: "pipe.skills.short",
+    phaseKey: "pipe.skills.phase",
+    descKey: "pipe.skills.desc",
   },
   software: {
     Icon: IconScan,
-    short: "Software",
-    phase: "Fase 3 · Code",
-    desc: "Roda SAST + SCA sobre o repositório e prioriza os achados por severidade.",
+    shortKey: "pipe.software.short",
+    phaseKey: "pipe.software.phase",
+    descKey: "pipe.software.desc",
   },
   refactor: {
     Icon: IconRefactor,
-    short: "Correção",
-    phase: "Fase 4 · Refactor",
-    desc: "Gera a correção automática do código e abre o Pull Request no GitHub.",
+    shortKey: "pipe.refactor.short",
+    phaseKey: "pipe.refactor.phase",
+    // A fase não gera mais nada sozinha: correção custa IA e agora só sai por
+    // clique explícito, na aba Correções. Ver AUDITORIA.md#BUG-16.
+    descKey: "pipe.refactor.desc",
   },
 };
 
-const STATUS_LABEL: Record<StepStatus, string> = {
-  pending: "Aguardando",
-  running: "Rodando",
-  done: "Concluído",
-  error: "Erro",
+const STATUS_KEY: Record<StepStatus, MessageKey> = {
+  pending: "pipe.status.pending",
+  running: "pipe.status.running",
+  done: "pipe.status.done",
+  error: "pipe.status.error",
 };
 
 export interface StepMetric {
@@ -63,8 +69,9 @@ export interface PipelineStep {
 }
 
 export default function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
+  const t = useT();
   return (
-    <div className="pipeline" role="list" aria-label="Progresso das 4 fases">
+    <div className="pipeline" role="list" aria-label={t("pipe.ariaLabel")}>
       {steps.map((step, i) => {
         const meta = PHASE_META[step.key];
         const prevDone = i > 0 && steps[i - 1].status === "done";
@@ -72,8 +79,8 @@ export default function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
 
         const tip = (
           <span className="pipe-tip">
-            <span className="pipe-tip-phase">{meta.phase}</span>
-            <span className="pipe-tip-desc">{meta.desc}</span>
+            <span className="pipe-tip-phase">{t(meta.phaseKey)}</span>
+            <span className="pipe-tip-desc">{t(meta.descKey)}</span>
             <span className="pipe-tip-engines">
               {isSoftware ? (
                 (step.engines || []).map((e) => (
@@ -111,7 +118,7 @@ export default function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
             <InfoTip
               side="bottom"
               size="md"
-              label={`${meta.phase} — ${STATUS_LABEL[step.status]}`}
+              label={`${t(meta.phaseKey)} — ${t(STATUS_KEY[step.status])}`}
               content={tip}
             >
               <span role="listitem" className={`pipe-node is-${step.status}`}>
@@ -126,8 +133,8 @@ export default function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
                     <meta.Icon />
                   )}
                 </span>
-                <span className="pipe-label">{meta.short}</span>
-                <span className="pipe-state">{STATUS_LABEL[step.status]}</span>
+                <span className="pipe-label">{t(meta.shortKey)}</span>
+                <span className="pipe-state">{t(STATUS_KEY[step.status])}</span>
               </span>
             </InfoTip>
           </Fragment>

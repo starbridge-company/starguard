@@ -7,12 +7,15 @@ import AppShell from "@/components/AppShell";
 import SeverityBadge from "@/components/SeverityBadge";
 import { apiGet, ApiError } from "@/lib/client";
 import type { Job, Severity } from "@/types";
-import { SEVERITY_LABEL_PT } from "@/types";
+import { useI18n } from "@/lib/i18n";
+import { severityKey } from "@/components/SeverityBadge";
 import { IconDownload, IconArrowLeft, IconShield } from "@/lib/icons";
 
 const SEV_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 
 export default function ReportPage() {
+  // A data do rodapé seguia fixa em pt-BR — a frente "Formatação" do FEAT-04.
+  const { t, locale } = useI18n();
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,9 +24,9 @@ export default function ReportPage() {
     apiGet<Job>(`/api/status/${id}`)
       .then(setJob)
       .catch((e) =>
-        setError(e instanceof ApiError ? e.message : "Falha ao carregar o relatório.")
+        setError(e instanceof ApiError ? e.message : t("report.loadFailed"))
       );
-  }, [id]);
+  }, [id, t]);
 
   if (error) {
     return (
@@ -58,16 +61,16 @@ export default function ReportPage() {
     <AppShell>
       <header className="page-header no-print">
         <div>
-          <span className="page-kicker">Relatório · {job.id}</span>
-          <h1>Sumário executivo</h1>
+          <span className="page-kicker">{t("common.report")} · {job.id}</span>
+          <h1>{t("report.title")}</h1>
           <p className="page-subtitle">{job.input.projectName}</p>
         </div>
         <div className="header-actions">
           <Link href={`/results/${job.id}`} className="button ghost">
-            <IconArrowLeft /> Voltar
+            <IconArrowLeft /> {t("report.back")}
           </Link>
           <button className="button primary" onClick={() => window.print()}>
-            <IconDownload /> Exportar / Imprimir
+            <IconDownload /> {t("report.print")}
           </button>
         </div>
       </header>
@@ -79,10 +82,10 @@ export default function ReportPage() {
           </div>
           <div>
             <h2 style={{ fontFamily: "var(--font-main)", fontWeight: 800 }}>
-              StarGuard — Relatório de Segurança
+              {t("report.docTitle")}
             </h2>
             <p className="muted">
-              Projeto: {job.input.projectName}
+              {t("report.project")}: {job.input.projectName}
               {job.input.repoUrl ? ` · ${job.input.repoUrl}` : ""}
             </p>
           </div>
@@ -90,14 +93,14 @@ export default function ReportPage() {
 
         {/* Vulnerabilidades por severidade */}
         <div className="report-section">
-          <h3>Vulnerabilidades por severidade</h3>
+          <h3>{t("report.bySeverity")}</h3>
           <div className="sev-summary">
             {SEV_ORDER.map((s) => (
               <div className="sev-tile" key={s}>
                 <span className={`count text-${s === "critical" ? "danger" : s === "high" ? "warning" : s === "low" ? "info" : "warning"}`}>
                   {sevCount(s)}
                 </span>
-                <span className="muted">{SEVERITY_LABEL_PT[s]}</span>
+                <span className="muted">{t(severityKey(s))}</span>
               </div>
             ))}
           </div>
@@ -106,7 +109,7 @@ export default function ReportPage() {
         {/* Requisitos (Fase 1) */}
         {plan && (
           <div className="report-section">
-            <h3>Requisitos técnicos de segurança (Fase 1)</h3>
+            <h3>{t("report.requirements")}</h3>
             <div className="report-req-list">
               {plan.requirements.map((r, i) => (
                 <div className="report-req" key={r.id}>
@@ -122,7 +125,7 @@ export default function ReportPage() {
 
         {/* Skills (Fase 2) */}
         <div className="report-section">
-          <h3>Validação de skills (Fase 2)</h3>
+          <h3>{t("report.skills")}</h3>
           {skills.length ? (
             <div className="report-req-list">
               {skills.map((s) => (
@@ -137,26 +140,29 @@ export default function ReportPage() {
                     }`}
                   >
                     <span className="dot" />
-                    {s.verdict === "rejected"
-                      ? "Reprovada"
-                      : s.verdict === "review"
-                        ? "Revisar"
-                        : "Validada"}
+                    {t(
+                      s.verdict === "rejected"
+                        ? "report.skillRejected"
+                        : s.verdict === "review"
+                          ? "report.skillReview"
+                          : "report.skillApproved"
+                    )}
                   </span>
                   <span>
-                    <strong>{s.skillName}</strong> — {s.findings.length} achado(s)
+                    <strong>{s.skillName}</strong> —{" "}
+                    {t("report.findingCount", { n: s.findings.length })}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="muted">Nenhuma skill validada nesta análise.</p>
+            <p className="muted">{t("report.noSkills")}</p>
           )}
         </div>
 
         {/* Vulnerabilidades detalhadas (Fase 3) */}
         <div className="report-section">
-          <h3>Achados de segurança (Fase 3)</h3>
+          <h3>{t("report.findings")}</h3>
           {vulns.length || deps.length ? (
             <div className="report-req-list">
               {vulns.map((v) => (
@@ -172,20 +178,20 @@ export default function ReportPage() {
                   <SeverityBadge severity={d.severity} />
                   <span>
                     <strong>{d.package}@{d.installedVersion}</strong> — {d.cve}
-                    {d.fixedVersion ? ` (corrige em ${d.fixedVersion})` : ""}
+                    {d.fixedVersion ? ` (${t("report.fixedIn", { v: d.fixedVersion })})` : ""}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="muted">Sem achados de código/dependências.</p>
+            <p className="muted">{t("report.noFindings")}</p>
           )}
         </div>
 
         {/* Revisão por IA · regras de negócio (Fase 3) */}
         {review && (
           <div className="report-section">
-            <h3>Revisão por IA · regras de negócio (Fase 3)</h3>
+            <h3>{t("report.aiReview")}</h3>
             {reviewFindings.length ? (
               <div className="report-req-list">
                 {reviewFindings.map((v) => (
@@ -193,7 +199,7 @@ export default function ReportPage() {
                     <SeverityBadge severity={v.severity} />
                     <span>
                       <strong>{v.title}</strong> — {v.file}:{v.line}
-                      {v.kind === "business-rule" ? " · regra de negócio" : ""}
+                      {v.kind === "business-rule" ? ` · ${t("card.businessRule")}` : ""}
                       {v.requirementRefs?.length ? ` · ${v.requirementRefs.join(", ")}` : ""}
                     </span>
                   </div>
@@ -202,8 +208,8 @@ export default function ReportPage() {
             ) : (
               <p className="muted">
                 {review.ran
-                  ? "Sem achados adicionais além do SAST/SCA."
-                  : review.note || "Revisão por IA não executada."}
+                  ? t("report.noExtraFindings")
+                  : review.note || t("report.reviewNotRun")}
               </p>
             )}
             {review.unverifiedRules?.length ? (
@@ -224,7 +230,7 @@ export default function ReportPage() {
 
         {/* Correções (Fase 4) */}
         <div className="report-section">
-          <h3>Correções aplicadas (Fase 4)</h3>
+          <h3>{t("report.fixes")}</h3>
           {refactor && refactor.fixes.length ? (
             <div className="report-req-list">
               {refactor.fixes.map((f) => (
@@ -245,12 +251,12 @@ export default function ReportPage() {
               ))}
             </div>
           ) : (
-            <p className="muted">Nenhuma correção aplicada automaticamente.</p>
+            <p className="muted">{t("report.fixesOnDemand")}</p>
           )}
         </div>
 
         <p className="muted" style={{ textAlign: "center", marginTop: 8 }}>
-          Gerado por StarGuard · Copilot de Segurança · {new Date().toLocaleDateString("pt-BR")}
+          {t("report.footer")} · {new Date().toLocaleDateString(locale)}
         </p>
       </div>
     </AppShell>

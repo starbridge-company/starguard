@@ -1,6 +1,6 @@
 "use client";
 
-import { eventCategory, eventLabel } from "@/lib/audit-events";
+import { eventCategory, eventLabelKey } from "@/lib/audit-events";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { LOCALE_COOKIE, normalizeLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 
@@ -25,6 +25,16 @@ export function fmtDate(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Número no formato do idioma ativo. `toLocaleString("pt-BR")` espalhado pelas
+ * telas de governança mostrava "1.234" para quem lê em inglês — a frente de
+ * "Formatação" do FEAT-04, que faltava fechar (AUDITORIA.md#PEND-23).
+ */
+export function fmtNum(n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return n.toLocaleString(activeLocale());
 }
 
 const STATUS_META: Record<string, { key: MessageKey; tone: string }> = {
@@ -97,9 +107,13 @@ export function RoleBadge({ role }: { role: string }) {
 }
 
 export function AuditBadge({ event }: { event: string }) {
+  const t = useT();
+  // Evento fora do catálogo aparece com o nome cru — mais útil na trilha de
+  // auditoria que um rótulo genérico que esconde o que aconteceu.
+  const key = eventLabelKey(event);
   return (
     <span className={`audit-badge audit-${eventCategory(event)}`}>
-      {eventLabel(event)}
+      {key ? t(key as MessageKey) : event}
     </span>
   );
 }

@@ -12,9 +12,11 @@ import SeverityBadge, { severityKey } from "@/components/SeverityBadge";
 import FixModal from "@/components/FixModal";
 import BatchFixModal from "@/components/BatchFixModal";
 import InfoTip from "@/components/InfoTip";
+import ExportMenu from "@/components/ExportMenu";
 import { apiPost, ApiError } from "@/lib/client";
 import { useAnalysisPolling, allTerminal } from "@/lib/useAnalysisPolling";
 import { useFindings, isResolved } from "@/lib/useFindings";
+import { collidesWithSast } from "@/lib/dedup";
 import { Segmented, SearchBox } from "@/components/filters";
 import { useT } from "@/lib/i18n";
 
@@ -107,6 +109,9 @@ export default function ResultsPage() {
   // navegar — e de renderizar. Ver AUDITORIA.md#UX-01.
   const [sevFilter, setSevFilter] = useState<string>("");
   const [srcFilter, setSrcFilter] = useState<string>("");
+  // Esconder os achados de confiança média com um clique — o palpite da IA não
+  // pode custar o mesmo tempo de triagem que uma certeza. Ver AUDITORIA.md#UX-07.
+  const [confFilter, setConfFilter] = useState<string>("");
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
 
@@ -258,17 +263,10 @@ export default function ResultsPage() {
   const reviewFindings = review?.findings || [];
 
   // A revisão por IA deixa de ter aba própria: seus achados entram na lista de
-  // Correções, deduplicados contra o SAST (mesmo arquivo, linha ±3 e mesmo
-  // CWE/regra) — para não repetir uma correção que já está lá.
-  const normPath = (f: string) => f.replace(/\\/g, "/").toLowerCase();
-  const collidesWithSast = (r: Vulnerability) =>
-    vulns.some(
-      (v) =>
-        normPath(v.file) === normPath(r.file) &&
-        Math.abs((v.line || 0) - (r.line || 0)) <= 3 &&
-        ((!!v.cwe && v.cwe === r.cwe) || (!!v.ruleId && v.ruleId === r.ruleId))
-    );
-  const aiFindings = reviewFindings.filter((r) => !collidesWithSast(r));
+  // Correções, deduplicados contra o SAST — para não repetir uma correção que
+  // já está lá. A regra mora em `lib/dedup.ts` e é a MESMA que o servidor
+  // aplica; manter duas cópias divergentes é o AUDITORIA.md#ARQ-10.
+  const aiFindings = reviewFindings.filter((r) => !collidesWithSast(r, vulns));
   const corrections = [...vulns, ...aiFindings].sort(
     (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
   );
@@ -285,6 +283,8 @@ export default function ResultsPage() {
     }
     if (sevFilter && v.severity !== sevFilter) return false;
     if (srcFilter && v.source !== srcFilter) return false;
+    // Achado do SAST não tem `confidence`; o filtro só age sobre os da IA.
+    if (confFilter === "high" && v.confidence === "medium") return false;
     if (
       q &&
       !`${v.file} ${v.ruleId} ${v.title} ${v.cwe ?? ""}`.toLowerCase().includes(q)
@@ -331,7 +331,9 @@ export default function ResultsPage() {
         { label: "IA", value: aiFindings.length },
         { label: "SCA", value: deps.length },
       ];
-    if (key === "refactor" && refactor)
+    // A Fase 4 não gera mais correção automática (AUDITORIA.md#BUG-16): exibir
+    // "correções 0 · PRs 0" em toda análise seria ruído, não informação.
+    if (key === "refactor" && refactor && (refactor.fixes.length || refactor.prs.length))
       return [
         { label: "correções", value: refactor.fixes.length },
         { label: "PRs", value: refactor.prs.length },
@@ -476,6 +478,10 @@ export default function ResultsPage() {
           <Link href={`/report/${job.id}`} className="button ghost">
             <IconReport /> {t("common.report")}
           </Link>
+          {/* Levar os achados para fora: SARIF sobe direto no GitHub Code
+              Scanning, CSV vai para planilha, JSON para pipeline.
+              Ver AUDITORIA.md#UX-10. */}
+          <ExportMenu analysisId={job.id} disabled={!scan} />
           <Link href="/" className="button ghost">
             <IconRefresh /> {t("common.new")}
           </Link>
@@ -690,6 +696,22 @@ export default function ResultsPage() {
                   }}
                   ariaLabel="Origem"
                 />
+                {/* Só aparece quando há o que filtrar: sem achado de confiança
+                    média, o controle seria decoração. Ver AUDITORIA.md#UX-07. */}
+                {corrections.some((v) => v.confidence === "medium") && (
+                  <Segmented
+                    options={[
+                      { value: "", label: t("filter.confidenceAll") },
+                      { value: "high", label: t("filter.confidenceHigh") },
+                    ]}
+                    value={confFilter}
+                    onChange={(v) => {
+                      setConfFilter(v);
+                      setLimit(PAGE);
+                    }}
+                    ariaLabel={t("filter.confidence")}
+                  />
+                )}
               </div>
 
               <div className="finding-toolbar">
@@ -745,7 +767,7 @@ export default function ResultsPage() {
               </div>
               {visibleCorrections.length === 0 ? (
                 <div className="empty-state">
-                  {q || sevFilter || srcFilter
+                  {q || sevFilter || srcFilter || confFilter
                     ? t("fixes.emptyFilters")
                     : statusFilter === "open"
                       ? t("fixes.emptyResolved")
@@ -764,6 +786,7 @@ export default function ResultsPage() {
                       status={findingState[v.id]?.status}
                       inherited={findingState[v.id]?.inherited}
                       hasFix={findingState[v.id]?.hasFix}
+                      repoUrl={job.input.repoUrl}
                       onStatus={
                         findingState[v.id]
                           ? (vuln, status) => void setFindingStatus(vuln.id, status)

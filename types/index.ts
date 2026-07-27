@@ -230,6 +230,16 @@ export interface JobInputPublic {
   skillNames: string[];
 }
 
+/**
+ * Resultado da Fase 4. Sai vazio do job: a fase não gera mais correção
+ * automática (AUDITORIA.md#BUG-16). Os campos continuam porque o relatório e
+ * a tela leem daqui o que foi feito sob demanda.
+ */
+export interface RefactorResult {
+  fixes: FixResult[];
+  prs: PullRequest[];
+}
+
 export interface Job {
   id: string;
   createdAt: number;
@@ -239,7 +249,7 @@ export interface Job {
     plan: PhaseState<ThreatModel>;
     skills: PhaseState<SkillValidation[]>;
     software: PhaseState<ScanResult>;
-    refactor: PhaseState<{ fixes: FixResult[]; prs: PullRequest[] }>;
+    refactor: PhaseState<RefactorResult>;
   };
 }
 
@@ -251,10 +261,7 @@ export const SEVERITY_ORDER: Record<Severity, number> = {
   info: 4,
 };
 
-export const SEVERITY_LABEL_PT: Record<Severity, string> = {
-  critical: "Crítica",
-  high: "Alta",
-  medium: "Média",
-  low: "Baixa",
-  info: "Info",
-};
+// `SEVERITY_LABEL_PT` vivia aqui e era a evidência citada no FEAT-04 ("enums
+// de domínio viram chave de tradução, não string"). O último consumidor era o
+// relatório; hoje a severidade vira rótulo por `severityKey()` +
+// `severity.*` no dicionário. Ver AUDITORIA.md#PEND-23.

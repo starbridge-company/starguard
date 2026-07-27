@@ -11,6 +11,7 @@ import type { Paged } from "@/lib/pagination";
 import { useMe } from "@/lib/useMe";
 import { SearchBox, RoleSelect } from "@/components/filters";
 import { fmtDate } from "@/components/listing";
+import { useT } from "@/lib/i18n";
 import { IconScan, IconPlus, IconTrash } from "@/lib/icons";
 
 interface Row {
@@ -28,6 +29,7 @@ interface Row {
 }
 
 export default function AdminUsersPage() {
+  const t = useT();
   const { me } = useMe();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
@@ -50,12 +52,12 @@ export default function AdminUsersPage() {
         setData(await apiGet<Paged<Row>>(`/api/admin/users?${params}`, { signal }));
       } catch (e) {
         if (isAbortError(e)) return;
-        setError(e instanceof ApiError ? e.message : "Falha ao carregar os usuários.");
+        setError(e instanceof ApiError ? e.message : t("adminUsers.loadFailed"));
       } finally {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced]
+    [page, qDebounced, t]
   );
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export default function AdminUsersPage() {
         d ? { ...d, items: d.items.map((u) => (u.id === id ? { ...u, role } : u)) } : d
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao alterar o papel.");
+      setError(e instanceof ApiError ? e.message : t("adminUsers.roleFailed"));
     } finally {
       setRoleBusy(null);
     }
@@ -82,7 +84,7 @@ export default function AdminUsersPage() {
   const removeUser = async (id: string, name: string) => {
     if (
       !confirm(
-        `Excluir "${name}"? A conta será desativada (soft delete) e a pessoa não poderá mais entrar. As análises dela permanecem no histórico.`
+        t("adminUsers.deleteConfirm", { name })
       )
     )
       return;
@@ -92,7 +94,7 @@ export default function AdminUsersPage() {
       await apiDelete(`/api/admin/users/${id}`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao excluir o usuário.");
+      setError(e instanceof ApiError ? e.message : t("adminUsers.deleteFailed"));
     } finally {
       setDeleting(null);
     }
@@ -104,11 +106,9 @@ export default function AdminUsersPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Governança</span>
-          <h1>Usuários</h1>
-          <p className="page-subtitle">
-            Todas as contas — gerencie papéis e acessos.
-          </p>
+          <span className="page-kicker">{t("nav.governance")}</span>
+          <h1>{t("nav.users")}</h1>
+          <p className="page-subtitle">{t("adminUsers.subtitle")}</p>
         </div>
         <div className="header-actions">
           <button
@@ -116,7 +116,7 @@ export default function AdminUsersPage() {
             className="button primary"
             onClick={() => setShowNew(true)}
           >
-            <IconPlus /> Novo usuário
+            <IconPlus /> {t("newUser.title")}
           </button>
         </div>
       </header>
@@ -129,7 +129,7 @@ export default function AdminUsersPage() {
               setPage(1);
               setQ(v);
             }}
-            placeholder="Buscar por nome ou e-mail…"
+            placeholder={t("adminUsers.searchPlaceholder")}
           />
         </div>
 
@@ -138,19 +138,19 @@ export default function AdminUsersPage() {
         {loading && !data ? (
           <div className="skeleton" style={{ height: 220 }} />
         ) : rows.length === 0 ? (
-          <div className="empty-state">Nenhum usuário encontrado.</div>
+          <div className="empty-state">{t("adminUsers.empty")}</div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Usuário</th>
-                  <th>Papel</th>
-                  <th>Análises</th>
-                  <th>Achados</th>
-                  <th>Críticas</th>
-                  <th>PRs</th>
-                  <th>Última atividade</th>
+                  <th>{t("adminUsers.colUser")}</th>
+                  <th>{t("newUser.role")}</th>
+                  <th>{t("nav.analyses")}</th>
+                  <th>{t("list.colFindings")}</th>
+                  <th>{t("severity.critical")}</th>
+                  <th>{t("adminUsers.colPrs")}</th>
+                  <th>{t("adminUsers.colLastActivity")}</th>
                   <th />
                 </tr>
               </thead>
@@ -162,7 +162,7 @@ export default function AdminUsersPage() {
                       <td>
                         <span className="cell-strong">
                           {u.name}
-                          {isSelf && <span className="tag">você</span>}
+                          {isSelf && <span className="tag">{t("adminUsers.you")}</span>}
                         </span>
                         <span className="cell-sub">{u.email}</span>
                       </td>
@@ -196,12 +196,12 @@ export default function AdminUsersPage() {
                           href={`/admin/analyses?userId=${u.id}`}
                           className="button ghost small"
                         >
-                          <IconScan /> Análises
+                          <IconScan /> {t("nav.analyses")}
                         </Link>
                         <button
                           type="button"
                           className="icon-btn danger"
-                          title={isSelf ? "Você não pode excluir a si mesmo" : "Excluir usuário"}
+                          title={isSelf ? t("adminUsers.cannotDeleteSelf") : t("adminUsers.deleteUser")}
                           disabled={isSelf || deleting === u.id}
                           onClick={() => removeUser(u.id, u.name)}
                         >

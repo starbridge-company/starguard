@@ -7,6 +7,7 @@ import Pagination from "@/components/Pagination";
 import { apiGet, ApiError } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { fmtDate } from "@/components/listing";
+import { useT } from "@/lib/i18n";
 import { IconPullRequest, IconExternal } from "@/lib/icons";
 
 interface Row {
@@ -22,6 +23,7 @@ interface Row {
 }
 
 export default function PullRequestsPage() {
+  const t = useT();
   const [data, setData] = useState<Paged<Row> | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +36,11 @@ export default function PullRequestsPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: "20" });
       setData(await apiGet<Paged<Row>>(`/api/pull-requests?${params}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar os Pull Requests.");
+      setError(e instanceof ApiError ? e.message : t("pr.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, t]);
 
   useEffect(() => {
     load();
@@ -50,11 +52,9 @@ export default function PullRequestsPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Correções enviadas</span>
-          <h1>Pull Requests</h1>
-          <p className="page-subtitle">
-            PRs de correção que você abriu a partir das análises.
-          </p>
+          <span className="page-kicker">{t("pr.kicker")}</span>
+          <h1>{t("nav.pullRequests")}</h1>
+          <p className="page-subtitle">{t("pr.subtitle")}</p>
         </div>
       </header>
 
@@ -64,19 +64,16 @@ export default function PullRequestsPage() {
         {loading && !data ? (
           <div className="skeleton" style={{ height: 220 }} />
         ) : rows.length === 0 ? (
-          <div className="empty-state">
-            Você ainda não abriu nenhum Pull Request. Gere correções em uma análise e
-            abra um PR — ele aparece aqui.
-          </div>
+          <div className="empty-state">{t("pr.empty")}</div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Pull Request</th>
-                  <th>Repositório</th>
-                  <th>Arquivos</th>
-                  <th>Aberto</th>
+                  <th>{t("nav.pullRequests")}</th>
+                  <th>{t("pr.colRepo")}</th>
+                  <th>{t("pr.colFiles")}</th>
+                  <th>{t("pr.colOpened")}</th>
                   <th />
                 </tr>
               </thead>
@@ -107,7 +104,7 @@ export default function PullRequestsPage() {
                           href={`/results/${r.analysisId}`}
                           className="button ghost small"
                         >
-                          Análise
+                          {t("pr.viewAnalysis")}
                         </Link>
                       )}
                       <a
@@ -115,7 +112,7 @@ export default function PullRequestsPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="icon-btn"
-                        title="Abrir no GitHub"
+                        title={t("pr.openOnGithub")}
                       >
                         <IconExternal />
                       </a>

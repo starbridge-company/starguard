@@ -89,8 +89,7 @@ export async function createAnalysis(input: {
   return row!.id;
 }
 
-/** Atualiza colunas de progresso/fase/métrica de uma análise em andamento. */
-export async function patchAnalysis(id: string, patch: AnalysisPatch): Promise<void> {
+function patchToSet(patch: AnalysisPatch): Record<string, unknown> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (patch.phases !== undefined) set.phases = patch.phases;
   if (patch.progress !== undefined) set.progress = patch.progress;
@@ -98,7 +97,78 @@ export async function patchAnalysis(id: string, patch: AnalysisPatch): Promise<v
   if (patch.startedAt !== undefined) set.startedAt = patch.startedAt;
   if (patch.finishedAt !== undefined) set.finishedAt = patch.finishedAt;
   if (patch.metrics) Object.assign(set, patch.metrics);
-  await db.update(analyses).set(set).where(eq(analyses.id, id));
+  return set;
+}
+
+/**
+ * Atualiza colunas de progresso/fase/métrica de uma análise em andamento.
+ *
+ * Grava o JSONB `phases` inteiro. Isso seria condição de corrida se houvesse
+ * dois escritores — e é o que o AUDITORIA.md#BUG-20 previa para quando o
+ * estado por achado começasse a ser gravado. Não aconteceu: o FEAT-01 levou os
+ * achados para a tabela `findings`, que é a alternativa que o próprio item
+ * indicava. Hoje quem escreve `phases` é só o `runJob` da própria análise —
+ * mais o encerramento de análise abandonada, que usa `patchIfUntouchedSince`
+ * justamente para não atropelar um job vivo.
+ */
+export async function patchAnalysis(id: string, patch: AnalysisPatch): Promise<void> {
+  await db.update(analyses).set(patchToSet(patch)).where(eq(analyses.id, id));
+}
+
+/**
+ * Igual ao `patchAnalysis`, mas só grava se a linha continuar sem sinal de
+ * vida desde `since`. Se o job voltou a escrever entre a leitura e a escrita,
+ * o UPDATE não casa e nada é sobrescrito. Ver AUDITORIA.md#BUG-11 e #BUG-20.
+ */
+export async function patchIfUntouchedSince(
+  id: string,
+  since: Date,
+  patch: AnalysisPatch
+): Promise<boolean> {
+  const rows = await db
+    .update(analyses)
+    .set(patchToSet(patch))
+    .where(and(eq(analyses.id, id), lt(analyses.updatedAt, since)))
+    .returning({ id: analyses.id });
+  return rows.length > 0;
+}
+
+/**
+ * Análises presas em `pending`/`running` sem sinal de vida há mais de
+ * `olderThanMs`. Devolve id + phases para que o chamador marque as fases
+ * inacabadas com um motivo legível. Ver AUDITORIA.md#BUG-11.
+ *
+ * O corte é por `updatedAt`: um job vivo escreve a cada fase, então uma linha
+ * parada é exatamente a que perdeu o processo (deploy, restart, crash).
+ */
+export async function listStale(olderThanMs: number, cutoff = new Date(Date.now() - olderThanMs)) {
+  return db
+    .select({ id: analyses.id, phases: analyses.phases, progress: analyses.progress })
+    .from(analyses)
+    .where(
+      and(
+        isNull(analyses.deletedAt),
+        isNull(analyses.finishedAt),
+        or(eq(analyses.status, "pending"), eq(analyses.status, "running")),
+        lt(analyses.updatedAt, cutoff)
+      )
+    )
+    .limit(100);
+}
+
+/**
+ * Soft delete. Devolve `false` se a análise já estava excluída (ou não existe)
+ * — assim a rota não responde 200 para algo que não aconteceu.
+ * Ver AUDITORIA.md#BUG-22.
+ */
+export async function softDelete(id: string): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(analyses)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(and(eq(analyses.id, id), isNull(analyses.deletedAt)))
+    .returning({ id: analyses.id });
+  return rows.length > 0;
 }
 
 export async function getById(id: string) {

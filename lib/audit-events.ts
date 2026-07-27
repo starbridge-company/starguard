@@ -1,7 +1,12 @@
 // ============================================================
-// Catálogo de eventos de auditoria — rótulos amigáveis + categorias.
+// Catálogo de eventos de auditoria — categorias + chave de tradução.
 // Módulo PURO (sem server-only): usado no backend (filtro por categoria) e
 // no frontend (badges, cores, filtros).
+//
+// Os rótulos eram literais em português aqui dentro: a tela de monitoramento
+// aparecia meio traduzida para quem lê em inglês. É a frente "enums de
+// domínio" do FEAT-04 — ver AUDITORIA.md#PEND-23. O módulo continua puro:
+// guarda a CHAVE, e quem renderiza aplica o `t()`.
 // ============================================================
 export type AuditCategory =
   | "auth"
@@ -12,39 +17,36 @@ export type AuditCategory =
   | "sistema";
 
 export interface EventMeta {
-  label: string;
   category: AuditCategory;
 }
 
+/**
+ * A chave de tradução é derivada do nome do evento (`auditEvent.<evento>`),
+ * não repetida entrada por entrada: uma tabela paralela de chaves seria só
+ * mais um lugar para sair de sincronia.
+ */
 export const EVENT_CATALOG: Record<string, EventMeta> = {
-  "login.success": { label: "Login", category: "auth" },
-  "login.fail": { label: "Login falho", category: "auth" },
-  "login.ratelimited": { label: "Login bloqueado (limite)", category: "auth" },
-  logout: { label: "Logout", category: "auth" },
-  "token.refresh": { label: "Sessão renovada", category: "auth" },
-  "session.revoked": { label: "Sessões encerradas", category: "auth" },
-  "analyze.start": { label: "Análise iniciada", category: "analise" },
-  "finding.status": { label: "Achado atualizado", category: "analise" },
-  "fix.generate": { label: "Correção gerada", category: "analise" },
-  "fix.cached": { label: "Correção reaproveitada", category: "analise" },
-  "analyze.done": { label: "Análise concluída", category: "analise" },
-  "pr.open": { label: "PR aberto", category: "pr" },
-  "pr.batch": { label: "PR em lote", category: "pr" },
-  "token.create": { label: "Token criado", category: "conta" },
-  "token.delete": { label: "Token removido", category: "conta" },
-  "account.update": { label: "Conta atualizada", category: "conta" },
-  "user.create": { label: "Usuário criado", category: "usuario" },
-  "user.role.update": { label: "Papel alterado", category: "usuario" },
-  "user.delete": { label: "Usuário excluído", category: "usuario" },
-};
-
-export const CATEGORY_META: Record<AuditCategory, { label: string }> = {
-  auth: { label: "Autenticação" },
-  analise: { label: "Análises" },
-  pr: { label: "Pull Requests" },
-  conta: { label: "Conta" },
-  usuario: { label: "Usuários" },
-  sistema: { label: "Sistema" },
+  "login.success": { category: "auth" },
+  "login.fail": { category: "auth" },
+  "login.ratelimited": { category: "auth" },
+  logout: { category: "auth" },
+  "token.refresh": { category: "auth" },
+  "session.revoked": { category: "auth" },
+  "analyze.start": { category: "analise" },
+  "finding.status": { category: "analise" },
+  "fix.generate": { category: "analise" },
+  "fix.cached": { category: "analise" },
+  "analyze.done": { category: "analise" },
+  "analysis.delete": { category: "analise" },
+  "analysis.export": { category: "analise" },
+  "pr.open": { category: "pr" },
+  "pr.batch": { category: "pr" },
+  "token.create": { category: "conta" },
+  "token.delete": { category: "conta" },
+  "account.update": { category: "conta" },
+  "user.create": { category: "usuario" },
+  "user.role.update": { category: "usuario" },
+  "user.delete": { category: "usuario" },
 };
 
 export const CATEGORY_ORDER: AuditCategory[] = [
@@ -56,8 +58,10 @@ export const CATEGORY_ORDER: AuditCategory[] = [
   "sistema",
 ];
 
-export function eventLabel(event: string): string {
-  return EVENT_CATALOG[event]?.label ?? event;
+/** Chave de tradução do evento. Evento desconhecido devolve `null` — quem
+ *  renderiza mostra o nome cru, que é mais útil que um rótulo genérico. */
+export function eventLabelKey(event: string): string | null {
+  return EVENT_CATALOG[event] ? `auditEvent.${event}` : null;
 }
 
 export function eventCategory(event: string): AuditCategory {

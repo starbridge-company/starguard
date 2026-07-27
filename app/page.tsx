@@ -10,6 +10,7 @@ import TokenPicker, { type TokenSelection } from "@/components/TokenPicker";
 import Collapsible from "@/components/Collapsible";
 import InfoTip from "@/components/InfoTip";
 import { apiPost, ApiError } from "@/lib/client";
+import { parseGitHubRepo } from "@/lib/validation";
 import { IconPlan, IconSkills, IconScan, IconRefactor, IconRepo } from "@/lib/icons";
 import { useT, type MessageKey } from "@/lib/i18n";
 
@@ -47,7 +48,11 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = projectName.trim() && systemDescription.trim();
+  // A URL do repositório é opcional, mas se foi digitada precisa ser válida:
+  // antes, o erro só aparecia depois do envio, vindo do servidor.
+  // Ver AUDITORIA.md#UX-19.
+  const repoOk = !repoUrl.trim() || parseGitHubRepo(repoUrl.trim()) !== null;
+  const canSubmit = !!projectName.trim() && !!systemDescription.trim() && repoOk;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

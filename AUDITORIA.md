@@ -33,7 +33,45 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **6 — Idioma** | FEAT-04 | 🟡 **fundação entregue e testada; extração parcial** em 27/07/2026 |
 | **Contínuo — Qualidade** | ARQ-01 · ARQ-02 · ARQ-03 · BUG-17 | ✅ **entregue** em 27/07/2026 |
 | **Varredura de pendências** | 18 das 19 pendências abertas | ✅ **resolvidas e verificadas** em 27/07/2026 |
-| Próxima | backlog P2/P3 do documento + PEND-23 | ⬜ a fazer |
+| **7 — Backlog P1/P2/P3** | SEC-06 · BUG-11 a BUG-22 · ARQ-10 · UX-03 · UX-04 (resto) · UX-07 · UX-08 · UX-10 · UX-11 · UX-12 · UX-13 · UX-19 · PEND-23 | ✅ **entregue** em 27/07/2026 |
+| Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-28 | ⬜ a fazer |
+
+<details>
+<summary><strong>Como o Sprint 7 foi validado</strong></summary>
+
+Suíte de unidade, tipos, lint e build de produção. **Não houve execução em
+navegador nem contra banco** — ver PEND-24 a PEND-27.
+
+| Verificação | Resultado |
+|---|---|
+| Testes de unidade | **184 em 17 arquivos** (era 86) — 2 arquivos novos por item de risco |
+| `npm run typecheck` | limpo |
+| `npm run lint` | **0 erros** (11 avisos: a decisão registrada em PEND-20) |
+| `npm run build` | passa; a rota `/api/analyses/[id]/export` aparece no manifesto |
+| Cobertura dos módulos novos | `github-auth` 100% · `dedup` 97% · `export` 92% · `repo-links` 100% |
+| Dicionários pt-BR × en | **434 chaves cada**, com teste travando a paridade e a interpolação |
+
+**Cada correção entrou com o teste que a trava** — `resolveGitHubToken · SEC-06`,
+`timeout e retry · BUG-12`, `resposta truncada · BUG-13`, `OpenAI nos modelos
+atuais · BUG-14`, `collidesWithSast · BUG-15`, `computeProgress · BUG-21`,
+`failUnfinishedPhases · BUG-11`, `DELETE /api/analyses/[id] · BUG-22`,
+`repoFileLink · UX-08`, `toSarif · UX-10`, `paridade de chaves · PEND-23`.
+
+**Três coisas encontradas ao fazer o trabalho, todas corrigidas:**
+- O `t` da tradução colidia com o `t` do `.map()` dos tokens na tela de Conta —
+  `tsc` pegou porque `TokenView` não é chamável. Num arquivo sem tipos, teria
+  virado erro em runtime.
+- `SEVERITY_LABEL_PT` e `CATEGORY_META` ficaram órfãos ao converter os enums
+  para chave de tradução. Removidos: código morto num arquivo de domínio é
+  exatamente o BUG-18.
+- O `NewUserModal` ainda era a `<div>` crua com `onClick` no overlay — o UX-04
+  tinha sido dado por entregue com ele de fora. Migrado para o `<Modal>`.
+
+**Duas decisões de produto tomadas pelo dono, não pelo executor** — a auditoria
+oferecia dois caminhos em cada uma: a Fase 4 **deixou de gerar correção
+automática** (BUG-16) e a **exclusão de análise foi exposta** em vez de a coluna
+ser removida (BUG-22).
+</details>
 
 <details>
 <summary><strong>Como a varredura de pendências foi validada</strong></summary>
@@ -253,13 +291,17 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ## Pendências
 
 > Varredura de 27/07/2026: as 19 pendências abertas foram revisadas uma a uma e
-> **18 foram resolvidas**. A tabela abaixo mantém o histórico — cada linha
-> riscada diz como foi fechada. A única que permanece é a PEND-23, criada
-> durante a varredura.
+> **18 foram resolvidas**. A PEND-23 foi fechada no Sprint 7. As quatro abaixo
+> nasceram do próprio Sprint 7 e são todas do mesmo tipo: **o que foi entregue
+> não foi exercitado em uso real.**
 
 | ID | Origem | O que falta | Por quê / o que fazer |
 |---|---|---|---|
-| **PEND-23** | FEAT-04 | Telas secundárias ainda em português fixo | O fluxo principal está 100% traduzido. Faltam as 4 telas de governança, o corpo da tela de Conta, o relatório e `NewUserModal`. É trabalho mecânico (`t()` no lugar do literal) sobre uma fundação pronta e testada. |
+| **PEND-24** | Sprint 7 | Nada foi visto em navegador | O sprint inteiro foi validado por tipo, lint, unidade e build. O selo de confiança (UX-07), o link para o GitHub (UX-08), o menu de exportação (UX-10), o `Picker` no lugar do `<select>` (UX-11), o foco visível e o `prefers-reduced-motion` (UX-12/13) e as 7 telas traduzidas **nunca foram abertos**. Rodar as suítes de `e2e/` e acrescentar uma para o percurso de governança. |
+| **PEND-25** | UX-10 | SARIF nunca subiu no Code Scanning | O critério de aceite do item é *"o SARIF exportado sobe no GitHub Code Scanning sem erro de validação"* — e isso exige um repositório real. O que existe é o formato travado por 14 asserções de unidade (schema, índice de regra, nível, `partialFingerprints`, localização do achado de SCA). Subir um arquivo real num repositório de teste fecha. |
+| **PEND-26** | BUG-11 / BUG-22 | Nenhuma consulta nova rodou contra Postgres | `listStale`, `patchIfUntouchedSince` e `softDelete` são Drizzle novo em `lib/repos/`, que por decisão do projeto não tem teste de unidade. A rota de exclusão está coberta com o repositório mockado — a **consulta em si**, não. Rodar contra um Postgres descartável. *(Parcial em 27/07/2026: as migrações `0002`–`0004` foram aplicadas a um banco real e o login foi exercitado ponta a ponta pelo ARQ-12; as três consultas novas seguem sem execução.)* |
+| **PEND-28** | ARQ-12 | O sintoma continua: 500 mudo | A causa do ARQ-12 foi corrigida (migrações aplicadas), mas **o modo de falha não**. Um banco atrás do código volta a derrubar o login exatamente do mesmo jeito no próximo deploy. Implementar a checagem de schema descrita no item. |
+| **PEND-27** | BUG-12/13/14 | Os três provedores continuam sem chamada real | O retry, o timeout, o `stop_reason` e o `max_completion_tokens` estão cobertos com `fetch` mockado. Nenhuma chave de IA foi usada. O BUG-14 em especial nasceu de um contrato do provedor: só uma chamada real prova que a OpenAI voltou a funcionar. |
 
 ### Histórico
 
@@ -275,7 +317,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | ~~PEND-05~~ | BUG-06/BUG-10 (S2) | ✅ **resolvida em 27/07/2026** |`tests/enrich.test.ts` mocka a camada de IA: 30 achados de 2 regras produzem **1** chamada, e resposta incompleta é descartada em vez de aplicada pela metade. |
 | ~~PEND-06~~ | BUG-07 (S2) | ✅ **resolvida em 27/07/2026** |`openPullRequestBatch` testado: 3 arquivos → 1 branch, 1 PR, e caminho repetido é deduplicado. |
 | ~~PEND-07~~ | SEC-02 (S2) | ✅ **resolvida em 27/07/2026** |`requireSession` passou a reconferir a conta no banco com cache de 30s. Verificado na aplicação: usuário excluído mantém acesso por ~30s (antes: 15 min) e depois recebe 401. |
-| **PEND-08** | ARQ-01 | Nenhum teste automatizado | Todas as validações foram feitas à mão contra um container. Nada disso está protegido contra regressão. É a maior dívida aberta. |
+| ~~PEND-08~~ | ARQ-01 | ✅ **resolvida em 27/07/2026** |Fechada pelo ARQ-01 e ampliada desde então: **184 testes em 17 arquivos**. A linha ficou sem riscar por engano na varredura anterior — o texto ("nenhum teste automatizado") já não descrevia o repositório. |
+| ~~PEND-23~~ | FEAT-04 | ✅ **resolvida em 27/07/2026** |As 4 telas de governança, o corpo da Conta, o relatório, `NewUserModal`, `PipelineStepper` e a lista de PRs passaram a usar `t()`. Fechadas junto as outras duas frentes do FEAT-04 que faltavam: **enums de domínio** (`SEVERITY_LABEL_PT` e os rótulos da trilha de auditoria viraram chave; ambos removidos do código) e **formatação** (`fmtNum` e a data do rodapé do relatório seguem o idioma ativo). **434 chaves por idioma**, com teste travando paridade e interpolação. |
 | ~~PEND-09~~ | FEAT-01/02 (S3) | ✅ **fechada em 27/07/2026** — filtros, selos, ações de estado, modal e cache exercitados em Chromium real | Filtro Abertos/Resolvidos, selos de estado, botões "Já corrigi"/"Falso positivo" e carregamento da correção guardada ao reabrir o modal: validados por tipo e build, não em uso real. |
 | ~~PEND-10~~ | FEAT-02 (S3) | ✅ **resolvida em 27/07/2026** |Coberto pelos testes de enriquecimento e pelo cache de correção já validado na API. |
 | ~~PEND-11~~ | FEAT-01 (S3) | ✅ **resolvida em 27/07/2026** |`scripts/backfill-findings.mjs` (`npm run db:backfill-findings`), idempotente e com `--dry-run`. Executado contra o banco de teste. |
@@ -464,6 +507,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 
 ### SEC-06 · `GITHUB_TOKEN` do servidor usado em nome de qualquer usuário ✅
 **P1 · Esforço P**
+
+> ✅ **Corrigido em 27/07/2026.** `lib/github-auth.ts`: o token do servidor só entra com `SINGLE_TENANT=true` explícito. Leitura sem token segue anônima (resolve repositório público); em repositório privado a resposta passou a ser "informe um token do GitHub" em vez de um 404 cru. Abrir PR exige token do próprio usuário. Teste cobre o caminho negativo.
 
 - **Evidência:** [lib/github.ts:86](lib/github.ts#L86), [:108](lib/github.ts#L108), [:136](lib/github.ts#L136) — `token || process.env.GITHUB_TOKEN`.
 - **Hoje:** num deploy multi-usuário, quem não tem token usa o do servidor e pode ler (e abrir PR em) qualquer repositório privado ao qual o token do servidor tenha acesso, bastando saber a URL.
@@ -667,6 +712,8 @@ create table starguard.finding_fixes (
 ### UX-03 · Clicar fora do modal joga fora a correção gerada ✅
 **P2 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** O dano maior sumiu com o FEAT-02 (a correção fica no banco e volta ao reabrir). O que ainda se perdia era o que o usuário **digitou** e não usou: `FixModal` e `NewUserModal` passaram a pedir confirmação quando há texto não aproveitado, e o `Modal` já bloqueia o fechamento durante a geração.
+
 - **Evidência:** [FixModal.tsx:57](components/FixModal.tsx#L57) e [BatchFixModal.tsx:178](components/BatchFixModal.tsx#L178) — `onClick={onClose}` no overlay.
 - **Hoje:** um clique acidental fora do modal descarta uma correção que custou minutos e dinheiro (agrava-se com a falta de cache do `FEAT-02`).
 - **Como corrigir:** com o `FEAT-02` o dano some (a correção fica salva). Ainda assim: confirmar antes de fechar se houver conteúdo não aproveitado, e nunca fechar por clique no overlay durante a geração.
@@ -704,6 +751,8 @@ create table starguard.finding_fixes (
 ### UX-07 · Achado da IA não mostra o nível de confiança ✅
 **P2 · Esforço P**
 
+> ✅ **Entregue em 27/07/2026.** Selo "confiança média" no card — só no caso duvidoso, porque marcar "alta" em todo achado seria ruído. Filtro "Só alta" na barra de correções, que aparece apenas quando há o que filtrar.
+
 - **Evidência:** `confidence: "high" | "medium"` é preenchido ([lib/review.ts:251](lib/review.ts#L251)) e nunca exibido — `grep` por `confidence` nos `.tsx` não retorna nada.
 - **Como corrigir:** badge "confiança média" no `VulnerabilityCard` e filtro por confiança.
 - **Aceite:** dá para esconder achados de confiança média com um clique.
@@ -711,12 +760,16 @@ create table starguard.finding_fixes (
 ### UX-08 · Não há link do achado para o código no GitHub 💡
 **P2 · Esforço P**
 
+> ✅ **Entregue em 27/07/2026.** `lib/repo-links.ts` monta `{repo}/blob/HEAD/{file}#L{a}-L{b}`. `HEAD` no lugar do `defaultBranch` evita persistir o branch em cada análise — o preço é que o link aponta para o código de agora, e o título do link diz isso. Recusa repositório fora da allowlist, caminho com `..` e o placeholder de arquivo desconhecido da revisão por IA.
+
 - **Hoje:** o card mostra `file` e `line` como texto ([VulnerabilityCard.tsx:52-59](components/VulnerabilityCard.tsx#L52-L59)). Para ver o contexto real, o usuário abre o GitHub e navega à mão.
 - **Como corrigir:** `{repoUrl}/blob/{defaultBranch}/{file}#L{line}-L{endLine}` — o `defaultBranch` já é buscado em `getRepoMeta`.
 - **Aceite:** um clique abre a linha exata no GitHub.
 
 ### UX-09 · Instrução padrão duplicada nos achados da IA ✅
 **P2 · Esforço P**
+
+> ✅ **Corrigido em 27/07/2026 (pelo ARQ-11).** A regex que nunca casava deu lugar a `isGenericSuggestion` em `lib/constants.ts`, com a frase-guia num lugar só. `FixModal` usa a função; a duplicação some.
 
 - **Evidência:** [FixModal.tsx:21](components/FixModal.tsx#L21) testa `/^Revise o trecho conforme a regra/i`, mas o texto genérico realmente usado é *"Revise o trecho conforme a **recomendação**."* ([lib/review.ts:246](lib/review.ts#L246)). A regex **nunca casa**.
 - **Hoje:** para todo achado de IA sem sugestão específica, a textarea abre com a frase genérica **mais** a linha-guia — exatamente a duplicação que o comentário do código diz evitar.
@@ -726,6 +779,8 @@ create table starguard.finding_fixes (
 ### UX-10 · Sem exportação de dados (SARIF, CSV, JSON) 💡
 **P2 · Esforço M**
 
+> ✅ **Entregue em 27/07/2026.** `GET /api/analyses/:id/export?format=sarif|csv|json`, com CSRF não aplicável (é GET) mas dono/superadmin checado. O SARIF sai com `security-severity`, tags de CWE/OWASP e `partialFingerprints` — sem eles o Code Scanning reabre todo achado a cada push. O CSV vai com BOM (Excel) e neutraliza injeção de fórmula, que importa porque o texto vem de repositório de terceiros. O JSON leva a cobertura (`sastRan`/`scaRan`/`reviewRan`), preservando a honestidade do UX-15. **Não exercitado contra o GitHub — ver PEND-25.**
+
 - **Evidência:** [app/report/[id]/page.tsx:69](app/report/[id]/page.tsx#L69) — a única exportação é `window.print()`.
 - **Hoje:** não dá para levar os achados para o GitHub Code Scanning, Jira, planilha ou pipeline de CI. É o que separa "demo" de "ferramenta adotada".
 - **Como corrigir:** `GET /api/analyses/:id/export?format=sarif|csv|json`. **SARIF 2.1.0** é o formato que o GitHub Code Scanning consome direto — alto retorno para pouco esforço, já que o modelo de dados interno é praticamente o do SARIF.
@@ -734,17 +789,23 @@ create table starguard.finding_fixes (
 ### UX-11 · `<select>` nativo destoa do resto da interface ✅
 **P2 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** `Picker` genérico em `components/filters.tsx`, no padrão `flt-dd` que o arquivo já declarava como convenção — com grupos (no lugar do `<optgroup>`), `role=listbox`, ESC e clique-fora. `TokenPicker` e `NewUserModal` migrados; não sobrou `<select>` nativo.
+
 - **Evidência:** [TokenPicker.tsx:62-78](components/TokenPicker.tsx#L62-L78) usa `<select>`, enquanto [filters.tsx:3-5](components/filters.tsx#L3-L5) declara a convenção do projeto: *"seletor via popover próprio (sem `<select>` nativo)"*.
 - **Como corrigir:** reaproveitar o padrão de `flt-dd` de `filters.tsx`.
 
 ### UX-12 · Sem suporte a `prefers-reduced-motion` ✅
 **P2 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** Bloco no fim do `globals.css` zerando `--duration-*` na origem, mais uma rede de segurança em `*`. O spinner é a exceção deliberada: ali o movimento **é** a informação, então ele desacelera em vez de parar — um círculo parado no lugar de um indicador de progresso seria pior.
+
 - **Evidência:** `grep -c "prefers-reduced-motion" app/globals.css` = **0**, com spinners e transições em uso.
 - **Como corrigir:** bloco final no CSS zerando `animation-duration`/`transition-duration` quando a preferência estiver ativa.
 
 ### UX-13 · Foco visível insuficiente ✅
 **P2 · Esforço P**
+
+> ✅ **Corrigido em 27/07/2026.** A regra global `:focus-visible` já existia — o problema eram três `outline: none` que a anulavam sem repor nada. O pior: o `InfoTip`, que é `tabIndex=0` com `role="button"` e dava para alcançar pelo teclado sem qualquer sinal na tela. Repostos com contorno sólido em InfoTip, busca dos popovers e campos de formulário.
 
 - **Evidência:** apenas 2 ocorrências de `focus-visible` em 3.157 linhas de CSS.
 - **Como corrigir:** regra global `:focus-visible { outline: 2px solid hsl(var(--accent)); outline-offset: 2px }` e conferir contraste em ambos os temas.
@@ -787,6 +848,8 @@ create table starguard.finding_fixes (
 ### UX-19 · Página inicial não valida a URL do repositório antes de enviar ✅
 **P3 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** `RepoInput` chama o mesmo `parseGitHubRepo` do servidor (o módulo já era isomórfico), marca o campo com `aria-invalid` e explica o formato; `canSubmit` passa a exigir URL válida. Campo vazio continua válido — o repositório é opcional.
+
 - **Evidência:** [app/page.tsx:48](app/page.tsx#L48) — `canSubmit` só exige nome e descrição. A URL inválida só falha no servidor ([validation.ts:48-52](lib/validation.ts#L48-L52)).
 - **Como corrigir:** validar no `RepoInput` com o mesmo `parseGitHubRepo` (isolar num módulo isomórfico) e mostrar o erro no campo.
 
@@ -820,20 +883,32 @@ create table starguard.finding_fixes (
 ### BUG-11 · Análise órfã fica "pendente" para sempre ✅
 **P2 · Esforço M** — [lib/jobs.ts:212-213](lib/jobs.ts#L212-L213): `runJob` faz `if (!raw) return;` silencioso. Os segredos vivem num `Map` em memória ([:39-41](lib/jobs.ts#L39-L41)) e o job é disparado com *fire-and-forget* ([:286-291](lib/jobs.ts#L286-L291)). Se o processo reiniciar (deploy no Render!) entre a criação e a execução — ou durante a execução — a análise fica `pending`/`running` **eternamente**, sem timeout e sem mensagem. Corrigir: marcar `status: "error"` quando os segredos não existirem, e uma varredura que expira análises `running` há mais de N minutos. Solução real em `ARQ-04`.
 
+> ✅ **Corrigido em 27/07/2026.** Segredos ausentes deixaram de retornar em silêncio: a análise vira `error` com um motivo legível em cada fase inacabada. Somado a isso, `expireStaleAnalyses()` encerra o que ficou sem sinal de vida por 20 min (`ANALYSIS_STALE_MS`), de carona na criação de análise e no máximo uma vez por minuto. A escrita é condicional (`patchIfUntouchedSince`), então um job que voltou a responder não é atropelado. Solução definitiva continua sendo o ARQ-04.
+
 ### BUG-12 · Chamadas de IA sem timeout e sem retry ✅
 **P2 · Esforço P** — [lib/ai.ts:44](lib/ai.ts#L44), [:78](lib/ai.ts#L78), [:109](lib/ai.ts#L109): nenhum `fetch` tem `signal`. Um provedor lento trava a fase até o `maxDuration` da rota. E um único 429 do provedor mata a fase inteira. Corrigir: `AbortSignal.timeout(120_000)` e retry com backoff em 429/500/502/503 (2 tentativas), respeitando `retry-after`.
+
+> ✅ **Corrigido em 27/07/2026.** `AbortSignal.timeout` (120 s, `AI_TIMEOUT_MS`) nos três provedores, retry com backoff exponencial em 429/408/5xx honrando o `retry-after`, e `AbortSignal.any` para o chamador poder cancelar. Cancelamento explícito não consome retentativa; 4xx não reentrante não é repetido.
 
 ### BUG-13 · Resposta truncada da IA vira erro confuso ✅
 **P2 · Esforço P** — `callAnthropic` ([lib/ai.ts:61-70](lib/ai.ts#L61-L70)) ignora `stop_reason`. Quando o modelo estoura `max_tokens`, o JSON vem cortado e o usuário recebe *"Não foi possível parsear o JSON da IA"* ([:185](lib/ai.ts#L185)). Corrigir: ler `stop_reason === "max_tokens"` e devolver "resposta truncada — reduza o escopo ou aumente o limite", que é acionável.
 
+> ✅ **Corrigido em 27/07/2026.** `stop_reason: "max_tokens"` (Anthropic), `finish_reason: "length"` (OpenAI) e `finishReason: "MAX_TOKENS"` (Google) viram `AIError` com `code: "truncated"` e a mensagem acionável — no lugar de "não foi possível parsear o JSON".
+
 ### BUG-14 · Provedor OpenAI quebrado nos modelos atuais ✅
 **P2 · Esforço P** — [lib/ai.ts:86](lib/ai.ts#L86) envia `max_tokens`; os modelos recentes da OpenAI exigem `max_completion_tokens` e rejeitam `temperature` fora do padrão. Como o produto se vende como *headless* (troca de provedor por env), `AI_PROVIDER=openai` provavelmente falha com 400. Corrigir e, de preferência, testar os três provedores.
+
+> ✅ **Corrigido em 27/07/2026.** `max_completion_tokens` no lugar do `max_tokens` deprecado, e `temperature` deixou de ser enviada — os modelos de raciocínio rejeitam valor fora do padrão. Teste trava os dois. **Sem chamada real ao provedor — ver PEND-27.**
 
 ### BUG-15 · Dedup da revisão por IA descarta achados legítimos ✅
 **P3 · Esforço P** — [lib/review.ts:171-179](lib/review.ts#L171-L179): no mesmo arquivo, `Math.abs(linha_sast - linha_ia) <= 3` descarta **independentemente do tipo de problema**. Um IDOR na linha 40 é descartado porque o SAST achou um `console.log` na 42. Corrigir: exigir proximidade **e** (mesmo CWE **ou** mesma categoria); só usar a distância isolada quando não houver CWE dos dois lados.
 
+> ✅ **Corrigido em 27/07/2026 (junto com o ARQ-10).** Proximidade virou condição necessária, não suficiente: quando os dois lados declaram CWE, ele precisa bater. O caso do relatório — IDOR na 40 descartado porque o SAST viu um `console.log` na 42 — está travado por teste. Achado sem linha só colide por CWE.
+
 ### BUG-16 · A Fase 4 automática corrige só o achado mais grave, e mal ✅
 **P3 · Esforço P** — [lib/jobs.ts:241-256](lib/jobs.ts#L241-L256): gera correção só para o topo da lista e chama `generateFix` **sem `repoUrl`** — ou seja, sem o arquivo inteiro e sem o engine de agente, justo o caminho de menor qualidade. O usuário compara com a correção sob demanda (que usa o arquivo completo) e vê duas qualidades diferentes para o mesmo produto. Corrigir: passar `repoUrl`/`token` também aqui, ou remover a geração automática e deixar tudo sob demanda (mais barato e mais coerente).
+
+> ✅ **Corrigido em 27/07/2026.** A geração automática foi **removida** — decisão do dono do produto entre as duas saídas que o item oferecia. Motivo: ela produzia UMA correção, pelo pior caminho (sem `repoUrl`, logo sem arquivo inteiro e sem agente), e com `FIX_ENGINE=agent` (o padrão) custava um clone e até 4,5 min de agente em toda análise que ninguém pediu — contra o princípio já adotado no UX-05 e o cache do FEAT-02. Correção agora é sempre sob demanda; o stepper e o relatório dizem isso.
 
 ### BUG-17 · `npm run lint` não existe mais ✅
 **P3 · Esforço P** — [package.json:13](package.json#L13) chama `next lint`, **removido no Next 16** (confirmado: `next lint --help` não reconhece o comando). Não há `.eslintrc*` nem `eslint.config.*`. Corrigir: adicionar `eslint` + `eslint-config-next` com flat config e trocar o script para `eslint .`.
@@ -843,17 +918,27 @@ create table starguard.finding_fixes (
 ### BUG-18 · `PRIVATE_HOST_RE` é código morto ✅
 **P3 · Esforço P** — [lib/validation.ts:37](lib/validation.ts#L37) testa IP privado **depois** de já ter exigido `host === "github.com"` ([:36](lib/validation.ts#L36)). Nunca pode ser verdadeiro. Inofensivo, mas passa falsa sensação de proteção anti-SSRF; ou remover, ou reposicionar caso a allowlist deixe de ser fixa.
 
+> ✅ **Corrigido em 27/07/2026.** Removido. Ficou no lugar um comentário dizendo o que de fato protege (a allowlist) e o que precisa voltar se ela deixar de ser fixa — checagem no **IP resolvido**, não no nome, porque a regex antiga nem contra rebind de DNS servia. Um teste trava que destino interno continua barrado.
+
 ### BUG-19 · `useMe` guarda cache de módulo que não expira ✅
 **P3 · Esforço P** — [lib/useMe.ts:15](lib/useMe.ts#L15). `clearMe()` é chamado nos lugares certos (conta e logout), mas se o papel mudar por ação de um superadmin, a interface do usuário afetado continua mostrando o papel antigo até recarregar. Corrigir: revalidar no foco da janela ou incluir o papel na resposta do refresh.
+
+> ✅ **Corrigido em 27/07/2026.** O cache passou a envelhecer (60 s) e a revalidar ao voltar o foco para a aba — que é quando o usuário volta a olhar a tela. Um conjunto de assinantes faz a revalidação atualizar todos os `useMe()` montados, não só quem disparou o fetch.
 
 ### BUG-20 · `patchAnalysis` sobrescreve o JSONB inteiro ✅
 **P3 · Esforço P** — [lib/repos/analyses.ts:93-102](lib/repos/analyses.ts#L93-L102) grava `phases` inteiro a cada atualização. Hoje só o `runJob` escreve, então não há conflito; quando o `FEAT-01` passar a gravar estado de achado, vira condição de corrida. Corrigir preventivamente com `jsonb_set` ou movendo os achados para tabela própria (o que o `FEAT-01` já faz).
 
+> ✅ **Endereçado em 27/07/2026.** A corrida que o item previa não chegou a existir: o FEAT-01 levou os achados para a tabela `findings` — que é a alternativa apontada pelo próprio item. Hoje quem escreve `phases` é o `runJob` da própria análise. O segundo escritor introduzido pelo BUG-11 usa `patchIfUntouchedSince`, um UPDATE condicional que não casa se o job voltou a escrever. Registrado no código.
+
 ### BUG-21 · `progress` não reflete falha parcial ✅
 **P3 · Esforço P** — [lib/jobs.ts:261-267](lib/jobs.ts#L261-L267) grava `progress: 100` mesmo com fases em erro. A lista mostra "100%" e status "erro" ao mesmo tempo.
 
+> ✅ **Corrigido em 27/07/2026.** `computeProgress` deriva o percentual das fases concluídas em vez de cravar 100 no fim. Com uma fase em erro a lista mostra 75%, não "100% · erro".
+
 ### BUG-22 · Sem `deletedAt` em análises na interface ✅
 **P3 · Esforço P** — a coluna `analyses.deleted_at` existe e é filtrada nas consultas, mas **nenhuma rota** exclui uma análise. Ou expor a exclusão (com CSRF e checagem de dono), ou remover a coluna.
+
+> ✅ **Corrigido em 27/07/2026.** A exclusão foi **exposta** — decisão do dono do produto entre as duas saídas do item. `DELETE /api/analyses/:id` com CSRF, checagem de dono (404 para análise alheia, sem confirmar existência) e soft delete idempotente (já excluída devolve 404, não 200 mentindo). Botão com confirmação na listagem e evento `analysis.delete` na auditoria.
 
 ---
 
@@ -894,6 +979,26 @@ create table starguard.finding_fixes (
 
 ### ARQ-10 · Lógica de deduplicação duplicada ✅
 **Esforço P** — `collidesWithSast` existe em [lib/review.ts:171](lib/review.ts#L171) (servidor) **e** em [results/[id]/page.tsx:209-215](app/results/[id]/page.tsx#L209-L215) (cliente), com regras **diferentes**: o servidor descarta por proximidade OU CWE; o cliente exige proximidade E (CWE ou regra). Os dois filtram o mesmo conjunto com critérios distintos. Unificar num único módulo compartilhado.
+
+> ✅ **Entregue em 27/07/2026.** `lib/dedup.ts` isomórfico com a regra única; `lib/review.ts` e a tela de resultados importam dela. As duas cópias divergentes sumiram — e a regra unificada é a corrigida pelo BUG-15, não a antiga de nenhum dos dois lados.
+
+### ARQ-12 · Banco atrasado em relação ao código derruba o login com 500 mudo ✅
+**P1 · Esforço P**
+
+> ⚠️ **Encontrado em uso real em 27/07/2026**, depois do Sprint 7 — e não por ele.
+> O banco estava na migração `0001` enquanto o código já esperava a `0004`.
+> Faltavam `users.sessions_invalidated_at` (SEC-02), as tabelas `findings` e
+> `finding_fixes` (FEAT-01/02) e `users.locale` (PEND-19). As três migrações
+> foram aplicadas; o login voltou. **A causa foi corrigida, o sintoma não.**
+
+- **Evidência:** `authenticate()` chama `ensureSeeded()` antes de procurar o usuário ([lib/auth.ts:88](lib/auth.ts#L88)). O `INSERT` do seed lista todas as colunas do schema Drizzle; uma coluna ausente no banco faz a query estourar, o seed propagar e a rota devolver **500 para qualquer senha** — inclusive a correta.
+- **Hoje:** a única pista é `Failed query: insert into "starguard"."users" …` no log do servidor. Quem opera vê "erro na requisição" e não tem como saber que o conserto é `npm run db:migrate`. O `/api/health` existe e **não** confere o schema.
+- **Por que é P1:** um banco atrás do código é o estado normal logo depois de um deploy — e o modo de falha escolhido é o pior possível: tudo parece de pé, mas ninguém entra.
+- **Como corrigir:**
+  1. Na inicialização, comparar as migrações do jornal (`db/migrations/meta/_journal.json`) com as de `drizzle.__drizzle_migrations` e **recusar subir** com uma mensagem dizendo quantas faltam e qual comando roda.
+  2. Enquanto isso não existir: `/api/health` reporta `schema: { esperado, aplicado, pendentes[] }` e fica *unhealthy* quando houver diferença.
+  3. Falha do seed não pode virar 500 anônimo — envolver o `ensureSeeded()` e responder 503 com "banco desatualizado", que é acionável.
+- **Aceite:** subir a app contra um banco uma migração atrás falha na inicialização citando o comando; se subir mesmo assim, o login responde 503 explicando, não 500.
 
 ### ARQ-11 · Textos de domínio espalhados como literais ✅
 **Esforço M** — a frase-guia de correção está duplicada **literalmente** em [parsers.ts:80](lib/parsers.ts#L80) e [FixModal.tsx:20](components/FixModal.tsx#L20), com uma terceira variante no prompt do agente ([agent-fix.ts:24](lib/agent-fix.ts#L24)). Causa direta de `UX-09`. Centralizar em `lib/constants.ts` — e é pré-requisito do `FEAT-04`.

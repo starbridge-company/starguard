@@ -12,6 +12,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { runAI, extractJSON } from "@/lib/ai";
 import { AI_BY_PHASE } from "@/lib/config";
+// Regra única de deduplicação, compartilhada com a tela (AUDITORIA.md#ARQ-10).
+import { collidesWithSast, collidesWithSca, normPath } from "@/lib/dedup";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
 import type {
   Vulnerability,
@@ -86,10 +88,6 @@ const SOURCE_EXT = new Set([
 // Caminhos que concentram risco de autorização / regra de negócio.
 const PRIORITY_RE =
   /(auth|login|logout|session|sess[aã]o|token|jwt|password|senha|route|rota|api|controller|handler|endpoint|middleware|service|servi[çc]o|db|database|sql|query|repository|model|payment|pagamento|billing|checkout|order|pedido|refund|reembolso|admin|user|usuario|account|conta|permission|permiss|access|acesso|acl|role|papel|tenant|empresa|company|upload|webhook|crypto|cripto|secret|segredo)/i;
-
-function normPath(p: string): string {
-  return p.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-}
 
 interface Candidate {
   path: string;
@@ -169,53 +167,6 @@ async function collectSourceFiles(
     used += content.length;
   }
   return { files, discovered: all.length, truncated };
-}
-
-// ------------------------------------------------------------
-// Deduplicação determinística (rede de segurança sobre a instrução do prompt):
-// descarta achado da IA que colide com um do SAST no mesmo arquivo por linha
-// próxima (±3) ou mesmo CWE.
-// ------------------------------------------------------------
-function collidesWithSast(f: Vulnerability, sast: Vulnerability[]): boolean {
-  const fp = normPath(f.file);
-  const fcwe = (f.cwe || "").toUpperCase().trim();
-  return sast.some((s) => {
-    if (normPath(s.file) !== fp) return false;
-    if (fcwe && s.cwe && s.cwe.toUpperCase().trim() === fcwe) return true;
-    return Math.abs((s.line || 0) - (f.line || 0)) <= 3;
-  });
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// SCA não tem arquivo/linha — a colisão é por CVE (sinal forte) ou por nome de
-// pacote citado num contexto de dependência vulnerável (evita re-reportar o que
-// o Trivy já pegou). Achado de código que só MENCIONA um pacote (ex.: "SSRF em
-// fetch com axios") não colide, pois falta o sinal de "dependência/versão/CVE".
-function collidesWithSca(f: Vulnerability, sca: DependencyVuln[]): boolean {
-  if (!sca.length) return false;
-  const text = `${f.ruleId} ${f.title} ${f.description} ${f.cwe ?? ""} ${f.file}`;
-
-  // 1) Mesmo CVE que o SCA já reportou.
-  const cveSet = new Set(sca.map((d) => d.cve.toUpperCase()));
-  const cited = text.toUpperCase().match(/CVE-\d{4}-\d{3,7}/g) || [];
-  if (cited.some((c) => cveSet.has(c))) return true;
-
-  // 2) Pacote do SCA citado em contexto de dependência.
-  const lower = text.toLowerCase();
-  const depSignal =
-    /(vulner|desatualiz|outdated|vers[aã]o|version|depend[êe]nc|pacote|package|upgrade|atualiz|bump|cve)/i.test(
-      lower
-    );
-  if (!depSignal) return false;
-  return sca.some((d) => {
-    const pkg = d.package.toLowerCase();
-    if (pkg.length < 3) return false;
-    const re = new RegExp(`(^|[^a-z0-9_.@/-])${escapeRe(pkg)}([^a-z0-9_.@/-]|$)`, "i");
-    return re.test(lower);
-  });
 }
 
 function normSeverity(s: unknown): Severity {

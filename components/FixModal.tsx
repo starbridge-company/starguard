@@ -53,10 +53,20 @@ export default function FixModal({
   const t = useT();
   const [instructions, setInstructions] = useState(() => defaultInstructions(vuln));
 
+  // Clicar fora não pode custar trabalho. A correção em si já não se perde —
+  // o FEAT-02 a guarda no banco e ela volta ao reabrir o modal. O que ainda
+  // some é o que o usuário DIGITOU e não chegou a usar: instruções alteradas
+  // e nunca enviadas. Só nesse caso perguntamos. Ver AUDITORIA.md#UX-03.
+  const instructionsDirty =
+    instructions.trim() !== defaultInstructions(vuln).trim();
+  const confirmClose = () =>
+    instructionsDirty && !fix ? t("fix.confirmDiscard") : null;
+
   return (
     <Modal
       title={t("fix.title")}
       locked={loading}
+      confirmClose={confirmClose}
       onClose={onClose}
       titleExtra={
         <div className="vuln-badges" style={{ marginLeft: 8 }}>

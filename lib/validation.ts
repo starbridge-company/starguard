@@ -14,9 +14,17 @@ export const emailField = z
   .max(255)
   .refine((v) => emailRe.test(v), "email inválido");
 
-// ---- SSRF: só github.com, sem IPs internos ----
-const PRIVATE_HOST_RE =
-  /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?|\[?fc|\[?fd)/i;
+// ---- SSRF: allowlist fixa ----
+// O que protege aqui é a allowlist, e só ela. Existia um `PRIVATE_HOST_RE`
+// testando IP interno DEPOIS de já ter exigido `host === "github.com"`: nunca
+// podia ser verdadeiro. Era código morto que dava falsa sensação de proteção —
+// e nem contra rebind de DNS servia, porque testava a string do host, não o IP
+// resolvido. Ver AUDITORIA.md#BUG-18.
+//
+// Se um dia a allowlist deixar de ser fixa (repositório auto-hospedado, GitHub
+// Enterprise), a checagem de destino interno precisa voltar — e no IP
+// resolvido, não no nome.
+const ALLOWED_HOSTS = new Set(["github.com", "www.github.com"]);
 
 export interface GitHubRepoRef {
   owner: string;
@@ -33,8 +41,7 @@ export function parseGitHubRepo(input: string): GitHubRepoRef | null {
   }
   if (u.protocol !== "https:") return null;
   const host = u.hostname.toLowerCase();
-  if (host !== "github.com" && host !== "www.github.com") return null;
-  if (PRIVATE_HOST_RE.test(host)) return null;
+  if (!ALLOWED_HOSTS.has(host)) return null;
   const parts = u.pathname.split("/").filter(Boolean);
   if (parts.length < 2) return null;
   const owner = parts[0]!;

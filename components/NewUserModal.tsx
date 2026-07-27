@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import Modal from "@/components/Modal";
+import { Picker } from "@/components/filters";
 import { apiPost, ApiError } from "@/lib/client";
-import { IconX, IconUser } from "@/lib/icons";
+import { useT } from "@/lib/i18n";
+import { IconUser } from "@/lib/icons";
 
 export default function NewUserModal({
   onClose,
@@ -12,6 +15,7 @@ export default function NewUserModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +24,7 @@ export default function NewUserModal({
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit =
-    name.trim() && email.trim() && password.length >= 8 && !saving;
+    !!name.trim() && !!email.trim() && password.length >= 8 && !saving;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,111 +40,114 @@ export default function NewUserModal({
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha ao criar o usuário.");
+      setError(err instanceof ApiError ? err.message : t("newUser.failed"));
       setSaving(false);
     }
   };
 
+  // Era a última <div> com onClick no overlay: sem role, sem ESC, sem
+  // armadilha de foco e sem trava de rolagem — e um clique fora jogava fora o
+  // formulário preenchido. Ver AUDITORIA.md#UX-04 e #UX-03.
+  const dirty = !!(name || email || password);
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal"
-        style={{ maxWidth: 460 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <div>
-            <h2 className="panel-title-row">
-              <IconUser /> Novo usuário
-              <InfoTip
-                title="Criar usuário"
-                content="O usuário entra com o e-mail e a senha definidos aqui. Superadmin enxerga tudo de todos; admin vê apenas o próprio histórico. A senha é guardada com hash Argon2id."
-              />
-            </h2>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Defina o acesso e o papel da nova conta.
-            </p>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Fechar">
-            <IconX />
-          </button>
+    <Modal
+      title={
+        <>
+          <IconUser /> {t("newUser.title")}
+          <InfoTip title={t("newUser.help")} content={t("newUser.helpText")} />
+        </>
+      }
+      locked={saving}
+      confirmClose={() => (dirty ? t("newUser.confirmDiscard") : null)}
+      onClose={onClose}
+    >
+      <p className="muted" style={{ marginTop: 4 }}>
+        {t("newUser.subtitle")}
+      </p>
+
+      <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
+        {error && <div className="alert error">{error}</div>}
+
+        <div className="field">
+          <label htmlFor="nu-name">{t("newUser.name")}</label>
+          <input
+            id="nu-name"
+            className="input"
+            placeholder={t("newUser.namePlaceholder")}
+            value={name}
+            maxLength={120}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
 
-        <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
-          {error && <div className="alert error">{error}</div>}
+        <div className="field">
+          <label htmlFor="nu-email">{t("newUser.email")}</label>
+          <input
+            id="nu-email"
+            className="input"
+            type="email"
+            autoComplete="off"
+            placeholder={t("newUser.emailPlaceholder")}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
 
-          <div className="field">
-            <label htmlFor="nu-name">Nome</label>
-            <input
-              id="nu-name"
-              className="input"
-              placeholder="Ex.: Maria Silva"
-              value={name}
-              maxLength={120}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-          </div>
+        <div className="field">
+          <label htmlFor="nu-password">{t("newUser.password")}</label>
+          <input
+            id="nu-password"
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            placeholder={t("newUser.passwordPlaceholder")}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          {password.length > 0 && password.length < 8 && (
+            <span className="field-hint error">{t("newUser.passwordTooShort")}</span>
+          )}
+        </div>
 
-          <div className="field">
-            <label htmlFor="nu-email">E-mail</label>
-            <input
-              id="nu-email"
-              className="input"
-              type="email"
-              autoComplete="off"
-              placeholder="pessoa@empresa.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
+        <div className="field">
+          <label htmlFor="nu-role">{t("newUser.role")}</label>
+          {/* Popover próprio em vez do <select> nativo (AUDITORIA.md#UX-11). */}
+          <Picker
+            id="nu-role"
+            value={role}
+            ariaLabel={t("newUser.role")}
+            onChange={(v) => setRole(v as "admin" | "superadmin")}
+            options={[
+              {
+                value: "admin",
+                label: t("role.admin"),
+                sub: t("newUser.roleAdminSub"),
+              },
+              {
+                value: "superadmin",
+                label: t("role.superadmin"),
+                sub: t("newUser.roleSuperadminSub"),
+              },
+            ]}
+          />
+        </div>
 
-          <div className="field">
-            <label htmlFor="nu-password">Senha</label>
-            <input
-              id="nu-password"
-              className="input"
-              type="password"
-              autoComplete="new-password"
-              placeholder="mínimo 8 caracteres"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {password.length > 0 && password.length < 8 && (
-              <span className="field-hint">A senha precisa de pelo menos 8 caracteres.</span>
-            )}
-          </div>
-
-          <div className="field">
-            <label htmlFor="nu-role">Papel</label>
-            <select
-              id="nu-role"
-              className="input select"
-              style={{ maxWidth: "none" }}
-              value={role}
-              onChange={(e) => setRole(e.target.value as "admin" | "superadmin")}
-            >
-              <option value="admin">Admin — vê apenas o próprio histórico</option>
-              <option value="superadmin">Superadmin — vê tudo de todos</option>
-            </select>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button type="button" className="button ghost" onClick={onClose}>
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="button primary"
-              disabled={!canSubmit}
-              aria-busy={saving}
-            >
-              {saving ? <span className="button-spinner" /> : null}
-              Criar usuário
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button type="button" className="button ghost" onClick={onClose}>
+            {t("common.cancel")}
+          </button>
+          <button
+            type="submit"
+            className="button primary"
+            disabled={!canSubmit}
+            aria-busy={saving}
+          >
+            {saving ? <span className="button-spinner" /> : null}
+            {t("newUser.submit")}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

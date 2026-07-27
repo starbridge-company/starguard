@@ -7,12 +7,7 @@
 // ============================================================
 import "server-only";
 import { AI_BY_PHASE, ENGINES, FIX_AGENT, engineSummary } from "@/lib/config";
-import {
-  generateThreatModel,
-  validateSkills,
-  runScan,
-  generateFix,
-} from "@/lib/tasks";
+import { generateThreatModel, validateSkills, runScan } from "@/lib/tasks";
 import { audit } from "@/lib/auth";
 import { redactError } from "@/lib/redact";
 import * as analysesRepo from "@/lib/repos/analyses";
@@ -25,11 +20,8 @@ import type {
   JobInputPublic,
   PhaseKey,
   PhaseState,
-  ScanResult,
   Severity,
-  Vulnerability,
 } from "@/types";
-import { SEVERITY_ORDER } from "@/types";
 
 // Segredos transitórios (nunca vão ao BD).
 interface Transient {
@@ -128,6 +120,7 @@ export async function createAnalysis(
     token,
     skills: input.skills || [],
   });
+  sweepIfDue();
   return id;
 }
 
@@ -159,12 +152,16 @@ export async function getAnalysisOwner(id: string): Promise<string | undefined> 
   return row?.userId;
 }
 
-function topVulnerability(scan?: ScanResult): Vulnerability | undefined {
-  if (!scan) return undefined;
-  const pool = [...scan.sast.vulnerabilities, ...(scan.review?.findings || [])];
-  return pool.sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-  )[0];
+/**
+ * Progresso = fases efetivamente CONCLUÍDAS. Gravar 100 no fim do job mesmo
+ * com fase em erro fazia a lista mostrar "100%" ao lado de "erro" — duas
+ * informações que se contradizem. Ver AUDITORIA.md#BUG-21.
+ */
+export function computeProgress(phases: Job["phases"]): number {
+  const all = Object.values(phases) as PhaseState[];
+  if (!all.length) return 0;
+  const done = all.filter((p) => p.status === "done").length;
+  return Math.round((done / all.length) * 100);
 }
 
 // `prsCount` fica de fora de propósito: quem o mantém é o repositório de PRs,
@@ -222,14 +219,102 @@ async function runPhase<T>(
   }
 }
 
+/**
+ * Marca como erro toda fase que não chegou ao fim, com um motivo legível.
+ * Sem isto, a análise fica `status: "error"` e a tela não diz o porquê.
+ */
+export function failUnfinishedPhases(
+  phases: Job["phases"],
+  motivo: string
+): Job["phases"] {
+  for (const p of Object.values(phases) as PhaseState[]) {
+    if (p.status === "done" || p.status === "error") continue;
+    p.status = "error";
+    p.error = motivo;
+    p.finishedAt = Date.now();
+  }
+  return phases;
+}
+
+const ORPHAN_MSG =
+  "A análise foi interrompida antes de começar (o servidor reiniciou). Rode de novo — nada foi perdido no repositório.";
+const STALE_MSG =
+  "A análise não deu sinal de vida por tempo demais e foi encerrada (provável reinício do servidor durante o processamento).";
+
+/** Sem sinal por este tempo, a análise é dada como perdida. */
+const STALE_AFTER_MS = Number(process.env.ANALYSIS_STALE_MS || 20 * 60_000);
+
+/**
+ * Encerra análises abandonadas. Os segredos do job vivem num Map em memória e
+ * o disparo é fire-and-forget: um restart do processo (todo deploy no Render é
+ * um) deixa a linha em `running` para sempre, sem timeout e sem mensagem.
+ * Ver AUDITORIA.md#BUG-11 — a solução definitiva é a fila do #ARQ-04.
+ */
+export async function expireStaleAnalyses(): Promise<number> {
+  // O MESMO corte na leitura e na escrita: se o job voltar a escrever entre as
+  // duas, o UPDATE condicional não casa e nada é atropelado (#BUG-20).
+  const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+  const stale = await analysesRepo
+    .listStale(STALE_AFTER_MS, cutoff)
+    .catch(() => []);
+  let n = 0;
+  for (const row of stale) {
+    const phases = failUnfinishedPhases(
+      (row.phases as Job["phases"]) ?? initialPhases(),
+      STALE_MSG
+    );
+    await analysesRepo
+      .patchIfUntouchedSince(row.id, cutoff, {
+        phases,
+        status: "error",
+        progress: computeProgress(phases),
+        finishedAt: new Date(),
+      })
+      .then((gravou) => {
+        if (gravou) n++;
+      })
+      .catch(() => {});
+  }
+  if (n > 0) console.warn(`[jobs] ${n} análise(s) abandonada(s) encerrada(s)`);
+  return n;
+}
+
+// A varredura roda de carona na criação de análise, no máximo uma vez por
+// minuto: sem fila e sem cron, é o gancho que existe e não custa nada.
+let lastSweep = 0;
+function sweepIfDue(): void {
+  const now = Date.now();
+  if (now - lastSweep < 60_000) return;
+  lastSweep = now;
+  void expireStaleAnalyses().catch(() => {});
+}
+
 export async function runJob(id: string): Promise<void> {
   const raw = secrets.get(id);
-  if (!raw) return;
+  // Segredos ausentes = o processo que criou a análise morreu antes de rodar.
+  // Retornar em silêncio deixava a linha `pending` para sempre (#BUG-11).
+  if (!raw) {
+    const phases = failUnfinishedPhases(initialPhases(), ORPHAN_MSG);
+    await analysesRepo
+      .patchAnalysis(id, {
+        phases,
+        status: "error",
+        progress: 0,
+        finishedAt: new Date(),
+      })
+      .catch(() => {});
+    console.warn(`[job ${id}] segredos ausentes — análise marcada como erro`);
+    return;
+  }
   const phases = initialPhases();
   audit("analyze.start", { jobId: id });
 
-  const persist = (progress: number) =>
-    analysesRepo.patchAnalysis(id, { phases, progress }).catch(() => {});
+  // O progresso é derivado das fases concluídas, nunca cravado à mão: era
+  // assim que "100%" convivia com "erro" na lista (#BUG-21).
+  const persist = () =>
+    analysesRepo
+      .patchAnalysis(id, { phases, progress: computeProgress(phases) })
+      .catch(() => {});
 
   try {
     await analysesRepo
@@ -239,10 +324,10 @@ export async function runJob(id: string): Promise<void> {
     await runPhase(phases, id, "plan", () =>
       generateThreatModel(raw.systemDescription, raw.locale)
     );
-    await persist(25);
+    await persist();
 
     await runPhase(phases, id, "skills", () => validateSkills(raw.skills || []));
-    await persist(50);
+    await persist();
 
     await runPhase(phases, id, "software", () =>
       runScan(raw.repoUrl, raw.token, {
@@ -274,41 +359,38 @@ export async function runJob(id: string): Promise<void> {
       }
     }
 
-    await persist(80);
+    await persist();
 
-    await runPhase(phases, id, "refactor", async () => {
-      const scan = phases.software.result;
-      const top = topVulnerability(scan);
-      const fixes = top?.codeSnippet
-        ? [
-            await generateFix({
-              vulnerabilityId: top.id,
-              file: top.file,
-              originalCode: top.codeSnippet,
-              description: top.description || top.title,
-              suggestion: top.suggestion,
-            }),
-          ]
-        : [];
-      return { fixes, prs: [] };
-    });
+    // A Fase 4 não gera mais correção automática. Ela gerava UMA — só do achado
+    // mais grave — e pelo pior caminho disponível: sem `repoUrl`, ou seja, sem
+    // o arquivo inteiro e sem o engine de agente. O usuário comparava com a
+    // correção sob demanda (que usa os dois) e via duas qualidades diferentes
+    // para o mesmo produto. Somado a isso, com FIX_ENGINE=agent — o padrão —
+    // toda análise custava um clone do repositório e até 4,5 min de agente que
+    // ninguém pediu, contra o princípio já adotado em UX-05 e o cache do
+    // FEAT-02. Correção agora é sempre sob demanda. Ver AUDITORIA.md#BUG-16.
+    await runPhase(phases, id, "refactor", async () => ({ fixes: [], prs: [] }));
 
     const anyError = (Object.values(phases) as PhaseState[]).some(
       (p) => p.status === "error"
     );
     await analysesRepo.patchAnalysis(id, {
       phases,
-      progress: 100,
+      progress: computeProgress(phases),
       status: anyError ? "error" : "done",
       finishedAt: new Date(),
       metrics: computeMetrics(phases),
     });
     audit("analyze.done", { jobId: id });
   } catch (e) {
-    // Falha inesperada fora das fases: marca a análise como erro.
+    // Falha inesperada fora das fases: marca a análise como erro — e as fases
+    // que ficaram no meio do caminho recebem o motivo, senão a tela mostra
+    // "erro" sem dizer onde (#BUG-11).
+    failUnfinishedPhases(phases, redactError(e) || "Falha inesperada na análise.");
     await analysesRepo
       .patchAnalysis(id, {
         phases,
+        progress: computeProgress(phases),
         status: "error",
         finishedAt: new Date(),
         metrics: computeMetrics(phases),

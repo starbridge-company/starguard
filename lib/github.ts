@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGitHubRepo, type GitHubRepoRef } from "@/lib/validation";
 import { redactError } from "@/lib/redact";
+import { resolveGitHubToken, requireGitHubToken } from "@/lib/github-auth";
 
 const pExecFile = promisify(execFile);
 
@@ -31,10 +32,15 @@ export async function cloneRepo(
   const ref = parseGitHubRepo(input);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida (allowlist github.com).");
 
+  // O token do servidor só entra quando a instância é de dono único
+  // (AUDITORIA.md#SEC-06); caso contrário, clone anônimo — que resolve
+  // repositório público e falha com mensagem clara no privado.
+  const auth = resolveGitHubToken(token);
+
   const dir = await mkdtemp(join(tmpdir(), "sg-scan-"));
   // Token vai na URL apenas em memória, como argumento (sem shell).
-  const cloneUrl = token
-    ? `https://x-access-token:${token}@github.com/${ref.owner}/${ref.repo}.git`
+  const cloneUrl = auth
+    ? `https://x-access-token:${auth}@github.com/${ref.owner}/${ref.repo}.git`
     : `${ref.url}.git`;
 
   try {
@@ -57,7 +63,7 @@ export async function cloneRepo(
     // .git/config do clone. O diretório sobrevive durante todo o job (e o
     // agente da Fase 4 lê arquivos ali dentro) — então apagamos a credencial
     // do remote assim que o clone termina. Ver AUDITORIA.md#SEC-01.
-    if (token) {
+    if (auth) {
       await pExecFile("git", ["remote", "set-url", "origin", `${ref.url}.git`], {
         cwd: dir,
         timeout: 15_000,
@@ -73,6 +79,13 @@ export async function cloneRepo(
     const msg = redactError(e);
     if (/not found|command not found|ENOENT/i.test(msg)) {
       throw new ScanUnavailable("git não encontrado no host.");
+    }
+    // Sem token, repositório privado é indistinguível de inexistente para o
+    // git. Dizer isso é mais útil que repetir o "repository not found" cru.
+    if (!auth && /authentication|could not read|repository not found|403|404/i.test(msg)) {
+      throw new ScanUnavailable(
+        "Repositório não encontrado ou privado. Informe um token do GitHub com acesso a ele."
+      );
     }
     throw new ScanUnavailable(`Falha ao clonar o repositório: ${msg.slice(0, 200)}`);
   }
@@ -99,7 +112,7 @@ export async function fetchFileContent(
 ): Promise<string | null> {
   const ref = parseGitHubRepo(repoUrl);
   if (!ref) return null;
-  const auth = token || process.env.GITHUB_TOKEN;
+  const auth = resolveGitHubToken(token);
   const { Octokit } = await import("octokit");
   const octokit = new Octokit(auth ? { auth } : {});
   try {
@@ -120,12 +133,29 @@ export async function fetchFileContent(
 export async function getRepoMeta(input: string, token?: string) {
   const ref = parseGitHubRepo(input);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida.");
+  const auth = resolveGitHubToken(token);
   const { Octokit } = await import("octokit");
-  const octokit = new Octokit({ auth: token || process.env.GITHUB_TOKEN });
-  const { data } = await octokit.rest.repos.get({
-    owner: ref.owner,
-    repo: ref.repo,
-  });
+  const octokit = new Octokit(auth ? { auth } : {});
+  let data;
+  try {
+    ({ data } = await octokit.rest.repos.get({
+      owner: ref.owner,
+      repo: ref.repo,
+    }));
+  } catch (e) {
+    // O GitHub responde 404 (não 403) a repositório privado sem credencial —
+    // é de propósito, para não confirmar a existência. Sem token, portanto,
+    // "não encontrado" quase sempre significa "privado". Ver AUDITORIA.md#SEC-06.
+    const status = (e as { status?: number })?.status;
+    if (!auth && (status === 404 || status === 403)) {
+      throw new ScanUnavailable(
+        "Repositório não encontrado ou privado. Informe um token do GitHub com acesso a ele."
+      );
+    }
+    throw new ScanUnavailable(
+      `Falha ao ler o repositório: ${redactError(e).slice(0, 200)}`
+    );
+  }
   return {
     fullName: data.full_name,
     defaultBranch: data.default_branch,
@@ -149,8 +179,8 @@ export async function openPullRequest(opts: {
 }): Promise<{ number: number; url: string; branch: string; title: string }> {
   const ref = parseGitHubRepo(opts.repoUrl);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida.");
-  const token = opts.token || process.env.GITHUB_TOKEN;
-  if (!token) throw new ScanUnavailable("GITHUB_TOKEN ausente para abrir PR.");
+  // Nunca o token do servidor num deploy multi-usuário (AUDITORIA.md#SEC-06).
+  const token = requireGitHubToken(opts.token);
 
   const { Octokit } = await import("octokit");
   const octokit = new Octokit({ auth: token });
@@ -233,8 +263,8 @@ export async function openPullRequestBatch(opts: {
 }> {
   const ref = parseGitHubRepo(opts.repoUrl);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida.");
-  const token = opts.token || process.env.GITHUB_TOKEN;
-  if (!token) throw new ScanUnavailable("GITHUB_TOKEN ausente para abrir PR.");
+  // Nunca o token do servidor num deploy multi-usuário (AUDITORIA.md#SEC-06).
+  const token = requireGitHubToken(opts.token);
 
   const { Octokit } = await import("octokit");
   const octokit = new Octokit({ auth: token });

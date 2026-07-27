@@ -24,6 +24,25 @@ export const AI_BY_PHASE: Record<Exclude<PhaseKey, never>, StepAIConfig> = {
   refactor: stepAI(4),
 };
 
+/**
+ * Parâmetros HTTP das chamadas de IA. Ver AUDITORIA.md#BUG-12.
+ *
+ * É função, e não constante de módulo, porque estes valores são lidos dentro
+ * de laços de retry — e os testes precisam zerar o backoff sem reimportar o
+ * módulo inteiro.
+ */
+export function aiHttp() {
+  return {
+    // Teto de tempo por chamada. Sem ele, um provedor lento segura a fase até
+    // o `maxDuration` da rota e o usuário não recebe erro nenhum.
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
+    // Tentativas ADICIONAIS após a primeira falha reentrante (429/5xx).
+    maxRetries: Number(process.env.AI_MAX_RETRIES ?? 2),
+    // Base do backoff exponencial; o `retry-after` do provedor tem prioridade.
+    retryBaseMs: Number(process.env.AI_RETRY_BASE_MS ?? 800),
+  };
+}
+
 export const ENGINES = {
   sast: (process.env.SAST_ENGINE || "opengrep").toLowerCase(),
   sca: (process.env.SCA_ENGINE || "trivy").toLowerCase(),
