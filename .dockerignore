@@ -1,0 +1,31 @@
+# ============================================================
+# Contexto de build — o que NÃO entra na imagem.
+# .env.local fica de fora: segredos vêm do ambiente (Render), nunca da camada.
+# ============================================================
+node_modules
+.next
+out
+build
+
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+.env
+.env.local
+.env*.local
+.keys/
+.scan-tmp/
+
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+
+Dockerfile
+.dockerignore
+docker-compose*.yml
