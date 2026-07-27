@@ -12,6 +12,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { runAI, extractJSON } from "@/lib/ai";
 import { AI_BY_PHASE } from "@/lib/config";
+import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
 import type {
   Vulnerability,
   DependencyVuln,
@@ -23,6 +24,7 @@ import type {
 type ReviewSection = NonNullable<ScanResult["review"]>;
 
 export interface ReviewContext {
+  locale?: Locale;
   systemDescription?: string;
   requirements: Requirement[];
   sastFindings: Vulnerability[];
@@ -35,7 +37,7 @@ export interface ReviewContext {
 // (a skill entrega tabela; o app precisa de achados estruturados) e a
 // deduplicação + foco em regra de negócio reforçados.
 // ------------------------------------------------------------
-const REVIEW_SYSTEM = `Você é um revisor de segurança de aplicações (AppSec) sênior. Scanners automáticos (SAST/SCA) JÁ rodaram sobre este código — seu valor está em achar o que ferramentas de PADRÃO não pegam. Output em PT-BR.
+const reviewSystem = (locale: Locale) => `Você é um revisor de segurança de aplicações (AppSec) sênior. Scanners automáticos (SAST/SCA) JÁ rodaram sobre este código — seu valor está em achar o que ferramentas de PADRÃO não pegam. Escreva TODO o texto de saída em ${LOCALE_AI_NAME[locale]}.
 
 METODOLOGIA (skill security-review)
 - Calibre a severidade ao domínio (impacto × exploitabilidade × dados sensíveis/compliance) antes de classificar.
@@ -100,7 +102,11 @@ async function collectSourceFiles(
   dir: string,
   priorityPaths: string[],
   opts: { maxFiles?: number; perFileBytes?: number; totalBudget?: number } = {}
-): Promise<{ files: { path: string; content: string }[]; discovered: number }> {
+): Promise<{
+  files: { path: string; content: string }[];
+  discovered: number;
+  truncated: number;
+}> {
   const maxFiles = opts.maxFiles ?? 40;
   const perFileBytes = opts.perFileBytes ?? 24 * 1024;
   const totalBudget = opts.totalBudget ?? 180 * 1024;
@@ -146,6 +152,7 @@ async function collectSourceFiles(
 
   const files: { path: string; content: string }[] = [];
   let used = 0;
+  let truncated = 0;
   for (const c of all) {
     if (files.length >= maxFiles || used >= totalBudget) break;
     let content: string;
@@ -160,7 +167,7 @@ async function collectSourceFiles(
     files.push({ path: c.path, content });
     used += content.length;
   }
-  return { files, discovered: all.length };
+  return { files, discovered: all.length, truncated };
 }
 
 // ------------------------------------------------------------
@@ -300,14 +307,21 @@ const STRICT_SUFFIX =
 
 type ParsedReview = { findings?: RawFinding[]; unverifiedRules?: unknown[] };
 
+/** Quanto do repositório a revisão realmente leu (AUDITORIA.md#UX-06). */
+type Coverage = NonNullable<ReviewSection["coverage"]>;
+
 /** Uma tentativa de revisão com um orçamento de código específico. */
 async function reviewAttempt(
   dir: string,
   ctx: ReviewContext,
   budget: ReviewBudget,
-  strict: boolean
-): Promise<{ empty: true } | { empty: false; parsed: ParsedReview }> {
-  const { files, discovered } = await collectSourceFiles(
+  strict: boolean,
+  locale: Locale
+): Promise<
+  | { empty: true }
+  | { empty: false; parsed: ParsedReview; coverage: Coverage }
+> {
+  const { files, discovered, truncated } = await collectSourceFiles(
     dir,
     ctx.sastFindings.map((f) => f.file),
     budget
@@ -315,14 +329,24 @@ async function reviewAttempt(
   if (!files.length) return { empty: true };
 
   const text = await runAI("software", {
-    system: strict ? REVIEW_SYSTEM + STRICT_SUFFIX : REVIEW_SYSTEM,
+    system: strict
+      ? reviewSystem(locale) + STRICT_SUFFIX
+      : reviewSystem(locale),
     // Teto alto: nos modelos com extended thinking o raciocínio consome
     // max_tokens; sem folga, o bloco de texto (o JSON) volta vazio/truncado.
     maxTokens: 16000,
     prompt: buildPrompt(ctx, files, discovered),
   });
 
-  return { empty: false, parsed: extractJSON<ParsedReview>(text) };
+  return {
+    empty: false,
+    parsed: extractJSON<ParsedReview>(text),
+    coverage: {
+      filesReviewed: files.length,
+      filesEligible: discovered,
+      truncatedFiles: truncated,
+    },
+  };
 }
 
 /**
@@ -341,8 +365,10 @@ export async function runAiReview(
     "Revisão por IA não executada: sem API key configurada. SAST/SCA rodaram normalmente.";
 
   let parsed: ParsedReview;
+  let coverage: Coverage | undefined;
   try {
-    const first = await reviewAttempt(dir, ctx, {}, false);
+    const locale = ctx.locale || DEFAULT_LOCALE;
+    const first = await reviewAttempt(dir, ctx, {}, false, locale);
     if (first.empty) {
       return {
         engine,
@@ -353,6 +379,7 @@ export async function runAiReview(
       };
     }
     parsed = first.parsed;
+    coverage = first.coverage;
   } catch (e1) {
     if ((e1 as { code?: string }).code === "no_key") {
       return { engine, ran: false, model, findings: [], note: noKeyNote };
@@ -363,10 +390,12 @@ export async function runAiReview(
         dir,
         ctx,
         { maxFiles: 15, perFileBytes: 14 * 1024, totalBudget: 60 * 1024 },
-        true
+        true,
+        ctx.locale || DEFAULT_LOCALE
       );
       if (retry.empty) throw e1;
       parsed = retry.parsed;
+      coverage = retry.coverage;
     } catch (e2) {
       const err = e2 as { code?: string; message?: string };
       const note =
@@ -402,6 +431,7 @@ export async function runAiReview(
     ran: true,
     model,
     findings,
+    coverage,
     unverifiedRules: unverifiedRules.length ? unverifiedRules : undefined,
     note:
       dropped > 0

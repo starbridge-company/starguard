@@ -3,6 +3,7 @@ import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/
 import { validate, step3Schema } from "@/lib/validation";
 import { redact } from "@/lib/redact";
 import { runScan } from "@/lib/tasks";
+import { getLocale } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -26,6 +27,7 @@ export async function POST(req: NextRequest) {
     const result = await runScan(v.data.repoUrl, v.data.token, {
       systemDescription: v.data.systemDescription,
       requirements,
+      locale: await getLocale(),
     });
     return jsonOk(result);
   } catch (e) {

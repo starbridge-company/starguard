@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
+import { Segmented } from "@/components/filters";
+import { useI18n } from "@/lib/i18n";
+import { LOCALES, LOCALE_LABEL } from "@/lib/i18n/config";
 import Pagination from "@/components/Pagination";
 import InfoTip from "@/components/InfoTip";
 import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from "@/lib/client";
@@ -25,6 +28,7 @@ interface Profile {
 }
 
 export default function AccountPage() {
+  const { locale, setLocale, t } = useI18n();
   const { me } = useMe();
 
   // ---- Perfil (nome + login) ----
@@ -192,6 +196,23 @@ export default function AccountPage() {
           <p className="page-subtitle">Seus dados de acesso e os tokens do GitHub.</p>
         </div>
       </header>
+
+      {/* Idioma — vale para a interface E para o que a IA escreve.
+          Ver AUDITORIA.md#FEAT-04. */}
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title-row">{t("account.language")}</h2>
+            <p className="muted">{t("account.languageHint")}</p>
+          </div>
+        </div>
+        <Segmented
+          options={LOCALES.map((l) => ({ value: l, label: LOCALE_LABEL[l] }))}
+          value={locale}
+          onChange={(v) => setLocale(v as (typeof LOCALES)[number])}
+          ariaLabel={t("common.language")}
+        />
+      </section>
 
       {/* Configurações básicas — perfil + login + senha */}
       <section className="panel">

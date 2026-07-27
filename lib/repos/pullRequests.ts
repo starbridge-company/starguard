@@ -4,7 +4,7 @@
 import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { pullRequests, type PullRequestRow } from "@/db/schema";
+import { analyses, pullRequests, type PullRequestRow } from "@/db/schema";
 import { paged, type PageParams, type Paged } from "@/lib/pagination";
 
 export async function createPR(input: {
@@ -30,6 +30,23 @@ export async function createPR(input: {
       committedCount: input.committedCount ?? 1,
     })
     .returning();
+
+  // Mantém o contador da análise em dia. Antes, `prs_count` só era calculado
+  // no fim do job — quando ainda não existia PR nenhum — e ficava zerado para
+  // sempre, contradizendo a tela /pull-requests. Ver AUDITORIA.md#BUG-08.
+  if (input.analysisId) {
+    await db
+      .update(analyses)
+      .set({
+        prsCount: sql`${analyses.prsCount} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(analyses.id, input.analysisId))
+      .catch(() => {
+        /* o PR já foi aberto no GitHub: o contador não pode derrubar a resposta */
+      });
+  }
+
   return row!;
 }
 

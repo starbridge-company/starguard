@@ -15,6 +15,20 @@
       "when": 1784713268127,
       "tag": "0001_remove_demo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785141831665,
+      "tag": "0002_medical_wallflower",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785143502969,
+      "tag": "0003_tough_hardball",
+      "breakpoints": true
     }
   ]
 }

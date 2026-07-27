@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, step1Schema } from "@/lib/validation";
 import { generateThreatModel } from "@/lib/tasks";
+import { getLocale } from "@/lib/i18n/server";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (!v.ok) return jsonError(400, v.message);
 
   try {
-    const model = await generateThreatModel(v.data.systemDescription);
+    const model = await generateThreatModel(v.data.systemDescription, await getLocale());
     return jsonOk(model);
   } catch {
     return jsonError(502, "Falha ao gerar a modelagem de ameaças.");

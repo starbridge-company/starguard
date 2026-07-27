@@ -17,6 +17,8 @@ import { audit } from "@/lib/auth";
 import { redactError } from "@/lib/redact";
 import * as analysesRepo from "@/lib/repos/analyses";
 import * as tokensRepo from "@/lib/repos/tokens";
+import * as findingsRepo from "@/lib/repos/findings";
+import type { Locale } from "@/lib/i18n/config";
 import type {
   Job,
   JobInput,
@@ -32,6 +34,9 @@ import { SEVERITY_ORDER } from "@/types";
 // Segredos transitórios (nunca vão ao BD).
 interface Transient {
   systemDescription: string;
+  /** Idioma do usuário no momento da criação — o job roda destacado da
+   *  requisição, então precisa carregar essa informação junto. */
+  locale?: Locale;
   repoUrl?: string;
   token?: string;
   skills: { name: string; content: string }[];
@@ -96,6 +101,7 @@ async function resolveToken(
 }
 
 export interface CreateAnalysisInput extends JobInput {
+  locale?: Locale;
   tokenId?: string;
   saveToken?: boolean;
   tokenName?: string;
@@ -117,6 +123,7 @@ export async function createAnalysis(
   });
   secrets.set(id, {
     systemDescription: input.systemDescription,
+    locale: input.locale,
     repoUrl: input.repoUrl || undefined,
     token,
     skills: input.skills || [],
@@ -160,7 +167,12 @@ function topVulnerability(scan?: ScanResult): Vulnerability | undefined {
   )[0];
 }
 
-function computeMetrics(phases: Job["phases"]): analysesRepo.AnalysisMetrics {
+// `prsCount` fica de fora de propósito: quem o mantém é o repositório de PRs,
+// que incrementa a cada PR aberto. Recalculá-lo aqui zeraria o contador, já
+// que `phases.refactor.prs` está sempre vazio. Ver AUDITORIA.md#BUG-08.
+function computeMetrics(
+  phases: Job["phases"]
+): Omit<analysesRepo.AnalysisMetrics, "prsCount"> {
   const scan = phases.software.result;
   const refactor = phases.refactor.result;
   const sast = scan?.sast.vulnerabilities ?? [];
@@ -180,7 +192,6 @@ function computeMetrics(phases: Job["phases"]): analysesRepo.AnalysisMetrics {
     scaCount: sca.length,
     reviewCount: review.length,
     fixesCount: refactor?.fixes.length ?? 0,
-    prsCount: refactor?.prs.length ?? 0,
     totalFindings: sast.length + sca.length + review.length,
   };
 }
@@ -226,7 +237,7 @@ export async function runJob(id: string): Promise<void> {
       .catch(() => {});
 
     await runPhase(phases, id, "plan", () =>
-      generateThreatModel(raw.systemDescription)
+      generateThreatModel(raw.systemDescription, raw.locale)
     );
     await persist(25);
 
@@ -237,8 +248,32 @@ export async function runJob(id: string): Promise<void> {
       runScan(raw.repoUrl, raw.token, {
         systemDescription: raw.systemDescription,
         requirements: phases.plan.result?.requirements,
+        locale: raw.locale,
       })
     );
+
+    // Cada achado vira uma linha com estado próprio, herdando o que já foi
+    // resolvido em análises anteriores do mesmo repositório. Falhar aqui não
+    // pode derrubar a análise — o JSONB `phases` continua sendo a fonte dos
+    // dados; a tabela é o que dá memória. Ver AUDITORIA.md#FEAT-01.
+    const scanResult = phases.software.result;
+    if (scanResult) {
+      const userId = await analysesRepo
+        .getById(id)
+        .then((r) => r?.userId)
+        .catch(() => undefined);
+      if (userId) {
+        await findingsRepo
+          .persistScanFindings(id, userId, raw.repoUrl || null, scanResult)
+          .then((herdados) => {
+            if (herdados > 0) {
+              console.log(`[job ${id}] ${herdados} achado(s) com estado herdado`);
+            }
+          })
+          .catch((e) => console.error(`[job ${id}] falha ao gravar achados`, e));
+      }
+    }
+
     await persist(80);
 
     await runPhase(phases, id, "refactor", async () => {

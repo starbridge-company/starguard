@@ -17,7 +17,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AI_BY_PHASE, FIX_AGENT } from "@/lib/config";
 import type { FixResult } from "@/types";
-import type { FixInput } from "@/lib/tasks";
+import { describeFindings, type FixInput } from "@/lib/tasks";
 
 const pExecFile = promisify(execFile);
 
@@ -28,19 +28,15 @@ function normPath(p: string): string {
 }
 
 function buildAgentPrompt(input: FixInput): string {
-  const loc = input.line
-    ? `linha ${input.line}${input.endLine && input.endLine !== input.line ? `–${input.endLine}` : ""}`
-    : "não informada";
+  const total = 1 + (input.alsoFix?.length || 0);
   const parts = [
-    `Corrija a vulnerabilidade de segurança abaixo neste repositório.`,
+    total > 1
+      ? `Corrija as ${total} vulnerabilidades de segurança abaixo neste repositório. Todas estão no MESMO arquivo — trate todas.`
+      : `Corrija a vulnerabilidade de segurança abaixo neste repositório.`,
     ``,
     `Arquivo: ${input.file}`,
-    `Local: ${loc}`,
-    input.ruleId ? `Regra: ${input.ruleId}` : "",
-    input.cwe ? `CWE: ${input.cwe}` : "",
-    input.owasp ? `OWASP: ${input.owasp}` : "",
-    `Vulnerabilidade: ${input.description}`,
-    input.suggestion ? `Sugestão do scanner: ${input.suggestion}` : "",
+    ``,
+    describeFindings(input),
   ].filter(Boolean);
   const instr = input.userInstructions?.trim();
   if (instr) {
@@ -181,6 +177,7 @@ export async function agentFix(input: FixInput): Promise<FixResult> {
       fixedCode,
       explanation: `${base}${extra}${meta}`,
       changedFiles: changedFiles.length ? changedFiles : undefined,
+      noChange: modified.length === 0,
     };
   } finally {
     clearTimeout(timer);

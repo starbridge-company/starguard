@@ -8,13 +8,17 @@ import PipelineStepper, { type PipelineStep } from "@/components/PipelineStepper
 import SectionTabs, { type SectionTab } from "@/components/SectionTabs";
 import VulnerabilityCard, { DependencyCard } from "@/components/VulnerabilityCard";
 import SkillFindingCard from "@/components/SkillFindingCard";
-import SeverityBadge from "@/components/SeverityBadge";
+import SeverityBadge, { severityKey } from "@/components/SeverityBadge";
 import FixModal from "@/components/FixModal";
 import BatchFixModal from "@/components/BatchFixModal";
 import InfoTip from "@/components/InfoTip";
 import { apiPost, ApiError } from "@/lib/client";
 import { useAnalysisPolling, allTerminal } from "@/lib/useAnalysisPolling";
-import { SEVERITY_ORDER, SEVERITY_LABEL_PT } from "@/types";
+import { useFindings, isResolved } from "@/lib/useFindings";
+import { Segmented, SearchBox } from "@/components/filters";
+import { useT } from "@/lib/i18n";
+
+import { SEVERITY_ORDER } from "@/types";
 import type {
   Job,
   Vulnerability,
@@ -34,6 +38,9 @@ import {
   IconPackage,
   IconChevronRight,
 } from "@/lib/icons";
+
+/** Cards renderizados por vez na aba de correções. */
+const PAGE = 25;
 
 type TabId = "overview" | "code" | "deps" | "threats" | "skills";
 
@@ -71,6 +78,7 @@ export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const { job, error, degraded, retry } = useAnalysisPolling(id);
 
+  const t = useT();
   const [tab, setTab] = useState<TabId>("overview");
 
   // Estado do fluxo de correção individual (FixModal).
@@ -85,62 +93,130 @@ export default function ResultsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
 
+  // Estado por achado (corrigido / falso positivo / PR aberto), persistido.
+  const softwareDone = job?.phases.software.status === "done";
+  const {
+    byLocal: findingState,
+    setStatus: setFindingStatus,
+    reload: reloadFindings,
+  } = useFindings(id, !!softwareDone);
+  const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">(
+    "open"
+  );
+  // Filtros da lista de correções. Sem eles, um repositório real (o teste
+  // interno produziu 576 achados) vira uma parede de cards impossível de
+  // navegar — e de renderizar. Ver AUDITORIA.md#UX-01.
+  const [sevFilter, setSevFilter] = useState<string>("");
+  const [srcFilter, setSrcFilter] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(PAGE);
+
   // Abre o modal SEM gerar — o usuário pode ajustar as instruções antes.
+  // Se já houver correção guardada para este achado, ela é CARREGADA (não
+  // regerada): era exatamente aqui que se queimava IA à toa a cada reabertura.
+  // Ver AUDITORIA.md#FEAT-02.
   const openFix = (vuln: Vulnerability) => {
     setSelVuln(vuln);
     setFix(null);
     setFixError(null);
     setPr(null);
     setPrState("idle");
+    if (findingState[vuln.id]?.hasFix) {
+      void runFix(vuln, "", false);
+    }
   };
 
   // Gera (ou refaz) a correção com o prompt personalizado + contexto do erro.
-  const generateFixFor = async (instructions: string) => {
-    if (!selVuln) return;
+  // `force` = "Refazer": só então gastamos IA de novo. Sem ele, a rota devolve
+  // a correção já guardada. Ver AUDITORIA.md#FEAT-02.
+  // `vuln` vem por parâmetro (e não do estado) porque `openFix` precisa
+  // disparar isto no mesmo tick em que seleciona o achado.
+  const runFix = async (
+    vuln: Vulnerability,
+    instructions: string,
+    force: boolean
+  ) => {
     setFix(null);
     setFixError(null);
     setFixLoading(true);
     try {
       const result = await apiPost<FixResult>("/api/step4-fix", {
-        vulnerabilityId: selVuln.id,
-        file: selVuln.file,
-        originalCode: selVuln.codeSnippet || selVuln.description || selVuln.title,
-        description: selVuln.description || selVuln.title,
-        suggestion: selVuln.suggestion,
-        language: guessLang(selVuln.file),
-        line: selVuln.line,
-        endLine: selVuln.endLine,
-        cwe: selVuln.cwe,
-        owasp: selVuln.owasp,
-        ruleId: selVuln.ruleId,
+        findingId: findingState[vuln.id]?.id,
+        force,
+        vulnerabilityId: vuln.id,
+        file: vuln.file,
+        originalCode: vuln.codeSnippet || vuln.description || vuln.title,
+        description: vuln.description || vuln.title,
+        suggestion: vuln.suggestion,
+        language: guessLang(vuln.file),
+        line: vuln.line,
+        endLine: vuln.endLine,
+        cwe: vuln.cwe,
+        owasp: vuln.owasp,
+        ruleId: vuln.ruleId,
         repoUrl: job?.input.repoUrl,
         userInstructions: instructions.trim() || undefined,
       });
       setFix(result);
+      if (!force) void reloadFindings(); // pode ter passado a existir correção
     } catch (err) {
-      setFixError(err instanceof ApiError ? err.message : "Falha ao gerar correção.");
+      setFixError(err instanceof ApiError ? err.message : t("fix.failed"));
     } finally {
       setFixLoading(false);
     }
   };
 
+  const generateFixFor = (instructions: string) => {
+    if (!selVuln) return;
+    // Já existe correção na tela => o botão é "Refazer" => gasta IA de novo.
+    void runFix(selVuln, instructions, !!fix);
+  };
+
   const openPR = async () => {
-    if (!fix || !job?.input.repoUrl) return;
+    if (!fix || !job?.input.repoUrl || fix.noChange) return;
     setPrState("loading");
     try {
-      const result = await apiPost<PullRequest>("/api/github/pr", {
-        repoUrl: job.input.repoUrl,
-        file: fix.file,
-        fixedCode: fix.fixedCode,
-        title: `Correção de segurança: ${selVuln?.title || fix.file}`,
-        body: fix.explanation,
-        analysisId: job.id,
-      });
+      const title = `Correção de segurança: ${selVuln?.title || fix.file}`;
+      // O engine de agente pode ter editado VÁRIOS arquivos. Mandar só
+      // `fix.file` gerava um PR incompleto — que muitas vezes nem compila.
+      // Ver AUDITORIA.md#BUG-07.
+      const changed = fix.changedFiles?.length ? fix.changedFiles : null;
+
+      const result =
+        changed && changed.length > 1
+          ? await apiPost<PullRequest>("/api/github/pr-batch", {
+              repoUrl: job.input.repoUrl,
+              files: changed.map((c) => ({
+                file: c.file,
+                fixedCode: c.fixedCode,
+              })),
+              title,
+              body: `${fix.explanation}\n\nArquivos alterados: ${changed
+                .map((c) => `\`${c.file}\``)
+                .join(", ")}`,
+              analysisId: job.id,
+            })
+          : await apiPost<PullRequest>("/api/github/pr", {
+              repoUrl: job.input.repoUrl,
+              file: fix.file,
+              fixedCode: fix.fixedCode,
+              title,
+              body: fix.explanation,
+              analysisId: job.id,
+            });
+
       setPr(result);
       setPrState("done");
-    } catch {
+      // O achado passa a "PR aberto" — some da lista de trabalho e a próxima
+      // análise deste repositório já nasce sabendo. Ver AUDITORIA.md#FEAT-01.
+      if (selVuln && findingState[selVuln.id]) {
+        void setFindingStatus(selVuln.id, "pr_open");
+      }
+    } catch (err) {
       setPrState("idle");
-      setFixError("Falha ao abrir o PR.");
+      setFixError(
+        err instanceof ApiError ? err.message : t("fix.failed")
+      );
     }
   };
 
@@ -153,7 +229,7 @@ export default function ResultsPage() {
         <div className="alert error">{error}</div>
         <div style={{ display: "flex", gap: 8 }}>
           <button type="button" className="button primary" onClick={retry}>
-            <IconRefresh /> Tentar novamente
+            <IconRefresh /> {t("common.retry")}
           </button>
           <Link href="/" className="button ghost">
             ← Nova análise
@@ -197,8 +273,47 @@ export default function ResultsPage() {
   const corrections = [...vulns, ...aiFindings].sort(
     (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
   );
+  // Achados já resolvidos (por você ou herdados de uma análise anterior deste
+  // repositório) saem da lista de trabalho por padrão. Ver AUDITORIA.md#FEAT-01.
+  const resolvedCount = corrections.filter((v) =>
+    isResolved(findingState[v.id]?.status)
+  ).length;
+  const q = query.trim().toLowerCase();
+  const filteredCorrections = corrections.filter((v) => {
+    if (statusFilter !== "all") {
+      const done = isResolved(findingState[v.id]?.status);
+      if (statusFilter === "resolved" ? !done : done) return false;
+    }
+    if (sevFilter && v.severity !== sevFilter) return false;
+    if (srcFilter && v.source !== srcFilter) return false;
+    if (
+      q &&
+      !`${v.file} ${v.ruleId} ${v.title} ${v.cwe ?? ""}`.toLowerCase().includes(q)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  // Renderiza por partes: cada card traz um bloco de código, e centenas deles
+  // de uma vez travam o navegador.
+  const visibleCorrections = filteredCorrections.slice(0, limit);
+  const hiddenByLimit = filteredCorrections.length - visibleCorrections.length;
+
   const criticalCount = corrections.filter((v) => v.severity === "critical").length;
   const skillsRejected = skills.filter((s) => s.verdict !== "approved").length;
+
+  // Quais analisadores REALMENTE rodaram. Sem isto, uma lista vazia porque o
+  // binário não existe no host era exibida como "repositório limpo 🎉".
+  const scannersRan = {
+    code: !!scan && (scan.sast.ran || !!scan.review?.ran),
+    deps: !!scan && scan.sca.ran,
+    reasons: [
+      scan && !scan.sast.ran
+        ? scan.sast.note || `O SAST (${scan.sast.engine}) não foi executado.`
+        : "",
+      scan && !scan.review?.ran && scan.review?.note ? scan.review.note : "",
+    ].filter(Boolean),
+  };
 
   const stepMetrics = (key: PhaseKey) => {
     if (key === "plan" && plan)
@@ -247,9 +362,9 @@ export default function ResultsPage() {
 
   const toggleAll = () =>
     setSelected((prev) =>
-      prev.size === corrections.length
+      prev.size === visibleCorrections.length
         ? new Set()
-        : new Set(corrections.map((v) => v.id))
+        : new Set(visibleCorrections.map((v) => v.id))
     );
 
   const sevCount = (s: Severity) =>
@@ -286,23 +401,23 @@ export default function ResultsPage() {
   };
 
   const tabs: SectionTab[] = [
-    { id: "overview", label: "Visão geral" },
+    { id: "overview", label: t("tab.overview") },
     {
       id: "code",
-      label: "Correções",
+      label: t("tab.fixes"),
       count: corrections.length,
       tone: criticalCount > 0 ? "danger" : "accent",
     },
     {
       id: "deps",
-      label: "Dependências",
+      label: t("tab.deps"),
       count: deps.length,
       tone: deps.some((d) => d.severity === "critical" || d.severity === "high")
         ? "warning"
         : "default",
     },
-    { id: "threats", label: "Ameaças", count: plan?.threats.length ?? 0 },
-    { id: "skills", label: "Skills", count: skills.length },
+    { id: "threats", label: t("tab.threats"), count: plan?.threats.length ?? 0 },
+    { id: "skills", label: t("tab.skills"), count: skills.length },
   ];
 
   const overviewRows = [
@@ -345,12 +460,12 @@ export default function ResultsPage() {
     <AppShell>
       <header className="page-header">
         <div>
-          <span className="page-kicker">Análise · {job.id}</span>
+          <span className="page-kicker">{t("results.kicker")} · {job.id}</span>
           <h1>{job.input.projectName}</h1>
           <p className="page-subtitle">
             {done
-              ? "Análise concluída. Comece pelas correções de código."
-              : "Rodando as 4 fases em tempo real…"}
+              ? t("results.doneSubtitle")
+              : t("results.runningSubtitle")}
           </p>
         </div>
         <div className="header-actions">
@@ -360,10 +475,10 @@ export default function ResultsPage() {
             </span>
           )}
           <Link href={`/report/${job.id}`} className="button ghost">
-            <IconReport /> Relatório
+            <IconReport /> {t("common.report")}
           </Link>
           <Link href="/" className="button ghost">
-            <IconRefresh /> Nova
+            <IconRefresh /> {t("common.new")}
           </Link>
         </div>
       </header>
@@ -377,7 +492,7 @@ export default function ResultsPage() {
       {degraded && (
         <div className="alert info">
           <span>
-            Conexão instável — o acompanhamento continua tentando sozinho.
+            {t("results.degraded")}
             {error ? ` (${error})` : ""}
           </span>
           <button
@@ -386,7 +501,7 @@ export default function ResultsPage() {
             onClick={retry}
             style={{ marginLeft: "auto" }}
           >
-            <IconRefresh /> Atualizar agora
+            <IconRefresh /> {t("results.refreshNow")}
           </button>
         </div>
       )}
@@ -440,7 +555,7 @@ export default function ResultsPage() {
               {(["critical", "high", "medium", "low"] as Severity[]).map((s) => (
                 <div className="sev-tile" key={s}>
                   <span className={`count text-${SEV_TEXT[s]}`}>{sevCount(s)}</span>
-                  <span className="muted">{SEVERITY_LABEL_PT[s]}</span>
+                  <span className="muted">{t(severityKey(s))}</span>
                 </div>
               ))}
             </div>
@@ -494,32 +609,128 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {notReady("software", "Analisando o código-fonte…")}
+          {notReady("software", t("fixes.analyzing"))}
 
-          {job.phases.software.status === "done" && corrections.length === 0 && (
-            <div className="empty-state">
-              Nenhuma correção de segurança encontrada. 🎉
+          {/* Transparência de cobertura: a revisão por IA lê uma AMOSTRA do
+              repositório. Apresentar o resultado sem dizer isso passaria a
+              impressão de que o projeto inteiro foi revisado.
+              Ver AUDITORIA.md#UX-06. */}
+          {review?.ran && review.coverage && (
+            <div className="alert info">
+              <span>
+                A revisão por IA leu{" "}
+                <strong>
+                  {review.coverage.filesReviewed} de{" "}
+                  {review.coverage.filesEligible}
+                </strong>{" "}
+                arquivos elegíveis (priorizando autenticação, rotas, banco e os
+                arquivos que o SAST apontou)
+                {review.coverage.truncatedFiles > 0 && (
+                  <>
+                    ; {review.coverage.truncatedFiles} foram truncados por
+                    tamanho
+                  </>
+                )}
+                . O SAST e o SCA analisaram o repositório inteiro.
+              </span>
             </div>
           )}
 
+          {job.phases.software.status === "done" &&
+            corrections.length === 0 &&
+            (scannersRan.code ? (
+              <div className="empty-state">
+                Nenhuma correção de segurança encontrada. 🎉
+              </div>
+            ) : (
+              // "Nada encontrado" e "nada foi procurado" são coisas MUITO
+              // diferentes num produto de segurança. Ver AUDITORIA.md#UX-15.
+              <div className="alert error">
+                <span>
+                  <strong>Nenhum analisador de código rodou.</strong>{" "}
+                  {scannersRan.reasons.join(" ")} Isto não significa que o
+                  repositório esteja limpo — significa que ele não foi analisado.
+                </span>
+              </div>
+            ))}
+
           {corrections.length > 0 && (
             <>
+              <div className="filter-bar">
+                <SearchBox
+                  value={query}
+                  onChange={(v) => {
+                    setQuery(v);
+                    setLimit(PAGE);
+                  }}
+                  placeholder={t("fixes.searchPlaceholder")}
+                />
+                <Segmented
+                  options={[
+                    { value: "", label: t("fixes.allSeverities") },
+                    { value: "critical", label: t("severity.critical") },
+                    { value: "high", label: t("severity.high") },
+                    { value: "medium", label: t("severity.medium") },
+                    { value: "low", label: t("severity.low") },
+                  ]}
+                  value={sevFilter}
+                  onChange={(v) => {
+                    setSevFilter(v);
+                    setLimit(PAGE);
+                  }}
+                  ariaLabel="Severidade"
+                />
+                <Segmented
+                  options={[
+                    { value: "", label: t("fixes.allSources") },
+                    { value: "sast", label: t("fixes.sourceSast") },
+                    { value: "ai-review", label: t("fixes.sourceAi") },
+                  ]}
+                  value={srcFilter}
+                  onChange={(v) => {
+                    setSrcFilter(v);
+                    setLimit(PAGE);
+                  }}
+                  ariaLabel="Origem"
+                />
+              </div>
+
               <div className="finding-toolbar">
+                <Segmented
+                  options={[
+                    {
+                      value: "open",
+                      label: t("fixes.filterOpen", { n: corrections.length - resolvedCount }),
+                    },
+                    { value: "resolved", label: t("fixes.filterResolved", { n: resolvedCount }) },
+                    { value: "all", label: t("fixes.filterAll") },
+                  ]}
+                  value={statusFilter}
+                  onChange={(v) => {
+                    setStatusFilter(v as "open" | "resolved" | "all");
+                    setLimit(PAGE);
+                  }}
+                  ariaLabel="Filtrar por estado"
+                />
                 <label className="check-inline">
                   <input
                     type="checkbox"
-                    checked={selected.size === corrections.length}
+                    checked={
+                      visibleCorrections.length > 0 &&
+                      selected.size === visibleCorrections.length
+                    }
                     ref={(el) => {
                       if (el)
                         el.indeterminate =
-                          selected.size > 0 && selected.size < corrections.length;
+                          selected.size > 0 &&
+                          selected.size < visibleCorrections.length;
                     }}
                     onChange={toggleAll}
                   />
-                  Selecionar todas
+                  {t("fixes.selectAll")}
                 </label>
                 <span className="muted">
-                  {selected.size} de {corrections.length} selecionadas
+                  {t("fixes.selectedCount", { n: selected.size, total: visibleCorrections.length })}
                 </span>
                 <span style={{ flex: 1 }} />
                 <button
@@ -528,25 +739,55 @@ export default function ResultsPage() {
                   disabled={selected.size === 0}
                   onClick={() => setBatchOpen(true)}
                 >
-                  <IconRefactor /> Corrigir {selected.size || ""} com IA
+                  <IconRefactor /> {t("fixes.fixWithAi", { n: selected.size || "" })}
                 </button>
                 <InfoTip
                   title="Correção em lote"
                   content="Selecione os achados e gere as correções de uma vez. No fim, você abre um único Pull Request com todas. Ou use “Corrigir com IA” em cada card para uma só."
                 />
               </div>
-              <div className="finding-list">
-                {corrections.map((v) => (
-                  <VulnerabilityCard
-                    key={v.id}
-                    vuln={v}
-                    onFix={openFix}
-                    selectable
-                    selected={selected.has(v.id)}
-                    onToggleSelect={toggleOne}
-                  />
-                ))}
-              </div>
+              {visibleCorrections.length === 0 ? (
+                <div className="empty-state">
+                  {q || sevFilter || srcFilter
+                    ? t("fixes.emptyFilters")
+                    : statusFilter === "open"
+                      ? t("fixes.emptyResolved")
+                      : t("fixes.emptyNoResolved")}
+                </div>
+              ) : (
+                <div className="finding-list">
+                  {visibleCorrections.map((v) => (
+                    <VulnerabilityCard
+                      key={v.id}
+                      vuln={v}
+                      onFix={openFix}
+                      selectable
+                      selected={selected.has(v.id)}
+                      onToggleSelect={toggleOne}
+                      status={findingState[v.id]?.status}
+                      inherited={findingState[v.id]?.inherited}
+                      hasFix={findingState[v.id]?.hasFix}
+                      onStatus={
+                        findingState[v.id]
+                          ? (vuln, status) => void setFindingStatus(vuln.id, status)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {hiddenByLimit > 0 && (
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={() => setLimit((n) => n + PAGE)}
+                  >
+                    {t("fixes.showMore", { n: Math.min(PAGE, hiddenByLimit), total: hiddenByLimit })}
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -589,11 +830,22 @@ export default function ResultsPage() {
 
           {notReady("software", "Escaneando as dependências…")}
 
-          {job.phases.software.status === "done" && deps.length === 0 && (
-            <div className="empty-state">
-              Nenhuma dependência vulnerável encontrada. 🎉
-            </div>
-          )}
+          {job.phases.software.status === "done" &&
+            deps.length === 0 &&
+            (scannersRan.deps ? (
+              <div className="empty-state">
+                Nenhuma dependência vulnerável encontrada. 🎉
+              </div>
+            ) : (
+              <div className="alert error">
+                <span>
+                  <strong>
+                    O SCA ({scan?.sca.engine || "trivy"}) não foi executado.
+                  </strong>{" "}
+                  {scan?.sca.note || "As dependências não foram verificadas."}
+                </span>
+              </div>
+            ))}
 
           {deps.length > 0 && (
             <div className="finding-list">
@@ -709,6 +961,12 @@ export default function ResultsPage() {
           vulns={corrections.filter((v) => selected.has(v.id))}
           repoUrl={job.input.repoUrl}
           analysisId={job.id}
+          findingIdByLocal={Object.fromEntries(
+            Object.entries(findingState).map(([k, f]) => [k, f.id])
+          )}
+          onPrOpened={(ids) => {
+            for (const localId of ids) void setFindingStatus(localId, "pr_open");
+          }}
           onClose={() => setBatchOpen(false)}
         />
       )}

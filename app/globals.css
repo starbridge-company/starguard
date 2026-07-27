@@ -1114,6 +1114,91 @@ img {
   box-shadow: var(--shadow-sm);
 }
 
+/* ---------- Diff de revisão (AUDITORIA.md#UX-02) ---------- */
+.diff {
+  display: grid;
+  gap: 8px;
+}
+.diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.diff-stats {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+.diff-body {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.5em 3.5em 1.2em 1fr;
+  white-space: pre;
+}
+.diff-line.add {
+  background: hsl(var(--accent) / 0.13);
+}
+.diff-line.del {
+  background: hsl(var(--danger) / 0.12);
+}
+.diff-num {
+  text-align: right;
+  padding-right: 8px;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  user-select: none;
+}
+.diff-sign {
+  text-align: center;
+  user-select: none;
+  font-weight: 700;
+}
+.diff-line.add .diff-sign { color: hsl(var(--accent)); }
+.diff-line.del .diff-sign { color: hsl(var(--danger)); }
+.diff-text {
+  padding-right: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.diff-collapsed {
+  padding: 5px 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2, var(--surface));
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  user-select: none;
+}
+
+/* Achado já resolvido (corrigido, falso positivo, PR aberto): fica presente
+   mas recuado, para não competir com o que ainda precisa de atenção.
+   Ver AUDITORIA.md#FEAT-01. */
+.vuln-card.is-resolved {
+  opacity: 0.62;
+}
+.vuln-card.is-resolved:hover {
+  opacity: 1;
+}
+.vuln-card.is-resolved .vuln-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--text-secondary);
+}
+.badge.ok {
+  color: hsl(var(--accent));
+  border-color: hsl(var(--accent) / 0.45);
+  background: hsl(var(--accent) / 0.1);
+}
+
 .vuln-card.sev-critical-edge { border-left-color: hsl(var(--danger)); }
 .vuln-card.sev-high-edge { border-left-color: hsl(var(--warning)); }
 .vuln-card.sev-medium-edge { border-left-color: #eab308; }

@@ -11,6 +11,7 @@ import {
   type User,
 } from "@/lib/auth";
 import { clientIp } from "@/lib/ratelimit";
+import * as usersRepo from "@/lib/repos/users";
 import { COOKIE } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -27,15 +28,35 @@ export async function POST(req: NextRequest) {
     return jsonError(401, "Sessão revogada.");
   }
 
+  // O usuário é lido do BANCO, não das claims. Antes, o refresh reconstruía a
+  // sessão a partir do próprio token: conta excluída continuava entrando e
+  // papel rebaixado continuava valendo por até 7 dias. Ver AUDITORIA.md#SEC-02.
+  const fresh = await usersRepo.findById(claims.sub); // já filtra deletedAt
+  if (!fresh) return jsonError(401, "Sessão inválida.");
+
+  // Corte de sessão (troca de papel, exclusão, troca de senha). `iat` do JWT
+  // tem precisão de SEGUNDOS: comparamos em segundos para que a sessão nova,
+  // emitida no mesmo segundo do corte, não se auto-invalide.
+  if (fresh.sessionsInvalidatedAt) {
+    const cutoff = Math.floor(fresh.sessionsInvalidatedAt.getTime() / 1000);
+    if (claims.iat < cutoff) {
+      await revokeRefresh(claims.jti, {
+        userId: claims.sub,
+        expiresAt: new Date(claims.exp * 1000),
+      });
+      return jsonError(401, "Sessão encerrada. Entre novamente.");
+    }
+  }
+
   // Rotação: revoga o refresh atual e emite um novo par.
   await revokeRefresh(claims.jti, {
     userId: claims.sub,
     expiresAt: new Date(claims.exp * 1000),
   });
   const user: User = {
-    id: claims.sub,
-    email: claims.email,
-    role: claims.role,
+    id: fresh.id,
+    email: fresh.email,
+    role: fresh.role, // papel ATUAL, não o que estava no token
   };
   const session = await issueSession(user);
   const res = jsonOk({ ok: true, csrf: session.csrf });

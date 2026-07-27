@@ -48,6 +48,13 @@ export const users = starguard.table(
     passwordHash: text("password_hash").notNull(),
     role: roleEnum("role").notNull().default("admin"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    // Corte de sessão: todo refresh token emitido ANTES deste instante é
+    // recusado. É como um papel alterado, uma exclusão ou uma troca de senha
+    // derrubam sessões em aberto sem precisar listar jti a jti.
+    // Ver AUDITORIA.md#SEC-02 e #SEC-03.
+    sessionsInvalidatedAt: timestamp("sessions_invalidated_at", {
+      withTimezone: true,
+    }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
@@ -143,6 +150,90 @@ export const pullRequests = starguard.table(
   ]
 );
 
+// ---- findings (achado individual, com estado próprio) ----
+// Antes, os achados só existiam dentro do JSONB `analyses.phases`: não havia
+// como marcar um como corrigido/falso positivo, nem reconhecê-lo num novo scan.
+// Ver AUDITORIA.md#FEAT-01.
+export const findingStatusEnum = starguard.enum("finding_status", [
+  "open",
+  "fixed",
+  "pr_open",
+  "pr_merged",
+  "false_positive",
+  "accepted_risk",
+]);
+
+export const findings = starguard.table(
+  "findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .references(() => analyses.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    // Id posicional dentro da análise ("V-3", "AI-1", "D-7"). É o que a tela
+    // usa para casar o card com a linha — os ids do JSONB continuam válidos
+    // DENTRO de uma análise, só não sobrevivem a um novo scan.
+    localId: text("local_id").notNull(),
+    // Identidade estável entre análises: regra + arquivo + trecho normalizado,
+    // SEM a linha (código deslocado não pode ressuscitar achado resolvido).
+    fingerprint: text("fingerprint").notNull(),
+    repoUrl: text("repo_url"),
+    source: text("source").notNull(), // sast | sca | ai-review
+    ruleId: text("rule_id").notNull(),
+    severity: text("severity").notNull(),
+    file: text("file"),
+    line: integer("line"),
+    title: text("title").notNull(),
+    // O Vulnerability/DependencyVuln completo, para a tela não depender do JSONB.
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: findingStatusEnum("status").notNull().default("open"),
+    statusNote: text("status_note"),
+    statusBy: uuid("status_by").references(() => users.id),
+    statusAt: timestamp("status_at", { withTimezone: true }),
+    // Preenchido quando o estado veio de uma análise anterior do mesmo repo.
+    inheritedFrom: uuid("inherited_from"),
+    pullRequestId: uuid("pull_request_id").references(() => pullRequests.id),
+    ...timestamps,
+  },
+  (t) => [
+    index("findings_analysis_idx").on(t.analysisId, t.severity),
+    index("findings_fp_idx").on(t.userId, t.fingerprint),
+    uniqueIndex("findings_analysis_local_uidx").on(t.analysisId, t.localId),
+  ]
+);
+
+// ---- finding_fixes (correções geradas, preservadas) ----
+// A correção gerada morria no estado do React: fechar o modal e reabrir
+// disparava uma nova chamada de IA. Ver AUDITORIA.md#FEAT-02.
+export const findingFixes = starguard.table(
+  "finding_fixes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    findingId: uuid("finding_id")
+      .notNull()
+      .references(() => findings.id),
+    engine: text("engine").notNull(), // api | agent
+    model: text("model"),
+    instructions: text("instructions"), // prompt personalizado usado
+    originalCode: text("original_code").notNull(),
+    fixedCode: text("fixed_code").notNull(),
+    changedFiles: jsonb("changed_files").$type<
+      { file: string; originalCode: string; fixedCode: string }[]
+    >(),
+    explanation: text("explanation"),
+    noChange: integer("no_change").notNull().default(0), // 0/1
+    createdBy: uuid("created_by").references(() => users.id),
+    // Preenchido quando o usuário manda refazer: guardamos o histórico em vez
+    // de sobrescrever, para dar pra comparar tentativas.
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("finding_fixes_finding_idx").on(t.findingId, t.supersededAt)]
+);
+
 // ---- audit_log ----
 export const auditLog = starguard.table(
   "audit_log",
@@ -186,4 +277,8 @@ export type AnalysisRow = typeof analyses.$inferSelect;
 export type NewAnalysis = typeof analyses.$inferInsert;
 export type PullRequestRow = typeof pullRequests.$inferSelect;
 export type NewPullRequest = typeof pullRequests.$inferInsert;
+export type FindingRow = typeof findings.$inferSelect;
+export type NewFinding = typeof findings.$inferInsert;
+export type FindingFixRow = typeof findingFixes.$inferSelect;
+export type FindingStatus = FindingRow["status"];
 export type Role = UserRow["role"];

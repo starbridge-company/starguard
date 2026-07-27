@@ -26,8 +26,117 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | Sprint | Itens | Situação |
 |---|---|---|
 | **1 — Destravar o uso** | BUG-01 · BUG-02 · BUG-03 · BUG-04 · BUG-05 · BUG-09 · SEC-01 · SEC-04 · SEC-05 · SEC-07 · SEC-08 (parcial) | ✅ **entregue e testado** em 27/07/2026 |
-| 2 — Fluxo de correção | BUG-06 · BUG-07 · BUG-08 · BUG-10 · SEC-02 · SEC-03 · UX-15 | ⬜ a fazer |
-| 3 em diante | ver plano de execução no fim | ⬜ a fazer |
+| **2 — Fluxo de correção** | BUG-06 · BUG-07 · BUG-08 · BUG-10 · SEC-02 · SEC-03 · UX-15 | ✅ **entregue e testado** em 27/07/2026 |
+| **3 — Estado e cache** | FEAT-01 · FEAT-02 | ✅ **entregue e testado** em 27/07/2026 |
+| **4 — Interface** | UX-01 · UX-02 · UX-04 · UX-05 · UX-06 | ✅ **entregue e testado em navegador** em 27/07/2026 |
+| **5 — Descrições** | FEAT-03 · ARQ-11 | ✅ **entregue e testado em navegador** em 27/07/2026 |
+| **6 — Idioma** | FEAT-04 | 🟡 **fundação entregue e testada; extração parcial** em 27/07/2026 |
+| 7 em diante | ver plano de execução no fim | ⬜ a fazer |
+
+<details>
+<summary><strong>Como o Sprint 6 foi validado</strong> (Chromium com <code>Accept-Language: en-US</code>)</summary>
+
+| Verificação | Resultado |
+|---|---|
+| Primeira visita, navegador em inglês | `<html lang="en">` e login em inglês **sem configurar nada** |
+| Menu lateral | "New analysis · Analyses · Pull Requests · Account · Sign out" |
+| Troca explícita para português | `<html lang>` vira `pt-BR`, menu volta, cookie `sg_locale=pt-BR` gravado |
+| Persistência | escolha sobrevive à navegação e à recarga |
+| Volta para inglês | menu traduzido de novo |
+| Erros de JavaScript | **0** |
+
+**O que ficou traduzido:** fundação completa (detecção por `Accept-Language`, cookie,
+`<html lang>`, provider, `t()` com interpolação e fallback), login, menu, tela de
+resultados, cards de achado, modal de correção, diff, selos de severidade e de estado,
+formatação de datas — e a **saída da IA**: modelagem de ameaças, revisão, enriquecimento e
+explicação de correção passaram todos a receber o idioma, com a análise carregando essa
+escolha até o fim do job.
+</details>
+
+<details>
+<summary><strong>Como o Sprint 5 foi validado</strong></summary>
+
+| Verificação | Resultado |
+|---|---|
+| Cobertura do catálogo num repositório real | **44 de 44** achados explicados pelo catálogo — **zero chamadas de IA** |
+| Título do card | `An action sourced from a third-party repository on GitHub is not pinned to a full length commit SHA…` → **"GitHub Action de terceiro não fixada em commit"** |
+| Descrição | passa a dizer o que é, por que importa e o caminho de ataque, em português |
+| "Como corrigir" | orientação específica por regra, no lugar da frase fixa que era igual para todos |
+| Divulgação progressiva | trecho de código, cenário de ataque e texto original ficam num `Collapsible` |
+| Rastreabilidade | o texto original da ferramenta continua acessível — não escondemos a fonte |
+| Erros de JavaScript | **0** |
+
+**Custo:** o catálogo tem 38 entradas (24 regras + 14 CWEs) e resolve as regras mais
+comuns de graça. A IA entra **em lote**, uma única chamada para todas as regras
+desconhecidas de uma vez — num repositório com 44 achados de 5 regras distintas, o
+desenho evita 44 chamadas.
+</details>
+
+<details>
+<summary><strong>Como o Sprint 4 foi validado</strong> (Chromium real, via Playwright — 20 verificações)</summary>
+
+| Verificação | Resultado |
+|---|---|
+| Lista de correções | renderiza **25 cards por vez**; "Mostrar mais" completa os 44 |
+| Filtro de severidade | Baixa → 3 cards; Crítica → 0 + estado vazio **de filtro** (não o "🎉 tudo limpo") |
+| Busca por regra | `package-dependencies` → 19 cards |
+| Filtro de origem | SAST 25 · Revisão IA 0 |
+| Marcar "Falso positivo" | contador "Abertos (42)" → "(41)"; card aparece em Resolvidos com estilo próprio |
+| Modal | `role="dialog"`, `aria-modal="true"`, `aria-labelledby` presentes |
+| Rolagem do fundo | travada ao abrir, restaurada ao fechar |
+| Armadilha de foco | após **25 Tabs** o foco continua dentro do diálogo |
+| ESC | fecha o modal |
+| Diff | 14 linhas na tela · contador **+4 −2** · alternância diff/arquivo completo |
+| Cache de correção | abrir o modal fez **1** chamada a `/api/step4-fix` e ela voltou do banco |
+| Lote | mostra o custo em chamadas de IA e **não gera nada** até o clique explícito |
+| Polling com análise concluída | **0 requisições** a `/api/status` em 12 s |
+| Erros de JavaScript | **0** no console, em todo o percurso |
+
+**Não exercitado:** o aviso de cobertura da revisão por IA (`UX-06`) só aparece quando a
+revisão roda, o que exige chave de IA — o caminho de dados foi validado por tipo e build.
+</details>
+
+<details>
+<summary><strong>Como o Sprint 3 foi validado</strong> (duas análises reais do mesmo repositório)</summary>
+
+| Verificação | Resultado |
+|---|---|
+| Análise 1 de um repositório real | **55 achados persistidos** (44 SAST + 11 SCA), todos `open` |
+| Marcar 3 achados (`fixed`, `false_positive`, `accepted_risk`) | HTTP 200 em cada |
+| **Análise 2 do mesmo repositório** | 55 achados · **3 herdados** com estado e nota · **52 abertos** |
+| Herança é por impressão digital? | `inherited_from` aponta para as linhas da análise 1, casadas por `fingerprint` |
+| `POST /api/step4-fix` sem correção guardada | 502 (foi à IA, sem key configurada) |
+| Mesmo POST **com** correção guardada | **200 · `cached: true`** — nenhuma chamada de IA |
+| Mesmo POST com `force: true` ("Refazer") | 502 — ignorou o cache e foi à IA, como deve |
+| Outro usuário lendo achados alheios | 404 em `GET /findings`, `PATCH /findings/:id` e `step4-fix` |
+| `PATCH` sem header CSRF / com status inválido | 403 / 400 |
+
+**Não exercitado:** a interface (filtro Abertos/Resolvidos, selo de estado, botões
+"Já corrigi"/"Falso positivo", carregamento da correção guardada ao reabrir o modal) foi
+validada por tipo e build, não em navegador. E a **gravação** da correção no fluxo real
+depende de chave de IA — o registro usado no teste de cache foi inserido à mão.
+</details>
+
+<details>
+<summary><strong>Como o Sprint 2 foi validado</strong></summary>
+
+| Verificação | Resultado |
+|---|---|
+| Superadmin **rebaixado** com sessão aberta | `/api/admin/*` → 403 **na hora** (antes: 15 min) e refresh → 401 (antes: 7 dias) |
+| Usuário **promovido** | sessão antiga derrubada — precisa entrar de novo para receber o papel novo |
+| Usuário **excluído** | refresh → 401; não entra mais |
+| Troca de senha em 2 dispositivos | o que trocou continua (200); o outro é derrubado (401) |
+| `alsoFix` com vários achados do mesmo arquivo | aceito (502 = falhou só na IA por falta de key); payload malformado → 400 |
+| Fim do job com `prs_count = 7` | continua 7 (antes: voltava a 0) |
+| Scan com `SAST_ENGINE=none` | `ran: false` + nota — a tela deixa de comemorar 🎉 |
+| Scan com **SCA quebrado** e SAST normal | SAST entrega 44 achados mesmo assim (antes: o SCA quebrado derrubava a fase inteira) |
+| Scan real de repositório público | SAST 44 achados · SCA 11 CVEs — caminho completo funcionando no container |
+
+**Não exercitado:** o agrupamento por arquivo do `BatchFixModal` e o aviso de `noChange`
+dependem de uma chave de IA para gerar correções de verdade. O **contrato** (schema, prompt
+com N achados, montagem do PR com um arquivo por grupo) está validado; o resultado da IA
+sobre múltiplos achados no mesmo arquivo, não.
+</details>
 
 <details>
 <summary><strong>Como o Sprint 1 foi validado</strong> (aplicação real em container + Postgres descartável)</summary>
@@ -79,6 +188,35 @@ buckets: login:<ip> = 7   |   login:<email>:<ip> = 5
 resultados (1 request a cada 1,4 s) e a busca sem debounce (1 request por tecla digitada),
 que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 `BUG-01`, `BUG-02` e `BUG-03` resolve a dor inteira — é meio dia de trabalho.
+
+---
+
+## Pendências abertas dos sprints entregues
+
+> O que ficou de fora do que já foi marcado como corrigido. Cada linha é
+> rastreável por ID e deve ser fechada antes de considerar o item concluído.
+
+| ID | Origem | O que falta | Por quê / o que fazer |
+|---|---|---|---|
+| **PEND-01** | SEC-08 (S1) | Backend Redis do rate limit | Só o vazamento de memória foi resolvido. Com 2+ instâncias no Render o limite efetivo dobra e fica imprevisível. `RATE_LIMIT_REDIS_URL` continua sendo lido por ninguém. |
+| ~~PEND-02~~ | BUG-01 (S1) | ✅ **fechada em 27/07/2026** | Verificado em Chromium removendo o cookie de acesso e mantendo o refresh: a sequência observada foi `401 /api/findings/…` → `200 /api/auth/refresh` → `200 /api/findings/…`, sem passar pelo login. Falta apenas ver o keepalive de 5 min disparar por tempo — o caminho que ele usa é o mesmo já provado. |
+| ~~PEND-03~~ | BUG-04/BUG-05 (S1) | ✅ **fechada em 27/07/2026** | O aviso de "conexão instável", o botão de retry e o debounce das buscas foram validados só por leitura e tipo. |
+| **PEND-04** | BUG-08 (S2) | Incremento real do contador | Testei apenas **metade**: que o fim do job não zera mais o `prs_count`. O incremento em `createPR` (0 → 1 ao abrir um PR) nunca rodou, porque exige um PR de verdade no GitHub. |
+| **PEND-05** | BUG-06/BUG-10 (S2) | Qualidade da correção agrupada | O contrato está validado (schema, prompt com N achados, PR com um arquivo por grupo), mas **nenhuma correção real foi gerada** — exige `ANTHROPIC_API_KEY`. Falta ver se a IA de fato resolve os N problemas do arquivo numa passada. |
+| **PEND-06** | BUG-07 (S2) | PR multi-arquivo do agente | Exige chave de IA + token do GitHub + repositório real. O caminho de código está pronto e tipado; nunca foi executado. |
+| **PEND-07** | SEC-02 (S2) | Janela de 15 min fora da área de governança | `requireRole` reconfere o papel no banco, mas `requireSession` (rotas comuns) não. Um usuário excluído mantém acesso aos **próprios** dados até o access token expirar. Decisão consciente: uma consulta por requisição em toda a API era caro demais para o ganho. |
+| **PEND-08** | ARQ-01 | Nenhum teste automatizado | Todas as validações foram feitas à mão contra um container. Nada disso está protegido contra regressão. É a maior dívida aberta. |
+| ~~PEND-09~~ | FEAT-01/02 (S3) | ✅ **fechada em 27/07/2026** — filtros, selos, ações de estado, modal e cache exercitados em Chromium real | Filtro Abertos/Resolvidos, selos de estado, botões "Já corrigi"/"Falso positivo" e carregamento da correção guardada ao reabrir o modal: validados por tipo e build, não em uso real. |
+| **PEND-10** | FEAT-02 (S3) | Gravação da correção no fluxo real | O cache foi provado com um registro inserido à mão. Ver a IA gerar → gravar → reaproveitar exige `ANTHROPIC_API_KEY`. |
+| **PEND-11** | FEAT-01 (S3) | Análises antigas não têm estado | Achados só passam a existir na tabela a partir de agora. Análises anteriores continuam funcionando, mas sem os controles de estado. Se quiser retroagir, é um backfill lendo o JSONB `phases`. |
+| **PEND-13** | FEAT-03 (S5) | Caminho de IA do enriquecimento não exercitado | O catálogo cobriu 100% do repositório testado, então a chamada em lote a `lib/enrich.ts` nunca rodou. Exige `ANTHROPIC_API_KEY` **e** um repositório com regras fora do catálogo. |
+| **PEND-14** | FEAT-03 (S5) | Catálogo cobre só as regras mais comuns | 38 entradas. Repositórios de outras linguagens (Python, Go, Java) vão cair mais na IA. Ampliar o catálogo é trabalho incremental e barato — cada entrada nova economiza chamadas para sempre. |
+| **PEND-15** | FEAT-03 (S5) | Dependências (SCA) não são enriquecidas | O enriquecimento cobre SAST e revisão por IA. Achados de CVE mantêm a descrição do Trivy, em inglês. |
+| **PEND-16** | FEAT-04 (S6) | Extração de strings incompleta | Traduzidos: login, menu, resultados, cards, modal de correção, diff, severidade/estado, datas. **Faltam:** corpo da tela de Conta, as 4 telas de governança, lista de análises, relatório, onboarding (`app/page.tsx`), `PipelineStepper`, `BatchFixModal`, `NewUserModal`, `filters.tsx`, `listing.tsx` e o conteúdo dos `InfoTip`. A fundação está pronta — o resto é trabalho mecânico de trocar literal por `t()`. |
+| **PEND-17** | FEAT-04 (S6) | Mensagens de erro da API em pt-BR fixo | `jsonError(401, "Não autenticado.")` e afins. O desenho previsto é devolver uma CHAVE e traduzir no cliente. |
+| **PEND-18** | FEAT-04/03 (S6) | Catálogo só existe em pt-BR | `lookupCatalog` devolve `undefined` para outros idiomas de propósito (texto em português para quem pediu inglês seria pior). Em inglês, os achados caem na IA ou ficam com o texto original da ferramenta. Traduzir as 38 entradas devolve o custo zero também para o inglês. |
+| **PEND-19** | FEAT-04 (S6) | Idioma vive só no cookie do navegador | Não há `users.locale`: entrar de outra máquina volta ao padrão. Uma coluna + `/api/me` resolveria. |
+| **PEND-12** | FEAT-01 (S3) | Rota `step3-scan` avulsa não persiste | Só o fluxo completo (`/api/analyze` → `runJob`) grava achados. A rota de scan isolada continua devolvendo o resultado sem criar estado. |
 
 ---
 
@@ -156,6 +294,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ### BUG-06 · Duas correções no mesmo arquivo: a última apaga a primeira, em silêncio ✅
 **P0 · Esforço M**
 
+> ✅ **Corrigido em 27/07/2026.** O `BatchFixModal` agrupa os achados por arquivo e envia **uma** correção por arquivo, com todos os problemas no mesmo prompt (`alsoFix` no `step4Schema`). O PR passa a ter uma entrada por arquivo — nada mais se sobrescreve.
+
 - **Evidência:** [components/BatchFixModal.tsx:140-146](components/BatchFixModal.tsx#L140-L146) monta `files[]` com um item por achado; [lib/github.ts:242-249](lib/github.ts#L242-L249) deduplica por caminho — *"Arquivos repetidos são deduplicados (o último conteúdo prevalece)"*.
 - **Hoje:** cada correção é gerada **independentemente a partir do arquivo original**. Se dois achados estão no mesmo arquivo (o caso comum — meu scan de teste no próprio StarGuard achou 576 achados concentrados em poucos arquivos), a segunda correção não contém a primeira. O PR recebe só a segunda, e a primeira vulnerabilidade **continua aberta enquanto a UI diz que foi corrigida**. Perda de dado silenciosa, num produto de segurança.
 - **Esperado:** correções no mesmo arquivo se acumulam, ou o usuário é avisado explicitamente.
@@ -168,6 +308,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ### BUG-07 · Correção multi-arquivo do agente perde arquivos no PR ✅
 **P0 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** Quando o agente altera mais de um arquivo, o PR individual passa a usar a rota `pr-batch` com todos eles; o modal lista os arquivos afetados antes de abrir.
+
 - **Evidência:** [types/index.ts:144](types/index.ts#L144) define `changedFiles[]`; [lib/agent-fix.ts:145-150](lib/agent-fix.ts#L145-L150) preenche corretamente; mas [app/results/[id]/page.tsx:159-166](app/results/[id]/page.tsx#L159-L166) envia só `file` + `fixedCode`.
 - **Hoje:** o agente (`FIX_ENGINE=agent`, que é o **padrão**) pode alterar 4 arquivos; o PR commita 1. O resultado é um PR que não compila — pior que não ter PR.
 - **Esperado:** o PR contém tudo que o agente mudou.
@@ -176,6 +318,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 
 ### BUG-08 · Contador de Pull Requests é sempre zero ✅
 **P0 · Esforço P**
+
+> ✅ **Corrigido em 27/07/2026.** `createPR` incrementa `analyses.prs_count`, e o `computeMetrics` deixou de recalcular (e zerar) esse contador no fim do job.
 
 - **Evidência:** [lib/jobs.ts:255](lib/jobs.ts#L255) retorna `{ fixes, prs: [] }` e nada nunca adiciona a `prs`; [lib/jobs.ts:182](lib/jobs.ts#L182) calcula `prsCount: refactor?.prs.length ?? 0` **uma única vez**, no fim do job — antes de qualquer PR existir. A rota de PR grava na tabela `pull_requests` ([pr/route.ts:46-56](app/api/github/pr/route.ts#L46-L56)) mas não toca na análise.
 - **Hoje:** a coluna "PRs" na lista de análises, na tabela de usuários do admin e no relatório mostra **0 para sempre**, mesmo com PRs abertos. A tela `/pull-requests` (que lê a tabela) mostra os PRs corretamente — as duas telas se contradizem.
@@ -205,6 +349,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ### SEC-02 · Papel alterado e usuário excluído continuam com sessão válida por 7 dias ✅
 **P0 · Esforço M**
 
+> ✅ **Corrigido em 27/07/2026.** Coluna `sessions_invalidated_at` (migração `0002`): o refresh lê o usuário do **banco** (papel atual, conta ativa) e recusa token emitido antes do corte. Troca de papel e exclusão gravam o corte na mesma instrução. `requireRole` reconfere o papel no banco.
+
 - **Evidência:** [app/api/auth/refresh/route.ts:33-38](app/api/auth/refresh/route.ts#L33-L38) reconstrói o usuário **a partir das claims do token**, sem consultar o banco. [admin/users/[id]/route.ts DELETE](app/api/admin/users/[id]/route.ts) faz soft delete e **não revoga** nada; o PATCH de papel também não.
 - **Hoje:** rebaixar um superadmin para admin não tem efeito — o refresh continua emitindo access tokens com `role: "superadmin"` por até 7 dias. Excluir um usuário idem: ele continua entrando. É uma falha de controle de acesso (OWASP A01).
 - **Como corrigir:**
@@ -215,6 +361,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 
 ### SEC-03 · Trocar a senha não invalida sessões antigas ✅
 **P1 · Esforço P**
+
+> ✅ **Corrigido em 27/07/2026.** Troca de senha/e-mail derruba as demais sessões (corte + revogação do refresh atual) e registra `session.revoked` na auditoria.
 
 - **Evidência:** [app/api/account/profile/route.ts:99-107](app/api/account/profile/route.ts#L99-L107) emite uma sessão nova, mas nunca chama `revokeRefresh` do refresh anterior.
 - **Hoje:** quem trocou a senha porque desconfiou de invasão **continua invadido** — o refresh token roubado vale 7 dias.
@@ -285,6 +433,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 ### FEAT-01 · Estado por achado: corrigido, PR aberto, falso positivo 💡
 **P1 · Esforço G** — *pedido explícito*
 
+> ✅ **Entregue em 27/07/2026.** Tabela `findings` (migração `0003`) com impressão digital estável em `lib/fingerprint.ts` (regra + arquivo + trecho normalizado, **sem** a linha). `runJob` persiste os achados e **herda** o estado resolvido de análises anteriores do mesmo repositório. Rotas `GET /api/analyses/:id/findings` e `PATCH /api/findings/:id`; na tela, filtro Abertos/Resolvidos, selo de estado e ações "Já corrigi"/"Falso positivo". Abrir PR marca `pr_open`.
+
 **O bloqueio real:** hoje **não existe entidade "achado"** no banco. Tudo vive dentro do
 JSONB `analyses.phases` ([db/schema.ts:97](db/schema.ts#L97)), e os ids são **posicionais**:
 `V-1`, `V-2` ([lib/parsers.ts:69](lib/parsers.ts#L69)), `D-1` ([:106](lib/parsers.ts#L106)),
@@ -349,6 +499,8 @@ transforma o StarGuard de "relatório" em "ferramenta de acompanhamento".
 ### FEAT-02 · Preservar a correção gerada (parar de queimar tokens) 💡
 **P1 · Esforço M** — *pedido explícito*
 
+> ✅ **Entregue em 27/07/2026.** Tabela `finding_fixes` guarda cada correção (com histórico: refazer aposenta a anterior em vez de apagar). `POST /api/step4-fix` devolve a correção guardada com `cached: true` e **só chama a IA** quando não há nada guardado ou quando vem `force: true` — o botão "Refazer". Reabrir o modal deixou de custar tokens.
+
 - **Evidência:** [app/results/[id]/page.tsx:117-123](app/results/[id]/page.tsx#L117-L123) — `openFix` faz `setFix(null)` **toda vez** que o modal abre; [:696](app/results/[id]/page.tsx#L696) remonta o componente via `key`. Nada é persistido: `generateFix` ([lib/tasks.ts:188](lib/tasks.ts#L188)) devolve e o resultado morre no estado do React.
 - **Hoje:** gerar → fechar → reabrir = **nova chamada de IA**, novo custo, nova espera. Com `FIX_ENGINE=agent` (padrão), cada regeneração clona o repositório e roda o agente por até 4,5 minutos — o desperdício é de dinheiro *e* de tempo.
 - **Solução em duas camadas:**
@@ -380,6 +532,8 @@ create table starguard.finding_fixes (
 ### FEAT-03 · Descrever as vulnerabilidades de verdade 💡
 **P1 · Esforço M** — *pedido explícito*
 
+> ✅ **Entregue em 27/07/2026.** `lib/catalog.ts` (38 entradas: 24 regras + 14 CWEs) explica os achados mais comuns **sem custo e offline**; `lib/enrich.ts` chama a IA **em lote** só para as regras que sobram, e sem chave mantém o texto original marcado como "texto da ferramenta". O card passa a mostrar título traduzido, o que é, por que importa e como corrigir — com cenário de ataque, trecho e texto original num `Collapsible`.
+
 - **Evidência:** [lib/parsers.ts:72-77](lib/parsers.ts#L72-L77) — `title` e `description` são o `extra.message` cru do Opengrep, **em inglês**, frequentemente uma frase técnica seca. O `suggestion` do SAST é uma **string fixa** ([:79-80](lib/parsers.ts#L79-L80)), igual para todos os achados. Resultado: interface em português com achados em inglês e uma "sugestão" que não sugere nada.
 - **Esperado:** cada achado explica, no idioma do usuário: **o que é**, **por que é perigoso neste código**, **como um atacante exploraria** e **como corrigir**.
 - **Como corrigir:**
@@ -392,6 +546,8 @@ create table starguard.finding_fixes (
 
 ### FEAT-04 · Internacionalização de verdade (UI + IA) 💡
 **P1 · Esforço G** — *pedido explícito*
+
+> 🟡 **Parcial — 27/07/2026.** **Fundação entregue e testada** (detecção automática por `Accept-Language`, cookie, `<html lang>` dinâmico, provider com `t()` e fallback, seletor na Conta) e a **saída da IA** já respeita o idioma nas quatro frentes de geração — a análise carrega a escolha até o fim do job. A extração de strings cobre o fluxo principal (login → menu → resultados → correção); governança, relatório e onboarding seguem em português — ver PEND-16.
 
 - **Evidência:** zero infraestrutura de i18n (nenhum `next-intl`/`react-i18next`, nenhuma pasta `locales/`). [app/layout.tsx:40](app/layout.tsx#L40) fixa `lang="pt-BR"`. Todas as strings estão embutidas no JSX. Os **prompts** também são pt-BR e um deles ordena explicitamente `Output em PT-BR` ([lib/review.ts:38](lib/review.ts#L38)).
 - **O ponto que costuma ser esquecido:** traduzir a interface não basta. Se a IA continuar respondendo em português, o usuário em inglês vê botões traduzidos e **conteúdo** em português. i18n aqui tem **quatro** frentes:
@@ -418,6 +574,8 @@ create table starguard.finding_fixes (
 ### UX-01 · A tela de resultados não tem nenhum filtro ✅
 **P2 · Esforço M**
 
+> ✅ **Entregue em 27/07/2026.** Barra de filtros na aba Correções (busca por arquivo/regra/CWE, severidade, origem) reaproveitando `components/filters.tsx`, somada ao filtro de estado do FEAT-01. A lista passou a renderizar 25 cards por vez com "Mostrar mais" — 44 de uma vez já pesavam na tela.
+
 - **Evidência:** [app/results/[id]/page.tsx:541-552](app/results/[id]/page.tsx#L541-L552) renderiza **todos** os achados de uma vez. O projeto **já tem** componentes de filtro prontos e bons ([components/filters.tsx](components/filters.tsx): busca, segmentado, faixa de datas, com ESC e clique-fora) — usados apenas nas listagens.
 - **Hoje:** meu scan de teste no próprio repositório gerou **576 achados**. A tela renderiza 576 cards com `<pre>` de código. É inutilizável e trava o navegador.
 - **Como corrigir:** barra de filtros reaproveitando `filters.tsx` — severidade (segmentado), origem (SAST/IA/SCA), estado (`FEAT-01`), busca por arquivo/regra; ordenação (severidade, arquivo, regra); **agrupar por arquivo** com colapso; e paginação ou virtualização a partir de ~50 itens.
@@ -425,6 +583,8 @@ create table starguard.finding_fixes (
 
 ### UX-02 · "Ver diff" não mostra diff ✅
 **P2 · Esforço M**
+
+> ✅ **Entregue em 27/07/2026.** `lib/diff.ts` (LCS com corte de prefixo/sufixo) + `components/CodeDiff.tsx`: marcação verde/vermelha, numeração dos dois lados, regiões inalteradas colapsadas e alternância diff/arquivo completo. Uma correção de 2 linhas num arquivo de 200 mostra **9 linhas**.
 
 - **Evidência:** [FixModal.tsx:146-151](components/FixModal.tsx#L146-L151) mostra o arquivo corrigido inteiro num `<pre>`; [BatchFixModal.tsx:248-258](components/BatchFixModal.tsx#L248-L258) mostra original e corrigido em dois blocos sob o rótulo "ver diff".
 - **Hoje:** para revisar uma correção num arquivo de 400 linhas, o usuário lê 400 linhas e adivinha o que mudou. É o pior ponto de fricção do fluxo principal do produto.
@@ -442,12 +602,16 @@ create table starguard.finding_fixes (
 ### UX-04 · Modais sem acessibilidade ✅
 **P2 · Esforço P**
 
+> ✅ **Entregue em 27/07/2026.** `components/Modal.tsx` compartilhado: `role=dialog`, `aria-modal`, `aria-labelledby`, foco inicial, armadilha de Tab, ESC, trava de rolagem do fundo e devolução do foco ao fechar. `FixModal` e `BatchFixModal` migrados.
+
 - **Evidência:** `FixModal`, `BatchFixModal` e `NewUserModal` não têm `role="dialog"`, `aria-modal`, foco inicial, armadilha de foco, retorno do foco ao fechar, fechamento por **ESC** nem trava de rolagem do fundo. Ironia: o `useDropdown` de [filters.tsx:18-35](components/filters.tsx#L18-L35) faz tudo isso certo.
 - **Como corrigir:** um `<Modal>` compartilhado com `role="dialog" aria-modal="true" aria-labelledby`, foco no primeiro elemento ao abrir, ciclo de Tab preso, ESC fecha, `overflow: hidden` no `body`, foco devolvido ao gatilho.
 - **Aceite:** navegação inteira por teclado; ESC fecha; leitor de tela anuncia o título do modal.
 
 ### UX-05 · Lote começa a gastar IA sem perguntar e não dá para cancelar ✅
 **P2 · Esforço P**
+
+> ✅ **Entregue em 27/07/2026.** O lote ganhou tela de confirmação com o custo (N achados em M arquivos = M chamadas de IA) e botão de cancelar durante a geração, via `AbortController`. Nada dispara sozinho ao abrir o modal.
 
 - **Evidência:** [BatchFixModal.tsx:78-121](components/BatchFixModal.tsx#L78-L121) — o `useEffect` dispara na montagem, 3 em paralelo. Fechar o modal só marca `cancelled = true`: as requisições em voo **terminam no servidor** e o resultado é jogado fora.
 - **Hoje:** selecionar 50 achados e clicar = 50 chamadas de IA imediatas, sem aviso de custo e sem freio. Com `FIX_ENGINE=agent`, são 50 clones de repositório.
@@ -456,6 +620,8 @@ create table starguard.finding_fixes (
 
 ### UX-06 · A revisão por IA lê ~40 arquivos e não avisa ✅
 **P2 · Esforço P**
+
+> ✅ **Entregue em 27/07/2026.** `runAiReview` devolve `coverage` (arquivos lidos / elegíveis / truncados) e a tela informa quanto do repositório a revisão realmente leu, deixando explícito que SAST e SCA analisaram tudo.
 
 - **Evidência:** [lib/review.ts:104-106](lib/review.ts#L104-L106) — teto de 40 arquivos / 180 KB / 24 KB por arquivo. O total descoberto (`discovered`) vai só para dentro do prompt ([:288](lib/review.ts#L288)) e **não** para o resultado.
 - **Hoje:** num repositório de 800 arquivos, a revisão vê 5% e a interface apresenta o resultado como se fosse a análise do projeto inteiro. Numa ferramenta de segurança isso é um problema de honestidade, não de UX.
@@ -519,6 +685,8 @@ create table starguard.finding_fixes (
 ### UX-15 · Estado vazio da lista de achados não distingue "limpo" de "não rodou" ✅
 **P2 · Esforço P**
 
+> ✅ **Corrigido em 27/07/2026.** `ran` passou a significar "o analisador REALMENTE executou": cada scanner é isolado (um binário ausente não derruba o outro nem a fase) e devolve `note` explicando. A tela distingue "nada encontrado" de "nada foi procurado".
+
 - **Evidência:** [results/[id]/page.tsx:502-506](app/results/[id]/page.tsx#L502-L506) — "Nenhuma correção encontrada 🎉" aparece sempre que `corrections.length === 0` e a fase terminou, **inclusive quando o SAST não rodou** (binário ausente, `ran: false`).
 - **Hoje:** o usuário comemora um repositório "limpo" que na verdade nunca foi escaneado. Grave num produto de segurança.
 - **Como corrigir:** checar `scan.sast.ran` / `scan.sca.ran` / `review.ran` e, se algum for `false`, mostrar o aviso com o motivo (`review.note` já traz o texto pronto).
@@ -571,6 +739,9 @@ create table starguard.finding_fixes (
 **P2 · Esforço P** — `audit()` aceita `ipHash` como 4º parâmetro ([lib/auth.ts:193-202](lib/auth.ts#L193-L202)) e **nenhuma das 16 chamadas** o passa. A coluna `ip_hash` ([db/schema.ts:154](db/schema.ts#L154)) é sempre nula e a tela ([monitoring/page.tsx:187-189](app/admin/monitoring/page.tsx#L187-L189)) mostra "—". Corrigir junto com `SEC-05`.
 
 ### BUG-10 · Correção "gerada" idêntica ao original, sem avisar ✅
+
+> ✅ **Corrigido em 27/07/2026.** `generateFix` agora **lança** quando a IA não devolve código; quando devolve algo idêntico ao original, marca `noChange` — a UI avisa e desabilita o botão de PR.
+
 **P2 · Esforço P** — [lib/tasks.ts:217-221](lib/tasks.ts#L217-L221): se a IA não devolver `fixedCode`, `fixedCode` recebe o próprio original e a explicação vira o texto padrão *"Correção gerada pela IA."*. O usuário vê uma "correção" que não corrige — e pode abrir um PR vazio. Corrigir: se `!parsed.fixedCode`, lançar erro explícito; se `fixedCode.trim() === originalCode.trim()`, avisar na UI ("a IA não propôs alteração").
 
 ### BUG-11 · Análise órfã fica "pendente" para sempre ✅
@@ -645,6 +816,8 @@ create table starguard.finding_fixes (
 
 ### ARQ-11 · Textos de domínio espalhados como literais ✅
 **Esforço M** — a frase-guia de correção está duplicada **literalmente** em [parsers.ts:80](lib/parsers.ts#L80) e [FixModal.tsx:20](components/FixModal.tsx#L20), com uma terceira variante no prompt do agente ([agent-fix.ts:24](lib/agent-fix.ts#L24)). Causa direta de `UX-09`. Centralizar em `lib/constants.ts` — e é pré-requisito do `FEAT-04`.
+
+> ✅ **Entregue em 27/07/2026.** `lib/constants.ts` centraliza a frase-guia de correção e o reconhecimento de sugestão genérica, que estavam duplicados em `parsers.ts`, `FixModal.tsx` e `agent-fix.ts`. É também a base do i18n do FEAT-04.
 
 ---
 

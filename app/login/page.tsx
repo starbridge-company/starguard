@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { apiPost, ApiError } from "@/lib/client";
 import { initTheme } from "@/lib/theme";
 import { IconShield } from "@/lib/icons";
+import { useT } from "@/lib/i18n";
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useT();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -28,7 +30,7 @@ export default function LoginPage() {
       router.push(next && next.startsWith("/") ? next : "/");
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Não foi possível entrar."
+        err instanceof ApiError ? err.message : t("login.failed")
       );
       setLoading(false);
     }
@@ -47,14 +49,14 @@ export default function LoginPage() {
           <h1>
             Star<span className="brand-word">Guard</span>
           </h1>
-          <p>Copilot de Segurança · DevSecOps assistido por IA</p>
+          <p>{t("login.subtitle")}</p>
         </div>
 
         {error && <div className="alert error">{error}</div>}
 
         <div className="auth-form">
           <div className="field">
-            <label htmlFor="email">E-mail</label>
+            <label htmlFor="email">{t("login.email")}</label>
             <input
               id="email"
               className="input"
@@ -66,7 +68,7 @@ export default function LoginPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="password">Senha</label>
+            <label htmlFor="password">{t("login.password")}</label>
             <input
               id="password"
               className="input"
@@ -85,12 +87,12 @@ export default function LoginPage() {
             aria-busy={loading}
           >
             {loading ? <span className="button-spinner" /> : null}
-            Entrar
+            {t("login.submit")}
           </button>
         </div>
 
         <p className="auth-hint">
-          Acesso restrito. Use as credenciais fornecidas pelo administrador.
+          {t("login.hint")}
         </p>
       </form>
     </div>

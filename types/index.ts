@@ -63,6 +63,34 @@ export interface SkillValidation {
   checkedItems: { label: string; ok: boolean }[];
 }
 
+/**
+ * Explicação legível de um achado. O texto cru do scanner é seco, técnico e em
+ * inglês ("An action sourced from a third-party repository…") — quem lê precisa
+ * saber o que é, por que importa e como corrigir. Ver AUDITORIA.md#FEAT-03.
+ */
+export interface FindingExplain {
+  /**
+   * Título curto no idioma do sistema. O título original vem do scanner em
+   * inglês e é a primeira coisa que se lê no card — traduzi-lo é metade do
+   * valor do enriquecimento.
+   */
+  title?: string;
+  /** O que é o problema, em uma frase. */
+  whatItIs: string;
+  /** Por que é perigoso NESTE contexto. */
+  whyItMatters: string;
+  /** Caminho de ataque concreto (quando aplicável). */
+  attackScenario?: string;
+  /** Como corrigir, de forma acionável. */
+  howToFix: string;
+  /**
+   * De onde veio o texto: catálogo local (instantâneo, sem custo), IA, ou
+   * nenhum dos dois — caso em que a UI precisa deixar claro que o texto é o
+   * original da ferramenta, em inglês.
+   */
+  source: "catalog" | "ai" | "scanner";
+}
+
 // ---- Fase 3 — Scan (SAST + SCA + revisão por IA) ----
 export interface Vulnerability {
   id: string;
@@ -83,6 +111,8 @@ export interface Vulnerability {
   // Campos preenchidos apenas quando source === "ai-review" (lib/review.ts):
   kind?: "code" | "business-rule"; // regra de negócio vs. falha de código que o SAST não pegou
   confidence?: "high" | "medium"; // calibração da skill (só reporta com >80% de confiança)
+  /** Descrição enriquecida no idioma do sistema (lib/enrich.ts). */
+  explain?: FindingExplain;
 }
 
 // Regra de negócio declarada no contexto que a IA NÃO conseguiu confirmar nem
@@ -108,12 +138,17 @@ export interface DependencyVuln {
 export interface ScanResult {
   sast: {
     engine: string;
+    // `ran` significa "o analisador REALMENTE executou". Engine desligado ou
+    // binário ausente => false + `note` explicando. A UI depende disso para
+    // não confundir "nada encontrado" com "nada foi procurado".
     ran: boolean;
+    note?: string;
     vulnerabilities: Vulnerability[];
   };
   sca: {
     engine: string;
     ran: boolean;
+    note?: string;
     dependencies: DependencyVuln[];
   };
   // Revisão por IA (skill security-review): complementa os scanners com o que
@@ -126,6 +161,14 @@ export interface ScanResult {
     findings: Vulnerability[]; // sempre source === "ai-review"
     unverifiedRules?: UnverifiedRule[];
     note?: string; // motivo de não ter rodado, ou resumo do dedupe
+    // Quanto do repositório a revisão realmente leu. Sem isto, a tela
+    // apresentava o resultado como se fosse a análise do projeto inteiro
+    // quando na prática foram ~40 arquivos. Ver AUDITORIA.md#UX-06.
+    coverage?: {
+      filesReviewed: number;
+      filesEligible: number;
+      truncatedFiles: number;
+    };
   };
 }
 
@@ -139,6 +182,10 @@ export interface FixResult {
   language?: string;
   usedWholeFile?: boolean; // true = IA recebeu o arquivo completo; false = só o trecho
   engine?: "api" | "agent"; // como a correção foi gerada
+  // true = a IA/agente não propôs alteração alguma (código de saída idêntico
+  // ao de entrada). A UI precisa avisar e NÃO oferecer PR — senão o usuário
+  // abre um pull request vazio achando que corrigiu.
+  noChange?: boolean;
   // Preenchido pelo engine de agente (Claude Code): todos os arquivos que ele
   // alterou. O modal mostra o principal; o PR completo pode commitar todos.
   changedFiles?: { file: string; originalCode: string; fixedCode: string }[];

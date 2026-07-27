@@ -1,6 +1,14 @@
 "use client";
 
 import { eventCategory, eventLabel } from "@/lib/audit-events";
+import { LOCALE_COOKIE, normalizeLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
+
+/** Idioma ativo lido do cookie — `fmtDate` é chamada fora de componentes. */
+function activeLocale(): string {
+  if (typeof document === "undefined") return DEFAULT_LOCALE;
+  const m = document.cookie.match(new RegExp(`${LOCALE_COOKIE}=([^;]+)`));
+  return normalizeLocale(m?.[1]);
+}
 
 // Peças de apresentação reutilizadas nas listagens (análises, PRs, usuários).
 
@@ -8,7 +16,8 @@ export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("pt-BR", {
+  // Locale fixo em pt-BR era um dos quatro pontos do FEAT-04.
+  return d.toLocaleString(activeLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "2-digit",

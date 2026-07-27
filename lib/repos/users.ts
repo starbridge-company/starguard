@@ -95,19 +95,39 @@ export async function ensureSeed(
     .onConflictDoNothing({ target: users.email });
 }
 
-/** Altera o papel de um usuário (superadmin). */
-export async function updateRole(id: string, role: Role): Promise<void> {
+/**
+ * Derruba todas as sessões abertas do usuário: o refresh passa a recusar
+ * qualquer token emitido antes de agora. Usado em troca de papel, exclusão e
+ * troca de senha/e-mail. Ver AUDITORIA.md#SEC-02 e #SEC-03.
+ */
+export async function invalidateSessions(id: string): Promise<void> {
   await db
     .update(users)
-    .set({ role, updatedAt: new Date() })
+    .set({ sessionsInvalidatedAt: new Date(), updatedAt: new Date() })
+    .where(eq(users.id, id));
+}
+
+/**
+ * Altera o papel de um usuário (superadmin) e derruba as sessões dele na
+ * MESMA instrução — senão o token antigo continuaria emitindo acesso com o
+ * papel anterior por até 7 dias.
+ */
+export async function updateRole(id: string, role: Role): Promise<void> {
+  const now = new Date();
+  await db
+    .update(users)
+    .set({ role, sessionsInvalidatedAt: now, updatedAt: now })
     .where(eq(users.id, id));
 }
 
 /** Soft delete de um usuário. Retorna false se já estava excluído/não existe. */
 export async function softDeleteUser(id: string): Promise<boolean> {
+  const now = new Date();
   const res = await db
     .update(users)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    // Sem o corte de sessão, um usuário excluído continuaria renovando a
+    // própria sessão pelos 7 dias de validade do refresh.
+    .set({ deletedAt: now, sessionsInvalidatedAt: now, updatedAt: now })
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
     .returning({ id: users.id });
   return res.length > 0;

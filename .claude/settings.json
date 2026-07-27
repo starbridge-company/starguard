@@ -30,7 +30,28 @@
       "Bash(rm -f _monitest.mjs)",
       "Bash(node _cleanup5.mjs)",
       "Bash(rm -f _cleanup5.mjs _probe.mjs _dbcheck.mjs _dbstate.mjs)",
-      "PowerShell($c = Get-NetTCPConnection -LocalPort 3127 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3127\" })"
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 3127 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $c | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop; \"parado PID $_\" } catch {} } } else { \"nada na 3127\" })",
+      "Bash(sed -i 's|readFileSync\\(\"/tmp/analise4.txt\", \"utf8\"\\).trim\\(\\)|\"__TRACKED_VAR__\"|' ui-sprint4.mjs)",
+      "Bash(sed -i '/import { readFileSync }/d' ui-sprint4.mjs)",
+      "Bash(curl -s -b /tmp/s4.txt http://127.0.0.1:3020/api/status/8a9feefe-cd91-4dcf-9584-d4773905678c)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -b /tmp/s4.txt http://127.0.0.1:3020/api/analyses/8a9feefe-cd91-4dcf-9584-d4773905678c/findings)",
+      "Bash(sed -i 's/check\\(todos === 44, `.Mostrar mais. completa para ${todos}`\\);/check\\(todos >= 42, `Mostrar mais completa para ${todos}`\\);/' ui-sprint4.mjs)",
+      "Bash(sed -i 's/await page.click\\(.\\\\.segmented button:has-text\\(\"Alta\"\\).\\);/await page.click\\(String.fromCharCode\\(46\\)+\"segmented button:has-text\\(\\\\\\\\\"Baixa\\\\\\\\\"\\)\"\\);/' ui-sprint4.mjs)",
+      "Bash(sed -i 's/check\\(\\(await cards\\(\\)\\) === 3, `filtro Alta: ${await cards\\(\\)} cards \\(esperado 3\\)`\\);/check\\(\\(await cards\\(\\)\\) === 3, `filtro Baixa: ${await cards\\(\\)} cards \\(esperado 3 — o repo nao tem criticos nem altos no codigo\\)`\\);/' ui-sprint4.mjs)",
+      "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/marcar4.mjs\")",
+      "Bash(curl -s -b /tmp/s5.txt http://127.0.0.1:3020/api/status/__CMDSUB_OUTPUT__)",
+      "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/add-titles.mjs\")",
+      "Bash(sed -i 's/^const ID = \".*\";/const ID = \"__TRACKED_VAR__\";/' ui-sprint5.mjs)",
+      "Bash(node ui-sprint5.mjs)",
+      "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/marcar5.mjs\")",
+      "Bash(xargs -I{} echo \"{} abertas\")",
+      "Bash(xargs -I{} echo \"{} fechadas\")",
+      "Bash(xargs -I{} echo \"  {} modificados\")",
+      "Bash(node -)",
+      "Bash(xargs -I{} echo \"{} pendências abertas\")",
+      "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/marcar6.mjs\")",
+      "Bash(node -pe \"const p=require\\('./package.json'\\); Object.entries\\(p.devDependencies\\).filter\\(\\([k]\\)=>/vitest|eslint/.test\\(k\\)\\).map\\(\\([k,v]\\)=>k+' '+v\\).join\\('\\\\n'\\)\")"
     ]
   }
 }

@@ -36,6 +36,11 @@ export function requireCsrf(req: NextRequest): boolean {
 /**
  * Exige uma sessão com o papel informado. Superadmin passa em qualquer
  * exigência (vê tudo). Retorna as claims ou null (o chamador responde 401/403).
+ *
+ * O papel é reconferido no BANCO, não só na claim: o access token vale 15 min,
+ * então um superadmin rebaixado (ou excluído) ainda carrega o papel antigo no
+ * token até ele expirar. Como só a área de governança passa por aqui, o custo
+ * de uma consulta por requisição é aceitável. Ver AUDITORIA.md#SEC-02.
  */
 export async function requireRole(
   req: NextRequest,
@@ -43,7 +48,15 @@ export async function requireRole(
 ): Promise<SessionClaims | null> {
   const s = await getSession(req);
   if (!s) return null;
-  if (s.role === ROLES.superadmin || s.role === role) return s;
+
+  const { findById } = await import("@/lib/repos/users");
+  const fresh = await findById(s.sub).catch(() => undefined); // já filtra deletedAt
+  if (!fresh) return null;
+
+  if (fresh.role === ROLES.superadmin || fresh.role === role) {
+    // Devolve o papel atual — o restante da rota não deve ler a claim velha.
+    return { ...s, role: fresh.role };
+  }
   return null;
 }
 

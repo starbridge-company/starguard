@@ -151,6 +151,41 @@ export const step4Schema = z.object({
   ruleId: z.string().max(300).optional(),
   repoUrl: z.union([githubUrlField, z.literal("")]).optional(),
   userInstructions: z.string().max(4_000).optional(),
+  // Achado persistido: habilita reaproveitar a correção já gerada em vez de
+  // queimar IA de novo. Ver AUDITORIA.md#FEAT-02.
+  findingId: uuidField.optional(),
+  // "Refazer": ignora o cache e gera de novo (guardando a anterior).
+  force: z.boolean().optional(),
+  // Demais achados do MESMO arquivo, corrigidos na mesma passada — evita que
+  // uma correção sobrescreva a outra no PR. Ver AUDITORIA.md#BUG-06.
+  alsoFix: z
+    .array(
+      z.object({
+        vulnerabilityId: z.string().min(1).max(120),
+        description: z.string().min(1).max(5_000),
+        suggestion: z.string().max(5_000).optional(),
+        line: z.number().int().min(0).max(10_000_000).optional(),
+        endLine: z.number().int().min(0).max(10_000_000).optional(),
+        cwe: z.string().max(300).optional(),
+        owasp: z.string().max(300).optional(),
+        ruleId: z.string().max(300).optional(),
+      })
+    )
+    .max(20)
+    .optional(),
+});
+
+// Estado de um achado (marcar como corrigido / falso positivo / etc.).
+export const findingStatusSchema = z.object({
+  status: z.enum([
+    "open",
+    "fixed",
+    "pr_open",
+    "pr_merged",
+    "false_positive",
+    "accepted_risk",
+  ]),
+  note: z.string().trim().max(1_000).optional(),
 });
 
 export const cloneSchema = z.object({

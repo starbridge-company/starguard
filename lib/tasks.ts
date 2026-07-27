@@ -4,7 +4,8 @@
 // ============================================================
 import "server-only";
 import { ENGINES } from "@/lib/config";
-import { runAI, extractJSON } from "@/lib/ai";
+import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
+import { runAI, extractJSON, AIError } from "@/lib/ai";
 import type {
   ThreatModel,
   SkillValidation,
@@ -12,16 +13,21 @@ import type {
   FixResult,
   Threat,
   Requirement,
+  Vulnerability,
+  DependencyVuln,
 } from "@/types";
 
 const THREAT_SYSTEM = `Você é um especialista em DevSecOps e modelagem de ameaças. Com base na descrição do sistema, identifique as principais ameaças e gere uma lista de requisitos técnicos de segurança. Considere: autenticação, autorização, criptografia, compliance (LGPD, ANS, PCI-DSS quando aplicável), ofuscação de dados sensíveis e boas práticas OWASP. Retorne JSON com os campos threats[] e requirements[].
 Formato: {"summary":"...","threats":[{"id":"T-01","category":"...","title":"...","description":"...","severity":"critical|high|medium|low"}],"requirements":[{"id":"R-01","category":"...","text":"..."}]}`;
 
 export async function generateThreatModel(
-  systemDescription: string
+  systemDescription: string,
+  locale: Locale = DEFAULT_LOCALE
 ): Promise<ThreatModel> {
   const text = await runAI("plan", {
-    system: THREAT_SYSTEM,
+    system: `${THREAT_SYSTEM}
+
+Escreva TODO o texto de saída em ${LOCALE_AI_NAME[locale]}.`,
     prompt: systemDescription.slice(0, 40000),
     // Alto o bastante para caber o "thinking" (que consome max_tokens nos
     // modelos novos) + o JSON completo, sem truncar.
@@ -64,7 +70,11 @@ function emptyScan(): ScanResult {
 export async function runScan(
   repoUrl: string | undefined,
   token: string | undefined,
-  ctx?: { systemDescription?: string; requirements?: Requirement[] }
+  ctx?: {
+    systemDescription?: string;
+    requirements?: Requirement[];
+    locale?: Locale;
+  }
 ): Promise<ScanResult> {
   if (!repoUrl) return emptyScan();
 
@@ -74,24 +84,82 @@ export async function runScan(
   const { runAiReview } = await import("@/lib/review");
   const { ENGINES } = await import("@/lib/config");
 
+  const { redactError } = await import("@/lib/redact");
+
   const { dir } = await cloneRepo(repoUrl, token);
   try {
-    const [vulnerabilities, dependencies] = await Promise.all([
-      runSast(dir),
-      runSca(dir),
+    // Cada analisador é isolado: binário ausente em UM deles não pode derrubar
+    // a fase inteira nem apagar os achados do outro. E `ran` passa a dizer a
+    // verdade — antes era sempre true, mesmo com o engine desligado, o que
+    // fazia a tela comemorar "nenhuma vulnerabilidade 🎉" sobre um repositório
+    // que ninguém tinha analisado. Ver AUDITORIA.md#UX-15.
+    const sastOff = ENGINES.sast === "none";
+    const scaOff = ENGINES.sca === "none";
+
+    const [sast, sca] = await Promise.all([
+      sastOff
+        ? Promise.resolve({
+            engine: ENGINES.sast,
+            ran: false,
+            note: "SAST desligado por configuração (SAST_ENGINE=none).",
+            vulnerabilities: [] as Vulnerability[],
+          })
+        : runSast(dir)
+            .then((vulnerabilities) => ({
+              engine: ENGINES.sast,
+              ran: true,
+              vulnerabilities,
+            }))
+            .catch((e) => ({
+              engine: ENGINES.sast,
+              ran: false,
+              note: redactError(e).slice(0, 300),
+              vulnerabilities: [] as Vulnerability[],
+            })),
+      scaOff
+        ? Promise.resolve({
+            engine: ENGINES.sca,
+            ran: false,
+            note: "SCA desligado por configuração (SCA_ENGINE=none).",
+            dependencies: [] as DependencyVuln[],
+          })
+        : runSca(dir)
+            .then((dependencies) => ({
+              engine: ENGINES.sca,
+              ran: true,
+              dependencies,
+            }))
+            .catch((e) => ({
+              engine: ENGINES.sca,
+              ran: false,
+              note: redactError(e).slice(0, 300),
+              dependencies: [] as DependencyVuln[],
+            })),
     ]);
+
     // Revisão por IA roda sobre o MESMO diretório clonado, depois do SAST/SCA
     // (precisa dos achados deles para deduplicar). Nunca lança.
     const review = await runAiReview(dir, {
       systemDescription: ctx?.systemDescription,
       requirements: ctx?.requirements || [],
-      sastFindings: vulnerabilities,
-      scaFindings: dependencies,
+      locale: ctx?.locale,
+      sastFindings: sast.vulnerabilities,
+      scaFindings: sca.dependencies,
     });
+
+    // Descrições legíveis, no idioma do sistema. Catálogo local resolve a
+    // maioria sem custo; a IA entra em lote só no que sobra. Nunca lança.
+    // Ver AUDITORIA.md#FEAT-03.
+    const { enrichFindings } = await import("@/lib/enrich");
+    const [sastExplained, reviewExplained] = await Promise.all([
+      enrichFindings(sast.vulnerabilities, ctx?.locale),
+      enrichFindings(review.findings, ctx?.locale),
+    ]);
+
     return {
-      sast: { engine: ENGINES.sast, ran: true, vulnerabilities },
-      sca: { engine: ENGINES.sca, ran: true, dependencies },
-      review,
+      sast: { ...sast, vulnerabilities: sastExplained },
+      sca,
+      review: { ...review, findings: reviewExplained },
     };
   } finally {
     await cleanup(dir);
@@ -111,6 +179,18 @@ Responda em JSON válido, sem markdown: {"fixedCode":"<código corrigido>","expl
 
 const MAX_WHOLE_FILE = 100_000; // acima disso, cai para o modo trecho + splice
 
+/** Achado adicional NO MESMO arquivo, corrigido na mesma passada. */
+export interface ExtraFinding {
+  vulnerabilityId: string;
+  description: string;
+  suggestion?: string;
+  line?: number;
+  endLine?: number;
+  cwe?: string;
+  owasp?: string;
+  ruleId?: string;
+}
+
 export interface FixInput {
   vulnerabilityId: string;
   file: string;
@@ -126,6 +206,46 @@ export interface FixInput {
   repoUrl?: string; // para buscar o arquivo inteiro na hora
   token?: string;
   userInstructions?: string; // prompt personalizado por quem está na tela
+  locale?: Locale; // idioma da explicação devolvida
+  /**
+   * Demais achados do MESMO arquivo. Corrigir todos numa passada só é o que
+   * impede uma correção de sobrescrever a outra: cada uma era gerada a partir
+   * do mesmo arquivo original e o PR só guardava a última.
+   * Ver AUDITORIA.md#BUG-06.
+   */
+  alsoFix?: ExtraFinding[];
+}
+
+/** Lista "1. problema (linha X) — regra/CWE" de todos os achados do arquivo. */
+export function describeFindings(input: FixInput): string {
+  const all = [
+    {
+      vulnerabilityId: input.vulnerabilityId,
+      description: input.description,
+      suggestion: input.suggestion,
+      line: input.line,
+      endLine: input.endLine,
+      cwe: input.cwe,
+      owasp: input.owasp,
+      ruleId: input.ruleId,
+    },
+    ...(input.alsoFix || []),
+  ];
+  return all
+    .map((f, i) => {
+      const loc = f.line
+        ? `linha ${f.line}${f.endLine && f.endLine !== f.line ? `–${f.endLine}` : ""}`
+        : "linha não informada";
+      const tags = [f.ruleId, f.cwe, f.owasp].filter(Boolean).join(" · ");
+      return [
+        `${i + 1}. [${loc}]${tags ? ` (${tags})` : ""}`,
+        `   Problema: ${f.description}`,
+        f.suggestion ? `   Sugestão do scanner: ${f.suggestion}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n");
 }
 
 /** Numera as linhas do arquivo só para referência no prompt (não vai na resposta). */
@@ -152,18 +272,14 @@ function spliceLines(
 }
 
 function buildFixPrompt(input: FixInput, wholeFile: string | null): string {
-  const loc = input.line
-    ? `linha ${input.line}${input.endLine && input.endLine !== input.line ? `–${input.endLine}` : ""}`
-    : "não informada";
+  const total = 1 + (input.alsoFix?.length || 0);
   const parts = [
     `Arquivo: ${input.file}`,
     `Linguagem: ${input.language || "desconhecida"}`,
-    `Local da vulnerabilidade: ${loc}`,
-    input.ruleId ? `Regra: ${input.ruleId}` : "",
-    input.cwe ? `CWE: ${input.cwe}` : "",
-    input.owasp ? `OWASP: ${input.owasp}` : "",
-    `Vulnerabilidade: ${input.description}`,
-    input.suggestion ? `Sugestão do scanner: ${input.suggestion}` : "",
+    total > 1
+      ? `\n${total} vulnerabilidades a corrigir NESTE MESMO arquivo — corrija TODAS na mesma resposta:`
+      : `\nVulnerabilidade a corrigir:`,
+    describeFindings(input),
   ].filter(Boolean);
 
   const instr = input.userInstructions?.trim();
@@ -209,16 +325,28 @@ export async function generateFix(input: FixInput): Promise<FixResult> {
   const useWhole = !!wholeFile && wholeFile.length <= MAX_WHOLE_FILE;
 
   const text = await runAI("refactor", {
-    system: FIX_SYSTEM,
+    system: `${FIX_SYSTEM}
+
+Escreva a "explanation" em ${LOCALE_AI_NAME[input.locale || DEFAULT_LOCALE]}.`,
     prompt: buildFixPrompt(input, useWhole ? wholeFile : null),
     maxTokens: 16000,
   });
   const parsed = extractJSON<{ fixedCode?: string; explanation?: string }>(text);
-  const aiCode = parsed.fixedCode || input.originalCode;
+
+  // Sem `fixedCode` a versão anterior devolvia o PRÓPRIO original rotulado como
+  // "Correção gerada pela IA" — o usuário via uma correção que não corrigia
+  // nada e podia abrir um PR vazio. Falhar aqui é honesto e acionável.
+  // Ver AUDITORIA.md#BUG-10.
+  if (!parsed.fixedCode || !parsed.fixedCode.trim()) {
+    throw new AIError(
+      "A IA não devolveu código corrigido. Tente de novo, ou ajuste as instruções para ser mais específico sobre a correção esperada.",
+      "bad_output"
+    );
+  }
+  const aiCode = parsed.fixedCode;
 
   let originalCode = useWhole ? wholeFile! : input.originalCode;
-  let fixedCode = useWhole ? wholeFile! : input.originalCode;
-  fixedCode = parsed.fixedCode ? aiCode : fixedCode;
+  let fixedCode = aiCode;
 
   // Arquivo grande demais para enviar inteiro: a IA corrigiu só o trecho, mas
   // ainda queremos gravar o arquivo inteiro no PR — recompomos via splice.
@@ -244,5 +372,6 @@ export async function generateFix(input: FixInput): Promise<FixResult> {
     originalCode,
     fixedCode,
     explanation: parsed.explanation || "Correção gerada pela IA.",
+    noChange: fixedCode.trim() === originalCode.trim(),
   };
 }

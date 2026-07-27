@@ -2,6 +2,7 @@
 // Parsers dos outputs das ferramentas (Semgrep/Opengrep, Trivy) -> tipos StarGuard.
 // ============================================================
 import type { Severity, Vulnerability, DependencyVuln } from "@/types";
+import { FIX_GUIDE } from "@/lib/constants";
 
 // Regras locais fazem o check_id virar o caminho completo com pontos
 // (ex.: "C.Users.Nelson.bin.opengrep-rules.javascript...detect-child-process").
@@ -76,8 +77,7 @@ export function parseSemgrep(json: SemgrepRaw): Vulnerability[] {
       endLine: r.end?.line,
       description: r.extra?.message || "",
       codeSnippet: r.extra?.lines,
-      suggestion:
-        "Corrija apenas este problema de segurança, sem alterar a lógica de negócio, mantendo o estilo e a indentação do arquivo.",
+      suggestion: FIX_GUIDE,
       cwe: Array.isArray(cwe) ? cwe[0] : cwe,
       owasp: Array.isArray(owasp) ? owasp[0] : owasp,
     };

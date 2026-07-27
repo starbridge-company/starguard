@@ -12,8 +12,11 @@ import {
   verifyPassword,
   issueSession,
   setSessionCookies,
+  revokeRefresh,
   audit,
 } from "@/lib/auth";
+import { verifyToken } from "@/lib/jwt";
+import { COOKIE } from "@/lib/config";
 import * as usersRepo from "@/lib/repos/users";
 
 export const runtime = "nodejs";
@@ -97,6 +100,24 @@ export async function PATCH(req: NextRequest) {
 
   // Reemite a sessão quando e-mail/senha mudam (claim de e-mail + rotação).
   if (emailChanged || wantsPassword) {
+    // Antes de emitir a nova, DERRUBA as antigas. Quem troca a senha porque
+    // desconfia de invasão precisa que o refresh roubado pare de valer — ele
+    // duraria mais 7 dias. Ver AUDITORIA.md#SEC-03.
+    await usersRepo.invalidateSessions(user.id).catch(() => {});
+
+    // Revoga também o refresh desta aba: o corte acima o invalidaria de todo
+    // jeito, mas deixá-lo na blocklist torna a intenção explícita.
+    const rt = req.cookies.get(COOKIE.refresh)?.value;
+    if (rt) {
+      const claims = await verifyToken(rt);
+      if (claims?.jti) {
+        await revokeRefresh(claims.jti, {
+          userId: user.id,
+          expiresAt: new Date(claims.exp * 1000),
+        }).catch(() => {});
+      }
+    }
+
     const issued = await issueSession({
       id: profile.id,
       email: profile.email,
@@ -104,6 +125,7 @@ export async function PATCH(req: NextRequest) {
     });
     const res = jsonOk({ ...profile, csrf: issued.csrf });
     setSessionCookies(res, issued);
+    audit("session.revoked", { userId: user.id, reason: wantsPassword ? "password" : "email" });
     return res;
   }
 
