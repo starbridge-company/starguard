@@ -15,6 +15,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // `tests/live-*` batem em serviço externo REAL (custa dinheiro e exige
+    // rede). Ficam fora do run padrão e rodam por `npm run test:live`.
+    exclude: ["tests/live-*.test.ts", "**/node_modules/**"],
     coverage: {
       provider: "v8",
       include: ["lib/**/*.ts"],

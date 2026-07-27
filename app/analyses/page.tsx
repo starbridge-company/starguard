@@ -68,7 +68,7 @@ export default function AnalysesPage() {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [page, qDebounced, status, from, to]
+    [page, qDebounced, status, from, to, t]
   );
 
   useEffect(() => {

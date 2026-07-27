@@ -16,13 +16,24 @@ import ExportMenu from "@/components/ExportMenu";
 import { apiPost, ApiError } from "@/lib/client";
 import { useAnalysisPolling, allTerminal } from "@/lib/useAnalysisPolling";
 import { useFindings, isResolved } from "@/lib/useFindings";
+import { useRepoVisibility } from "@/lib/useRepoVisibility";
 import { collidesWithSast } from "@/lib/dedup";
+import { clampFix, clampPrBody, clampPrTitle } from "@/lib/validation";
+import { type TokenChoice } from "@/components/TokenPrompt";
+import {
+  canFixDependency,
+  dependencyAsFixTarget,
+  dependencyFixTitle,
+  lockfileWarning,
+} from "@/lib/deps-fix";
 import { Segmented, SearchBox } from "@/components/filters";
-import { useT } from "@/lib/i18n";
+import { useT, type MessageKey } from "@/lib/i18n";
 
 import { SEVERITY_ORDER } from "@/types";
 import type {
   Vulnerability,
+  DependencyVuln,
+  FixTarget,
   FixResult,
   PullRequest,
   PhaseKey,
@@ -32,6 +43,7 @@ import type {
 import {
   IconReport,
   IconRefresh,
+  IconWarn as IconAlert,
   IconRefactor,
   IconPlan,
   IconSkills,
@@ -44,6 +56,14 @@ import {
 const PAGE = 25;
 
 type TabId = "overview" | "code" | "deps" | "threats" | "skills";
+
+// Nome legível da fase, reaproveitando as chaves do PipelineStepper.
+const PHASE_NAME: Record<PhaseKey, MessageKey> = {
+  plan: "pipe.plan.short",
+  skills: "pipe.skills.short",
+  software: "pipe.software.short",
+  refactor: "pipe.refactor.short",
+};
 
 const SEV_TEXT: Record<Severity, string> = {
   critical: "danger",
@@ -83,16 +103,24 @@ export default function ResultsPage() {
   const [tab, setTab] = useState<TabId>("overview");
 
   // Estado do fluxo de correção individual (FixModal).
-  const [selVuln, setSelVuln] = useState<Vulnerability | null>(null);
+  const [selVuln, setSelVuln] = useState<FixTarget | null>(null);
   const [fix, setFix] = useState<FixResult | null>(null);
   const [fixLoading, setFixLoading] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
   const [prState, setPrState] = useState<"idle" | "loading" | "done">("idle");
   const [pr, setPr] = useState<PullRequest | null>(null);
+  // Preenchido quando o PR falha por falta de token — a tela pede na hora em
+  // vez de mostrar um erro que o usuário não sabe resolver.
+  const [needToken, setNeedToken] = useState<string | null>(null);
+  const { isPrivate: repoIsPrivate } = useRepoVisibility(job?.input.repoUrl);
 
   // Seleção para correção em lote.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
+  // Seleção da aba de Dependências, separada da de Correções: são listas
+  // diferentes e marcar numa não pode arrastar a outra.
+  const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set());
+  const [depsBatchOpen, setDepsBatchOpen] = useState(false);
 
   // Estado por achado (corrigido / falso positivo / PR aberto), persistido.
   const softwareDone = job?.phases.software.status === "done";
@@ -119,7 +147,7 @@ export default function ResultsPage() {
   // Se já houver correção guardada para este achado, ela é CARREGADA (não
   // regerada): era exatamente aqui que se queimava IA à toa a cada reabertura.
   // Ver AUDITORIA.md#FEAT-02.
-  const openFix = (vuln: Vulnerability) => {
+  const openFix = (vuln: FixTarget) => {
     setSelVuln(vuln);
     setFix(null);
     setFixError(null);
@@ -136,7 +164,7 @@ export default function ResultsPage() {
   // `vuln` vem por parâmetro (e não do estado) porque `openFix` precisa
   // disparar isto no mesmo tick em que seleciona o achado.
   const runFix = async (
-    vuln: Vulnerability,
+    vuln: FixTarget,
     instructions: string,
     force: boolean
   ) => {
@@ -146,12 +174,19 @@ export default function ResultsPage() {
     try {
       const result = await apiPost<FixResult>("/api/step4-fix", {
         findingId: findingState[vuln.id]?.id,
+        analysisId: id,
         force,
         vulnerabilityId: vuln.id,
         file: vuln.file,
-        originalCode: vuln.codeSnippet || vuln.description || vuln.title,
-        description: vuln.description || vuln.title,
-        suggestion: vuln.suggestion,
+        // Cortado antes de enviar: mensagem de scanner e trecho de código não
+        // têm tamanho garantido, e um texto fora do comum não pode derrubar a
+        // geração inteira.
+        originalCode: clampFix(
+          "originalCode",
+          vuln.codeSnippet || vuln.description || vuln.title
+        ),
+        description: clampFix("description", vuln.description || vuln.title),
+        suggestion: clampFix("suggestion", vuln.suggestion),
         language: guessLang(vuln.file),
         line: vuln.line,
         endLine: vuln.endLine,
@@ -159,7 +194,10 @@ export default function ResultsPage() {
         owasp: vuln.owasp,
         ruleId: vuln.ruleId,
         repoUrl: job?.input.repoUrl,
-        userInstructions: instructions.trim() || undefined,
+        userInstructions: clampFix(
+          "userInstructions",
+          instructions.trim() || undefined
+        ),
       });
       setFix(result);
       if (!force) void reloadFindings(); // pode ter passado a existir correção
@@ -176,11 +214,25 @@ export default function ResultsPage() {
     void runFix(selVuln, instructions, !!fix);
   };
 
-  const openPR = async () => {
+  const openPR = async (tokenChoice?: TokenChoice) => {
     if (!fix || !job?.input.repoUrl || fix.noChange) return;
     setPrState("loading");
+    setNeedToken(null);
     try {
-      const title = `Correção de segurança: ${selVuln?.title || fix.file}`;
+      // Dependência tem título próprio ("chore(deps): pacote a → b") e um
+      // aviso que PRECISA ir no corpo: o agente edita o manifesto mas não
+      // regera o lockfile — ele não executa comandos, por desenho. Um PR com
+      // manifesto novo e lock velho quebra o `npm ci` de quem recebe.
+      const depAlvo = deps.find((d) => d.id === selVuln?.id);
+      // Título e corpo são texto NOSSO — o título do achado pode ser um
+      // parágrafo inteiro vindo do scanner. Cortar aqui evita que o PR seja
+      // recusado depois de a correção já estar gerada e paga.
+      const title = clampPrTitle(
+        depAlvo
+          ? dependencyFixTitle(depAlvo)
+          : `Correção de segurança: ${selVuln?.title || fix.file}`
+      );
+      const avisoLock = depAlvo ? lockfileWarning(depAlvo) : null;
       // O engine de agente pode ter editado VÁRIOS arquivos. Mandar só
       // `fix.file` gerava um PR incompleto — que muitas vezes nem compila.
       // Ver AUDITORIA.md#BUG-07.
@@ -195,18 +247,30 @@ export default function ResultsPage() {
                 fixedCode: c.fixedCode,
               })),
               title,
-              body: `${fix.explanation}\n\nArquivos alterados: ${changed
-                .map((c) => `\`${c.file}\``)
-                .join(", ")}`,
+              body: clampPrBody(
+                [
+                  fix.explanation,
+                  `\nArquivos alterados: ${changed.map((c) => `\`${c.file}\``).join(", ")}`,
+                  avisoLock ? `\n> ⚠️ ${avisoLock}` : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n")
+              ),
               analysisId: job.id,
+              ...tokenChoice,
             })
           : await apiPost<PullRequest>("/api/github/pr", {
               repoUrl: job.input.repoUrl,
               file: fix.file,
               fixedCode: fix.fixedCode,
               title,
-              body: fix.explanation,
+              body: clampPrBody(
+                avisoLock
+                  ? `${fix.explanation}\n\n> ⚠️ ${avisoLock}`
+                  : fix.explanation
+              ),
               analysisId: job.id,
+              ...tokenChoice,
             });
 
       setPr(result);
@@ -218,9 +282,13 @@ export default function ResultsPage() {
       }
     } catch (err) {
       setPrState("idle");
-      setFixError(
-        err instanceof ApiError ? err.message : t("fix.failed")
-      );
+      // Token ausente tem tratamento próprio: a correção já está gerada e
+      // guardada, então basta informar o token e repetir — sem gastar IA.
+      if (err instanceof ApiError && err.key === "err.githubTokenRequired") {
+        setNeedToken(err.message);
+        return;
+      }
+      setFixError(err instanceof ApiError ? err.message : t("fix.failed"));
     }
   };
 
@@ -343,6 +411,20 @@ export default function ResultsPage() {
 
   const done = allTerminal(job);
 
+  // Fases que falharam e para onde levar quem clicar. Ver AUDITORIA.md#UX-16.
+  const failedPhases = (["plan", "skills", "software", "refactor"] as PhaseKey[])
+    .map((k) => job.phases[k])
+    .filter((p) => p.status === "error");
+  const PHASE_TAB: Partial<Record<PhaseKey, TabId>> = {
+    plan: "threats",
+    skills: "skills",
+    software: "code",
+    refactor: "code",
+  };
+  const failedTab = failedPhases.length
+    ? PHASE_TAB[failedPhases[0]!.key]
+    : undefined;
+
   const steps: PipelineStep[] = (
     ["plan", "skills", "software", "refactor"] as PhaseKey[]
   ).map((k) => ({
@@ -361,12 +443,59 @@ export default function ResultsPage() {
       return next;
     });
 
-  const toggleAll = () =>
-    setSelected((prev) =>
-      prev.size === visibleCorrections.length
-        ? new Set()
-        : new Set(visibleCorrections.map((v) => v.id))
+  // Duas seleções DIFERENTES, de propósito.
+  //
+  // "Da página" age só sobre o que está renderizado (a lista mostra 25 por
+  // vez); "todas" age sobre tudo que passou pelos filtros, mesmo o que ainda
+  // não foi desenhado. Com 576 achados num repositório real, tratar as duas
+  // como a mesma coisa é a diferença entre selecionar 25 e selecionar 576 —
+  // e cada uma dessas é uma chamada de IA.
+  const pageIds = visibleCorrections.map((v) => v.id);
+  const allIds = filteredCorrections.map((v) => v.id);
+
+  const pageAllSelected =
+    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const allSelected =
+    allIds.length > 0 && allIds.length === selected.size &&
+    allIds.every((id) => selected.has(id));
+
+  const togglePage = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      // Desmarcar a página não pode limpar o que foi escolhido em outra.
+      if (pageAllSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+
+  const toggleEverything = () =>
+    setSelected(allSelected ? new Set() : new Set(allIds));
+
+  // ---- Correção de dependência ----
+  // Só entram na seleção as que TÊM correção possível: marcar uma dependência
+  // sem versão corrigida publicada só geraria uma chamada de IA para descobrir
+  // que não há o que fazer.
+  const depsFixable = deps.filter(canFixDependency);
+  const depsPageAllSelected =
+    depsFixable.length > 0 && depsFixable.every((d) => selectedDeps.has(d.id));
+
+  const toggleDep = (d: DependencyVuln) =>
+    setSelectedDeps((prev) => {
+      const next = new Set(prev);
+      if (next.has(d.id)) next.delete(d.id);
+      else next.add(d.id);
+      return next;
+    });
+
+  const toggleDepsPage = () =>
+    setSelectedDeps(
+      depsPageAllSelected ? new Set() : new Set(depsFixable.map((d) => d.id))
     );
+
+  // Reaproveita o MESMO modal e a mesma rota das correções de código: o que
+  // muda é o alvo (manifesto em vez de arquivo de código) e as instruções,
+  // que já vêm prontas e determinísticas de `lib/deps-fix.ts`.
+  const openDepFix = (d: DependencyVuln) => openFix(dependencyAsFixTarget(d));
 
   const sevCount = (s: Severity) =>
     corrections.filter((v) => v.severity === s).length +
@@ -491,6 +620,34 @@ export default function ResultsPage() {
       {!done && (
         <div className="progress-track" aria-label="progresso">
           <div className="progress-fill" style={{ width: `${job.progress}%` }} />
+        </div>
+      )}
+
+      {/* Fase que falhou no meio do caminho. O PipelineStepper já ficava
+          vermelho, mas quem está na aba "Visão geral" não olhava para ele —
+          e seguia lendo um resultado incompleto sem saber. A faixa fica no
+          topo, é persistente e leva para a aba certa.
+          Ver AUDITORIA.md#UX-16. */}
+      {failedPhases.length > 0 && (
+        <div className="alert error phase-banner" role="status">
+          <IconAlert />
+          <span>
+            <strong>
+              {t("results.phasesFailed", { n: failedPhases.length })}
+            </strong>{" "}
+            {failedPhases.map((p) => t(PHASE_NAME[p.key])).join(" · ")}
+            {failedPhases[0]?.error ? ` — ${failedPhases[0].error}` : ""}
+          </span>
+          {failedTab && (
+            <button
+              type="button"
+              className="button ghost small"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setTab(failedTab)}
+            >
+              {t("results.goToPhase")}
+            </button>
+          )}
         </div>
       )}
 
@@ -734,22 +891,34 @@ export default function ResultsPage() {
                 <label className="check-inline">
                   <input
                     type="checkbox"
-                    checked={
-                      visibleCorrections.length > 0 &&
-                      selected.size === visibleCorrections.length
-                    }
+                    checked={pageAllSelected}
                     ref={(el) => {
                       if (el)
                         el.indeterminate =
-                          selected.size > 0 &&
-                          selected.size < visibleCorrections.length;
+                          !pageAllSelected &&
+                          pageIds.some((id) => selected.has(id));
                     }}
-                    onChange={toggleAll}
+                    onChange={togglePage}
                   />
-                  {t("fixes.selectAll")}
+                  {t("fixes.selectPage", { n: pageIds.length })}
                 </label>
+
+                {/* Só aparece quando há mais do que a página mostra — senão os
+                    dois botões fariam exatamente a mesma coisa. */}
+                {allIds.length > pageIds.length && (
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={toggleEverything}
+                  >
+                    {allSelected
+                      ? t("fixes.clearAll")
+                      : t("fixes.selectAllFiltered", { n: allIds.length })}
+                  </button>
+                )}
+
                 <span className="muted">
-                  {t("fixes.selectedCount", { n: selected.size, total: visibleCorrections.length })}
+                  {t("fixes.selectedCount", { n: selected.size, total: allIds.length })}
                 </span>
                 <span style={{ flex: 1 }} />
                 <button
@@ -868,11 +1037,59 @@ export default function ResultsPage() {
             ))}
 
           {deps.length > 0 && (
-            <div className="finding-list">
-              {deps.map((d) => (
-                <DependencyCard key={d.id} dep={d} />
-              ))}
-            </div>
+            <>
+              {/* Correção de dependência é possível quando o upstream publicou
+                  versão corrigida E sabemos o manifesto. As demais aparecem
+                  na lista, mas sem botão — e o card diz o porquê. */}
+              {depsFixable.length > 0 && (
+                <div className="finding-toolbar">
+                  <label className="check-inline">
+                    <input
+                      type="checkbox"
+                      checked={depsPageAllSelected}
+                      ref={(el) => {
+                        if (el)
+                          el.indeterminate =
+                            !depsPageAllSelected &&
+                            depsFixable.some((d) => selectedDeps.has(d.id));
+                      }}
+                      onChange={toggleDepsPage}
+                    />
+                    {t("deps.selectPage", { n: depsFixable.length })}
+                  </label>
+                  <span className="muted">
+                    {t("fixes.selectedCount", {
+                      n: selectedDeps.size,
+                      total: depsFixable.length,
+                    })}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={selectedDeps.size === 0}
+                    onClick={() => setDepsBatchOpen(true)}
+                  >
+                    <IconRefactor />{" "}
+                    {t("deps.fixSelected", { n: selectedDeps.size || "" })}
+                  </button>
+                </div>
+              )}
+
+              <div className="finding-list">
+                {deps.map((d) => (
+                  <DependencyCard
+                    key={d.id}
+                    dep={d}
+                    onFix={openDepFix}
+                    selectable
+                    selected={selectedDeps.has(d.id)}
+                    onToggleSelect={toggleDep}
+                    hasFix={findingState[d.id]?.hasFix}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
       )}
@@ -969,10 +1186,13 @@ export default function ResultsPage() {
           error={fixError}
           onGenerate={generateFixFor}
           onClose={() => setSelVuln(null)}
-          onOpenPR={openPR}
+          onOpenPR={() => void openPR()}
           prState={prState}
           pr={pr}
           canOpenPR={!!job.input.repoUrl}
+          needToken={needToken}
+          repoIsPrivate={repoIsPrivate}
+          onRetryWithToken={(escolha) => void openPR(escolha)}
         />
       )}
 
@@ -988,6 +1208,28 @@ export default function ResultsPage() {
             for (const localId of ids) void setFindingStatus(localId, "pr_open");
           }}
           onClose={() => setBatchOpen(false)}
+        />
+      )}
+
+      {/* Lote de dependências: mesmo modal, mesma rota. Cada dependência vira
+          um alvo com o manifesto como arquivo — e o agrupamento por arquivo do
+          BatchFixModal passa a agir a favor: várias dependências do MESMO
+          manifesto entram numa correção só, que é exatamente o certo (um
+          package.json não pode ser reescrito duas vezes em paralelo). */}
+      {depsBatchOpen && (
+        <BatchFixModal
+          vulns={depsFixable
+            .filter((d) => selectedDeps.has(d.id))
+            .map(dependencyAsFixTarget)}
+          repoUrl={job.input.repoUrl}
+          analysisId={job.id}
+          findingIdByLocal={Object.fromEntries(
+            Object.entries(findingState).map(([k, f]) => [k, f.id])
+          )}
+          onPrOpened={(ids) => {
+            for (const localId of ids) void setFindingStatus(localId, "pr_open");
+          }}
+          onClose={() => setDepsBatchOpen(false)}
         />
       )}
     </AppShell>

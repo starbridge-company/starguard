@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   resolveGitHubToken,
   requireGitHubToken,
+  tokenForPullRequest,
   isSingleTenant,
   GitHubTokenRequired,
 } from "@/lib/github-auth";
@@ -79,5 +80,50 @@ describe("requireGitHubToken · SEC-06 (escrita)", () => {
 
   it("aceita o token do próprio usuário", () => {
     expect(requireGitHubToken("ghp_doUsuario")).toBe("ghp_doUsuario");
+  });
+});
+
+// Regra do produto: repositório PÚBLICO usa o token do servidor (não há dado
+// privado em jogo — qualquer um poderia abrir o mesmo PR por um fork).
+// Repositório PRIVADO exige o token do usuário, sempre.
+describe("tokenForPullRequest · público × privado", () => {
+  it("público sem token do usuário: usa o do servidor", () => {
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    expect(tokenForPullRequest({ isPrivate: false })).toBe("ghp_doServidor");
+  });
+
+  it("público NÃO exige SINGLE_TENANT — o risco do SEC-06 não existe aqui", () => {
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    delete process.env.SINGLE_TENANT;
+    expect(tokenForPullRequest({ isPrivate: false })).toBe("ghp_doServidor");
+  });
+
+  it("PRIVADO recusa o token do servidor — é o furo do SEC-06", () => {
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    process.env.SINGLE_TENANT = "true";
+    expect(() => tokenForPullRequest({ isPrivate: true })).toThrow(
+      GitHubTokenRequired
+    );
+  });
+
+  it("privado diz POR QUE precisa do token", () => {
+    expect(() => tokenForPullRequest({ isPrivate: true })).toThrow(/privado/i);
+  });
+
+  it("token do usuário prevalece nos dois casos", () => {
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    expect(tokenForPullRequest({ userToken: "ghp_meu", isPrivate: true })).toBe(
+      "ghp_meu"
+    );
+    expect(tokenForPullRequest({ userToken: "ghp_meu", isPrivate: false })).toBe(
+      "ghp_meu"
+    );
+  });
+
+  it("público sem token nenhum ainda pede — não há como assinar o PR", () => {
+    delete process.env.GITHUB_TOKEN;
+    expect(() => tokenForPullRequest({ isPrivate: false })).toThrow(
+      GitHubTokenRequired
+    );
   });
 });

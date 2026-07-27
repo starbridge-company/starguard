@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGitHubRepo, type GitHubRepoRef } from "@/lib/validation";
 import { redactError } from "@/lib/redact";
-import { resolveGitHubToken, requireGitHubToken } from "@/lib/github-auth";
+import { resolveGitHubToken, tokenForPullRequest } from "@/lib/github-auth";
 
 const pExecFile = promisify(execFile);
 
@@ -166,6 +166,44 @@ export async function getRepoMeta(input: string, token?: string) {
 }
 
 /**
+ * O repositório é privado?
+ *
+ * Consultado SEM credencial de propósito: o GitHub só responde 200 para quem é
+ * público. Um 404 aqui significa "privado ou inexistente" — e os dois levam à
+ * mesma conclusão para efeito de token: precisa ser o do usuário.
+ *
+ * Cache curto porque isto roda a cada tentativa de abrir PR e a visibilidade
+ * de um repositório quase nunca muda no meio de uma sessão.
+ */
+const visCache = new Map<string, { at: number; privado: boolean }>();
+const VIS_TTL_MS = 5 * 60_000;
+
+export async function isPrivateRepo(repoUrl: string): Promise<boolean> {
+  const ref = parseGitHubRepo(repoUrl);
+  if (!ref) return true; // não deu para checar: trata como privado (mais restrito)
+
+  const cached = visCache.get(ref.url);
+  if (cached && Date.now() - cached.at < VIS_TTL_MS) return cached.privado;
+
+  const { Octokit } = await import("octokit");
+  const anon = new Octokit();
+  let privado = true;
+  try {
+    const { data } = await anon.rest.repos.get({
+      owner: ref.owner,
+      repo: ref.repo,
+    });
+    privado = !!data.private;
+  } catch {
+    // 404 anônimo = não é público. Falha de rede também cai aqui, e tratar
+    // como privado é o lado seguro: no máximo pedimos um token a mais.
+    privado = true;
+  }
+  visCache.set(ref.url, { at: Date.now(), privado });
+  return privado;
+}
+
+/**
  * Abre um PR com o arquivo corrigido: cria branch a partir do default,
  * grava o novo conteúdo e abre o pull request.
  */
@@ -179,8 +217,12 @@ export async function openPullRequest(opts: {
 }): Promise<{ number: number; url: string; branch: string; title: string }> {
   const ref = parseGitHubRepo(opts.repoUrl);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida.");
-  // Nunca o token do servidor num deploy multi-usuário (AUDITORIA.md#SEC-06).
-  const token = requireGitHubToken(opts.token);
+  // Público: o token do servidor abre o PR. Privado: exige o token do
+  // usuário — emprestar o do servidor aqui é o furo do AUDITORIA.md#SEC-06.
+  const token = tokenForPullRequest({
+    userToken: opts.token,
+    isPrivate: await isPrivateRepo(opts.repoUrl),
+  });
 
   const { Octokit } = await import("octokit");
   const octokit = new Octokit({ auth: token });
@@ -263,8 +305,12 @@ export async function openPullRequestBatch(opts: {
 }> {
   const ref = parseGitHubRepo(opts.repoUrl);
   if (!ref) throw new ScanUnavailable("URL de repositório inválida.");
-  // Nunca o token do servidor num deploy multi-usuário (AUDITORIA.md#SEC-06).
-  const token = requireGitHubToken(opts.token);
+  // Público: o token do servidor abre o PR. Privado: exige o token do
+  // usuário — emprestar o do servidor aqui é o furo do AUDITORIA.md#SEC-06.
+  const token = tokenForPullRequest({
+    userToken: opts.token,
+    isPrivate: await isPrivateRepo(opts.repoUrl),
+  });
 
   const { Octokit } = await import("octokit");
   const octokit = new Octokit({ auth: token });
@@ -285,40 +331,78 @@ export async function openPullRequestBatch(opts: {
     sha: baseRef.data.object.sha,
   });
 
-  // Dedup por caminho (normalizado p/ "/"); commits sequenciais na mesma branch.
-  const seen = new Set<string>();
-  let committed = 0;
+  // Dedup por caminho (normalizado p/ "/"). O ÚLTIMO conteúdo vence: quando o
+  // mesmo arquivo aparece duas vezes, a versão mais recente já acumula as
+  // correções anteriores.
+  const porCaminho = new Map<string, string>();
   for (const f of opts.files) {
-    const path = f.file.replace(/\\/g, "/");
-    if (seen.has(path)) continue;
-    seen.add(path);
-
-    let sha: string | undefined;
-    try {
-      const existing = await octokit.rest.repos.getContent({
-        owner,
-        repo,
-        path,
-        ref: branch,
-      });
-      if (!Array.isArray(existing.data) && "sha" in existing.data) {
-        sha = existing.data.sha;
-      }
-    } catch {
-      /* arquivo novo */
-    }
-
-    await octokit.rest.repos.createOrUpdateFileContents({
-      owner,
-      repo,
-      path,
-      branch,
-      message: `fix(security): ${path}`,
-      content: Buffer.from(f.fixedCode, "utf8").toString("base64"),
-      sha,
-    });
-    committed++;
+    porCaminho.set(f.file.replace(/\\/g, "/"), f.fixedCode);
   }
+  const arquivos = [...porCaminho.entries()];
+
+  // ------------------------------------------------------------
+  // Um commit só, via Git Data API.
+  //
+  // Antes era `createOrUpdateFileContents` num laço: DUAS chamadas por arquivo
+  // (ler o sha + gravar) e um commit por arquivo, tudo em série. Para os 33
+  // arquivos de um lote real isso dava 66 idas ao GitHub e mais de um minuto
+  // de espera — além de poluir o histórico com 33 commits "fix(security): …".
+  //
+  // Agora: blobs em PARALELO, uma árvore, um commit, um update de ref. O
+  // tempo passa a depender do arquivo mais lento, não da soma de todos.
+  // ------------------------------------------------------------
+  const baseCommit = await octokit.rest.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseRef.data.object.sha,
+  });
+
+  const CONCORRENCIA = 8;
+  const blobs: { path: string; sha: string }[] = [];
+  for (let i = 0; i < arquivos.length; i += CONCORRENCIA) {
+    const lote = arquivos.slice(i, i + CONCORRENCIA);
+    const shas = await Promise.all(
+      lote.map(async ([path, conteudo]) => {
+        const { data } = await octokit.rest.git.createBlob({
+          owner,
+          repo,
+          content: Buffer.from(conteudo, "utf8").toString("base64"),
+          encoding: "base64",
+        });
+        return { path, sha: data.sha };
+      })
+    );
+    blobs.push(...shas);
+  }
+
+  const tree = await octokit.rest.git.createTree({
+    owner,
+    repo,
+    base_tree: baseCommit.data.tree.sha,
+    tree: blobs.map((b) => ({
+      path: b.path,
+      mode: "100644" as const,
+      type: "blob" as const,
+      sha: b.sha,
+    })),
+  });
+
+  const commit = await octokit.rest.git.createCommit({
+    owner,
+    repo,
+    message: `fix(security): ${arquivos.length} arquivo(s) — ${opts.title}`,
+    tree: tree.data.sha,
+    parents: [baseRef.data.object.sha],
+  });
+
+  await octokit.rest.git.updateRef({
+    owner,
+    repo,
+    ref: `heads/${branch}`,
+    sha: commit.data.sha,
+  });
+
+  const committed = arquivos.length;
 
   const pr = await octokit.rest.pulls.create({
     owner,

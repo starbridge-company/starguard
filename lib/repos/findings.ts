@@ -196,6 +196,30 @@ export async function listForAnalysis(analysisId: string): Promise<FindingView[]
   }));
 }
 
+/**
+ * Acha o achado pelo par (análise, id local) — "V-3", "D-7".
+ *
+ * Existe porque depender do cliente mandar o `findingId` é frágil: a tela
+ * carrega esse mapa de forma assíncrona, e se a geração começa antes de ele
+ * chegar, a requisição sai SEM identificação. Aí duas coisas quebram de uma
+ * vez — o cache não é consultado (gasta IA de novo) e o resultado não é
+ * guardado (a próxima abertura gasta outra vez).
+ *
+ * O par tem índice único (`findings_analysis_local_uidx`), então isto é uma
+ * busca direta.
+ */
+export async function getByLocalId(
+  analysisId: string,
+  localId: string
+): Promise<FindingRow | undefined> {
+  const rows = await db
+    .select()
+    .from(findings)
+    .where(and(eq(findings.analysisId, analysisId), eq(findings.localId, localId)))
+    .limit(1);
+  return rows[0];
+}
+
 export async function getById(id: string): Promise<FindingRow | undefined> {
   const rows = await db.select().from(findings).where(eq(findings.id, id)).limit(1);
   return rows[0];

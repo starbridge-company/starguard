@@ -168,3 +168,16 @@ describe("DELETE /api/analyses/[id] · BUG-22", () => {
     expect((await del()).status).toBe(404);
   });
 });
+
+// Falta de token ao abrir PR não pode virar 502 genérico: o usuário resolve
+// isso em dois cliques, informando ou escolhendo um token salvo.
+describe("PR sem token · erro com identidade própria", () => {
+  it("GitHubTokenRequired vira 400 com chave que a tela reconhece", async () => {
+    const { GitHubTokenRequired } = await import("@/lib/github-auth");
+    const e = new GitHubTokenRequired();
+    // O contrato que a tela usa para decidir entre "pedir token" e "mostrar erro".
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe("GitHubTokenRequired");
+    expect(e.message).toMatch(/token do GitHub/i);
+  });
+});

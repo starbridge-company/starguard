@@ -73,6 +73,21 @@ async function seedOnce(): Promise<void> {
   await usersRepo.ensureSeed(withHashes);
 }
 
+/**
+ * Erro de infraestrutura, não de credencial. Existe para o chamador poder
+ * responder 503 com um texto acionável em vez de deixar vazar um 500 mudo —
+ * ver AUDITORIA.md#ARQ-12, que foi exatamente esse modo de falha.
+ */
+export class InfraUnavailable extends Error {
+  constructor(
+    message: string,
+    public cause?: unknown
+  ) {
+    super(message);
+    this.name = "InfraUnavailable";
+  }
+}
+
 async function ensureSeeded(): Promise<void> {
   if (!g.__sg_seed) {
     g.__sg_seed = seedOnce().catch((e) => {
@@ -84,8 +99,28 @@ async function ensureSeeded(): Promise<void> {
   return g.__sg_seed;
 }
 
+/**
+ * Traduz a falha do seed para algo que se possa mostrar a quem opera.
+ *
+ * O INSERT do seed é montado a partir do schema Drizzle: uma coluna que exista
+ * no código e não no banco derruba a query — e derrubava o login inteiro.
+ */
+async function ensureSeededOrExplain(): Promise<void> {
+  try {
+    await ensureSeeded();
+  } catch (e) {
+    const { checkSchema, schemaMessage } = await import("@/lib/schema-check");
+    const status = await checkSchema(true);
+    if (!status.ok) throw new InfraUnavailable(schemaMessage(status), e);
+    throw new InfraUnavailable(
+      "Banco de dados indisponível. Tente novamente em instantes.",
+      e
+    );
+  }
+}
+
 export async function findUser(email: string): Promise<User | undefined> {
-  await ensureSeeded();
+  await ensureSeededOrExplain();
   const row = await usersRepo.findByEmail(email);
   return row
     ? {

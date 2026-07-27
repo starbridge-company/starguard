@@ -8,7 +8,7 @@
 // erro acionável em vez de "não foi possível parsear o JSON" (#BUG-13).
 // ============================================================
 import type { AIProvider, PhaseKey, StepAIConfig } from "@/types";
-import { AI_BY_PHASE, aiHttp } from "@/lib/config";
+import { AI_BY_PHASE, aiHttp, AI_MAX_OUTPUT_TOKENS } from "@/lib/config";
 
 export class AIError extends Error {
   constructor(
@@ -32,6 +32,12 @@ interface CallOpts {
   temperature?: number;
   /** Cancelamento externo (ex.: o "Cancelar" do lote). Somado ao timeout. */
   signal?: AbortSignal;
+  /** Trava o retry automático que dobra o orçamento — usado pela própria
+   *  retentativa, para não crescer sem fim. */
+  noGrow?: boolean;
+  /** Etapa de origem: define o teto de tempo (correção devolve arquivo
+   *  inteiro e precisa de muito mais que os 120 s padrão). */
+  phase?: PhaseKey;
 }
 
 function keyFor(provider: AIProvider): string | undefined {
@@ -76,9 +82,10 @@ async function callWithRetry(
   label: string,
   url: string,
   init: RequestInit,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  phase?: PhaseKey
 ): Promise<Response> {
-  const { timeoutMs, maxRetries, retryBaseMs } = aiHttp();
+  const { timeoutMs, maxRetries, retryBaseMs } = aiHttp(phase);
   let last = "";
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -123,10 +130,17 @@ async function callWithRetry(
   throw new AIError(last || `${label}: falha desconhecida`);
 }
 
-/** Resposta cortada no meio: o JSON vem quebrado e o erro precisa dizer isso. */
+/**
+ * Resposta cortada no meio: o JSON vem quebrado e o erro precisa dizer isso.
+ *
+ * A mensagem NÃO manda o usuário "aumentar o limite de saída": esse teto é
+ * configuração nossa (`STEP*_MAX_TOKENS`), não existe controle na tela, e
+ * mandar fazer algo impossível é pior que não explicar. O que sobra sob o
+ * controle de quem usa é o tamanho do que ele escreveu.
+ */
 function truncated(label: string): never {
   throw new AIError(
-    `${label}: resposta truncada (limite de tokens atingido). Reduza o escopo ou aumente o limite de saída.`,
+    `${label}: a resposta do modelo não coube no limite configurado. Tente uma descrição mais objetiva; se persistir, o teto de saída desta etapa precisa ser revisto.`,
     "truncated"
   );
 }
@@ -138,7 +152,7 @@ function truncated(label: string): never {
 async function callAnthropic(
   model: string,
   key: string,
-  { system, prompt, maxTokens = 2048, signal }: CallOpts
+  { system, prompt, maxTokens = 2048, signal, phase }: CallOpts
 ): Promise<string> {
   // `temperature` é deprecado nos modelos Claude mais novos (ex.: claude-sonnet-5),
   // que retornam 400 se ele for enviado — por isso não o incluímos aqui.
@@ -159,7 +173,8 @@ async function callAnthropic(
         messages: [{ role: "user", content: prompt }],
       }),
     },
-    signal
+    signal,
+    phase
   );
   const data = await res.json();
   // Modelos com "extended thinking" (ex.: claude-sonnet-5) retornam um bloco
@@ -178,7 +193,7 @@ async function callAnthropic(
 async function callOpenAI(
   model: string,
   key: string,
-  { system, prompt, maxTokens = 2048, signal }: CallOpts
+  { system, prompt, maxTokens = 2048, signal, phase }: CallOpts
 ): Promise<string> {
   // `max_tokens` está deprecado no /chat/completions e os modelos de raciocínio
   // o REJEITAM com 400 — o parâmetro atual é `max_completion_tokens`. Pelo mesmo
@@ -202,7 +217,8 @@ async function callOpenAI(
         ],
       }),
     },
-    signal
+    signal,
+    phase
   );
   const data = await res.json();
   const choice = data?.choices?.[0];
@@ -213,7 +229,7 @@ async function callOpenAI(
 async function callGoogle(
   model: string,
   key: string,
-  { system, prompt, maxTokens = 2048, temperature = 0.2, signal }: CallOpts
+  { system, prompt, maxTokens = 2048, temperature = 0.2, signal, phase }: CallOpts
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
@@ -230,7 +246,8 @@ async function callGoogle(
         generationConfig: { temperature, maxOutputTokens: maxTokens },
       }),
     },
-    signal
+    signal,
+    phase
   );
   const data = await res.json();
   const candidate = data?.candidates?.[0];
@@ -246,6 +263,21 @@ async function safeText(res: Response): Promise<string> {
   }
 }
 
+function dispatch(
+  cfg: StepAIConfig,
+  key: string,
+  opts: CallOpts
+): Promise<string> {
+  switch (cfg.provider) {
+    case "anthropic":
+      return callAnthropic(cfg.model, key, opts);
+    case "openai":
+      return callOpenAI(cfg.model, key, opts);
+    case "google":
+      return callGoogle(cfg.model, key, opts);
+  }
+}
+
 /** Chamada crua de IA usando uma config explícita de provider/modelo. */
 export async function callAI(
   cfg: StepAIConfig,
@@ -258,19 +290,29 @@ export async function callAI(
       "no_key"
     );
   }
-  switch (cfg.provider) {
-    case "anthropic":
-      return callAnthropic(cfg.model, key, opts);
-    case "openai":
-      return callOpenAI(cfg.model, key, opts);
-    case "google":
-      return callGoogle(cfg.model, key, opts);
+
+  try {
+    return await dispatch(cfg, key, opts);
+  } catch (e) {
+    // Truncou: uma única nova tentativa com o dobro do orçamento, limitada
+    // pelo teto absoluto. O ajuste é NOSSO e automático — não há controle de
+    // limite de saída na tela para o usuário mexer, então repassar o problema
+    // a ele seria pedir o impossível. Ver AUDITORIA.md#BUG-13.
+    const truncou = e instanceof AIError && e.code === "truncated";
+    const atual = opts.maxTokens ?? 2048;
+    const maior = Math.min(atual * 2, AI_MAX_OUTPUT_TOKENS);
+    if (!truncou || opts.noGrow || maior <= atual) throw e;
+
+    console.warn(
+      `[ai] resposta truncada em ${atual} tokens; repetindo com ${maior}`
+    );
+    return dispatch(cfg, key, { ...opts, maxTokens: maior, noGrow: true });
   }
 }
 
 /** Executa uma etapa resolvendo o provider/modelo pelo config headless. */
 export async function runAI(phase: PhaseKey, opts: CallOpts): Promise<string> {
-  return callAI(AI_BY_PHASE[phase], opts);
+  return callAI(AI_BY_PHASE[phase], { ...opts, phase });
 }
 
 /** Extrai o primeiro objeto/array JSON de uma resposta de IA. */

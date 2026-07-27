@@ -5,6 +5,7 @@ import { redact } from "@/lib/redact";
 import { audit } from "@/lib/auth";
 import * as prRepo from "@/lib/repos/pullRequests";
 import { getDecrypted } from "@/lib/repos/tokens";
+import { GitHubTokenRequired } from "@/lib/github-auth";
 import { getAnalysisOwner } from "@/lib/jobs";
 
 export const runtime = "nodejs";
@@ -58,6 +59,12 @@ export async function POST(req: NextRequest) {
     audit("pr.open", { userId: session.sub, number: pr.number });
     return jsonOk(pr);
   } catch (e) {
+    // Token ausente NÃO é falha do GitHub: é algo que o usuário resolve na
+    // hora, informando (ou escolhendo) um token. Precisa chegar ao cliente com
+    // identidade própria para a tela pedir em vez de só mostrar um 502.
+    if (e instanceof GitHubTokenRequired) {
+      return jsonError(400, e.message, "err.githubTokenRequired");
+    }
     const msg = e instanceof Error ? redact(e.message) : "Falha ao abrir o PR.";
     return jsonError(502, msg);
   }

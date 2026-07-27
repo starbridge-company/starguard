@@ -75,6 +75,8 @@ export const PT_BR = {
   "results.degraded":
     "Conexão instável — o acompanhamento continua tentando sozinho.",
   "results.refreshNow": "Atualizar agora",
+  "results.phasesFailed": "{n} fase(s) falharam:",
+  "results.goToPhase": "Ver detalhes",
   "results.loadFailed": "Falha ao carregar a análise.",
   "tab.overview": "Visão geral",
   "tab.fixes": "Correções",
@@ -90,7 +92,20 @@ export const PT_BR = {
   "fixes.filterOpen": "Abertos ({n})",
   "fixes.filterResolved": "Resolvidos ({n})",
   "fixes.filterAll": "Todos",
-  "fixes.selectAll": "Selecionar todas",
+  "deps.installed": "instalada",
+  "deps.fixedIn": "corrigida em",
+  "deps.manifestHint": "Arquivo que a correção edita",
+  "deps.fixWithAi": "Corrigir com IA",
+  "deps.noFixedVersion":
+    "Ainda não há versão corrigida publicada para este pacote — não há o que propor sem inventar.",
+  "deps.noManifest":
+    "Não foi possível identificar o arquivo onde a dependência é declarada.",
+  "deps.selectPage": "Selecionar as {n} desta página",
+  "deps.selectAllFiltered": "Selecionar todas as {n}",
+  "deps.fixSelected": "Corrigir {n} com IA",
+  "fixes.selectPage": "Selecionar as {n} desta página",
+  "fixes.selectAllFiltered": "Selecionar todas as {n}",
+  "fixes.clearAll": "Limpar seleção",
   "fixes.selectedCount": "{n} de {total} selecionadas",
   "fixes.fixWithAi": "Corrigir {n} com IA",
   "fixes.showMore": "Mostrar mais {n} de {total} restantes",
@@ -113,6 +128,8 @@ export const PT_BR = {
   "card.originalText": "Texto original da ferramenta",
   "card.howToFix": "Como corrigir",
   "card.suggestion": "Sugestão de correção",
+  "card.aiGenerated":
+    "Texto gerado por IA a partir do repositório analisado — confira antes de tratar como veredito da ferramenta.",
   "card.confidenceMedium": "confiança média",
   "card.confidenceMediumHint":
     "A revisão por IA não teve certeza deste achado. Confira antes de agir.",
@@ -247,6 +264,14 @@ export const PT_BR = {
     "Correção do código e abertura do Pull Request, sob demanda por achado.",
 
   // ---- Pull Requests ----
+  "pr.tokenRequired": "Escolha o token do GitHub",
+  "pr.tokenPrivateHint":
+    "Este repositório é privado, então o PR precisa ser aberto com um token seu.",
+  "pr.savedTokens": "Tokens salvos",
+  "pr.newToken": "+ Usar um token novo…",
+  "pr.retryWithToken": "Abrir PR com este token",
+  "pr.tokenScopeHint":
+    "Precisa de permissão de escrita. Repositório público usa o token do servidor automaticamente.",
   "pr.kicker": "Correções enviadas",
   "pr.subtitle": "PRs de correção que você abriu a partir das análises.",
   "pr.empty":
@@ -396,6 +421,10 @@ export const PT_BR = {
   "err.conflict": "Conflito com um registro existente.",
   "err.tooManyRequests": "Muitas requisições. Aguarde alguns instantes.",
   "err.server": "Erro no servidor. Tente novamente.",
+  "err.githubTokenRequired":
+    "Informe um token do GitHub com permissão de escrita para abrir o pull request.",
+  "err.schemaOutdated":
+    "O banco de dados está desatualizado em relação à aplicação. Avise quem administra: faltam migrações.",
   "err.badRequest": "Dados inválidos.",
   "err.network": "Sem conexão com o servidor.",
 
@@ -424,6 +453,10 @@ export const PT_BR = {
   "report.fixesOnDemand":
     "As correções são geradas sob demanda, achado a achado, na tela de resultados — nenhuma é gerada automaticamente.",
   "report.footer": "Gerado por StarGuard · Copilot de Segurança",
+  "report.metaAnalysis": "Análise",
+  "report.metaRunAt": "Executada em",
+  "report.metaPrintedAt": "Emitida em",
+  "report.metaEngines": "Motores",
   "report.loadFailed": "Falha ao carregar o relatório.",
 
   // ---- Eventos da trilha de auditoria (enum de domínio, FEAT-04) ----
@@ -611,6 +644,8 @@ const EN: Partial<Record<MessageKey, string>> = {
   "results.runningSubtitle": "Running the 4 phases in real time…",
   "results.degraded": "Unstable connection — still retrying in the background.",
   "results.refreshNow": "Refresh now",
+  "results.phasesFailed": "{n} phase(s) failed:",
+  "results.goToPhase": "See details",
   "results.loadFailed": "Failed to load the analysis.",
   "tab.overview": "Overview",
   "tab.fixes": "Fixes",
@@ -626,7 +661,20 @@ const EN: Partial<Record<MessageKey, string>> = {
   "fixes.filterOpen": "Open ({n})",
   "fixes.filterResolved": "Resolved ({n})",
   "fixes.filterAll": "All",
-  "fixes.selectAll": "Select all",
+  "deps.installed": "installed",
+  "deps.fixedIn": "fixed in",
+  "deps.manifestHint": "File the fix edits",
+  "deps.fixWithAi": "Fix with AI",
+  "deps.noFixedVersion":
+    "No fixed version has been published for this package yet — there is nothing to propose without inventing it.",
+  "deps.noManifest":
+    "Could not identify the file where the dependency is declared.",
+  "deps.selectPage": "Select the {n} on this page",
+  "deps.selectAllFiltered": "Select all {n}",
+  "deps.fixSelected": "Fix {n} with AI",
+  "fixes.selectPage": "Select the {n} on this page",
+  "fixes.selectAllFiltered": "Select all {n}",
+  "fixes.clearAll": "Clear selection",
   "fixes.selectedCount": "{n} of {total} selected",
   "fixes.fixWithAi": "Fix {n} with AI",
   "fixes.showMore": "Show {n} more of {total} remaining",
@@ -648,6 +696,8 @@ const EN: Partial<Record<MessageKey, string>> = {
   "card.originalText": "Tool's original text",
   "card.howToFix": "How to fix",
   "card.suggestion": "Suggested fix",
+  "card.aiGenerated":
+    "AI-generated from the analysed repository — check it before treating this as the tool's verdict.",
   "card.confidenceMedium": "medium confidence",
   "card.confidenceMediumHint":
     "The AI review wasn't sure about this finding. Double-check before acting.",
@@ -778,6 +828,14 @@ const EN: Partial<Record<MessageKey, string>> = {
     "Code fix and Pull Request, generated on demand per finding.",
 
   // ---- Pull Requests ----
+  "pr.tokenRequired": "Choose the GitHub token",
+  "pr.tokenPrivateHint":
+    "This repository is private, so the PR must be opened with a token of yours.",
+  "pr.savedTokens": "Saved tokens",
+  "pr.newToken": "+ Use a new token…",
+  "pr.retryWithToken": "Open PR with this token",
+  "pr.tokenScopeHint":
+    "Needs write access. Public repositories use the server token automatically.",
   "pr.kicker": "Fixes shipped",
   "pr.subtitle": "Fix PRs you opened from your analyses.",
   "pr.empty":
@@ -922,6 +980,10 @@ const EN: Partial<Record<MessageKey, string>> = {
   "err.conflict": "Conflict with an existing record.",
   "err.tooManyRequests": "Too many requests. Please wait a moment.",
   "err.server": "Server error. Please try again.",
+  "err.githubTokenRequired":
+    "Provide a GitHub token with write access to open the pull request.",
+  "err.schemaOutdated":
+    "The database is out of date with the application. Tell whoever administers it: migrations are missing.",
   "err.badRequest": "Invalid data.",
   "err.network": "No connection to the server.",
 
@@ -949,6 +1011,10 @@ const EN: Partial<Record<MessageKey, string>> = {
   "report.fixesOnDemand":
     "Fixes are generated on demand, finding by finding, on the results screen — none is generated automatically.",
   "report.footer": "Generated by StarGuard · Security Copilot",
+  "report.metaAnalysis": "Analysis",
+  "report.metaRunAt": "Run at",
+  "report.metaPrintedAt": "Issued at",
+  "report.metaEngines": "Engines",
   "report.loadFailed": "Failed to load the report.",
 
   // ---- Eventos da trilha de auditoria (enum de domínio, FEAT-04) ----

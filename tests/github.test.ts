@@ -6,11 +6,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const criados: { path: string; content: string; branch: string }[] = [];
 const refsCriadas: string[] = [];
 const prsAbertos: { head: string; title: string }[] = [];
+// Caminho do lote (Git Data API): blobs, árvore, commit, ref.
+const blobsCriados: string[] = [];
+const arvores: string[][] = [];
+const commits: string[] = [];
+const refsAtualizadas: string[] = [];
 
 const octokitFake = {
   rest: {
     repos: {
-      get: vi.fn(async () => ({ data: { default_branch: "main" } })),
+      // `private` fica no tipo para os testes poderem simular repositório
+      // privado — é o que decide de quem é o token que abre o PR.
+      get: vi.fn(
+        async (): Promise<{
+          data: { default_branch: string; private?: boolean };
+        }> => ({ data: { default_branch: "main" } })
+      ),
       getContent: vi.fn(async () => {
         throw new Error("not found"); // arquivo novo
       }),
@@ -27,6 +38,28 @@ const octokitFake = {
       getRef: vi.fn(async () => ({ data: { object: { sha: "abc123" } } })),
       createRef: vi.fn(async (a: Record<string, string>) => {
         refsCriadas.push(a.ref!);
+        return { data: {} };
+      }),
+      // O lote passou a usar a Git Data API: blobs em paralelo, UMA árvore,
+      // UM commit. Antes eram duas chamadas e um commit por arquivo, em série.
+      getCommit: vi.fn(async () => ({ data: { tree: { sha: "tree-base" } } })),
+      createBlob: vi.fn(async (a: Record<string, string>) => {
+        const conteudo = Buffer.from(a.content!, "base64").toString("utf8");
+        blobsCriados.push(conteudo);
+        return { data: { sha: `blob-${blobsCriados.length}` } };
+      }),
+      createTree: vi.fn(
+        async (a: { tree: { path: string; sha: string }[] }) => {
+          arvores.push(a.tree.map((t) => t.path));
+          return { data: { sha: "tree-nova" } };
+        }
+      ),
+      createCommit: vi.fn(async (a: Record<string, string>) => {
+        commits.push(a.message!);
+        return { data: { sha: "commit-1" } };
+      }),
+      updateRef: vi.fn(async (a: Record<string, string>) => {
+        refsAtualizadas.push(a.ref!);
         return { data: {} };
       }),
     },
@@ -52,6 +85,11 @@ beforeEach(() => {
   criados.length = 0;
   refsCriadas.length = 0;
   prsAbertos.length = 0;
+  blobsCriados.length = 0;
+  arvores.length = 0;
+  commits.length = 0;
+  refsAtualizadas.length = 0;
+  vi.clearAllMocks();
 });
 
 describe("openPullRequest", () => {
@@ -80,12 +118,13 @@ describe("openPullRequest", () => {
     expect(criados[0]?.path).toBe("src/api/a.js");
   });
 
-  it("sem token, recusa antes de tocar no GitHub", async () => {
+  it("sem token nenhum (nem do servidor), recusa antes de tocar no GitHub", async () => {
     const semToken = { ...process.env };
     delete process.env.GITHUB_TOKEN;
     await expect(
       openPullRequest({
-        repoUrl: "https://github.com/acme/app",
+        // URL distinta por teste: a visibilidade fica em cache por 5 min.
+        repoUrl: "https://github.com/acme/sem-token",
         file: "a.js",
         fixedCode: "x",
         title: "t",
@@ -94,35 +133,42 @@ describe("openPullRequest", () => {
     process.env = semToken;
   });
 
-  // O token do servidor não pode abrir PR em nome de quem não o forneceu num
-  // deploy multi-usuário. Ver AUDITORIA.md#SEC-06.
-  it("com GITHUB_TOKEN no servidor e sem SINGLE_TENANT, ainda recusa", async () => {
+  // Regra do produto: repositório PÚBLICO usa o token do servidor — não há
+  // dado privado em jogo, qualquer um poderia abrir o mesmo PR por um fork.
+  // O `repos.get` mockado não devolve `private`, então o repo é público.
+  it("repositório público abre o PR com o token do servidor", async () => {
     const antes = { ...process.env };
     process.env.GITHUB_TOKEN = "ghp_doServidor";
     delete process.env.SINGLE_TENANT;
-    await expect(
-      openPullRequest({
-        repoUrl: "https://github.com/acme/app",
-        file: "a.js",
-        fixedCode: "x",
-        title: "t",
-      })
-    ).rejects.toThrow(/token do GitHub/i);
-    expect(prsAbertos).toHaveLength(0);
-    process.env = antes;
-  });
-
-  it("com SINGLE_TENANT=true o token do servidor volta a valer", async () => {
-    const antes = { ...process.env };
-    process.env.GITHUB_TOKEN = "ghp_doServidor";
-    process.env.SINGLE_TENANT = "true";
     await openPullRequest({
-      repoUrl: "https://github.com/acme/app",
+      repoUrl: "https://github.com/acme/publico",
       file: "a.js",
       fixedCode: "x",
       title: "t",
     });
     expect(prsAbertos).toHaveLength(1);
+    process.env = antes;
+  });
+
+  // Em repositório PRIVADO o token do servidor continua barrado: emprestá-lo
+  // daria acesso de escrita a todo repositório privado que ele alcança.
+  // Ver AUDITORIA.md#SEC-06.
+  it("repositório privado recusa o token do servidor", async () => {
+    const antes = { ...process.env };
+    process.env.GITHUB_TOKEN = "ghp_doServidor";
+    process.env.SINGLE_TENANT = "true";
+    octokitFake.rest.repos.get.mockResolvedValueOnce({
+      data: { default_branch: "main", private: true },
+    });
+    await expect(
+      openPullRequest({
+        repoUrl: "https://github.com/acme/privado",
+        file: "a.js",
+        fixedCode: "x",
+        title: "t",
+      })
+    ).rejects.toThrow(/privado/i);
+    expect(prsAbertos).toHaveLength(0);
     process.env = antes;
   });
 
@@ -154,14 +200,36 @@ describe("openPullRequestBatch · BUG-07", () => {
       token: "ghp_teste",
     });
     expect(pr.committed).toBe(3);
-    expect(criados.map((c) => c.path)).toEqual(["src/a.js", "src/b.js", "src/c.js"]);
+    expect(arvores[0]).toEqual(["src/a.js", "src/b.js", "src/c.js"]);
+    expect(blobsCriados).toEqual(["A", "B", "C"]);
     // Uma branch só, um PR só.
     expect(refsCriadas).toHaveLength(1);
     expect(prsAbertos).toHaveLength(1);
-    expect(new Set(criados.map((c) => c.branch)).size).toBe(1);
   });
 
-  it("deduplica caminho repetido em vez de commitar duas vezes", async () => {
+  // O laço antigo fazia DUAS chamadas e um commit por arquivo, em série: 33
+  // arquivos custavam 66 idas ao GitHub e mais de um minuto. Este teste trava
+  // o custo em O(1) chamadas de escrita de árvore/commit.
+  it("gera UM commit, não um por arquivo", async () => {
+    await openPullRequestBatch({
+      repoUrl: "https://github.com/acme/app",
+      files: Array.from({ length: 30 }, (_, i) => ({
+        file: `src/f${i}.js`,
+        fixedCode: `conteudo ${i}`,
+      })),
+      title: "Correções",
+      token: "ghp_teste",
+    });
+    expect(commits).toHaveLength(1);
+    expect(arvores).toHaveLength(1);
+    expect(arvores[0]).toHaveLength(30);
+    expect(refsAtualizadas).toHaveLength(1);
+    // E nenhuma chamada ao caminho antigo, que era o lento.
+    expect(octokitFake.rest.repos.createOrUpdateFileContents).not.toHaveBeenCalled();
+    expect(octokitFake.rest.repos.getContent).not.toHaveBeenCalled();
+  });
+
+  it("deduplica caminho repetido — o último conteúdo vence", async () => {
     const pr = await openPullRequestBatch({
       repoUrl: "https://github.com/acme/app",
       files: [
@@ -172,6 +240,8 @@ describe("openPullRequestBatch · BUG-07", () => {
       token: "ghp_teste",
     });
     expect(pr.committed).toBe(1);
-    expect(criados).toHaveLength(1);
+    expect(arvores[0]).toEqual(["src/a.js"]);
+    // O segundo já acumula a correção do primeiro; ficar com ele é o certo.
+    expect(blobsCriados).toEqual(["segundo"]);
   });
 });

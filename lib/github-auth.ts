@@ -56,3 +56,45 @@ export function requireGitHubToken(userToken?: string | null): string {
   }
   return token;
 }
+
+/**
+ * Token para abrir PR, ciente da VISIBILIDADE do repositório.
+ *
+ * A regra do produto separa dois casos que têm riscos diferentes:
+ *
+ * - **Repositório público**: o token do servidor abre o PR. Não há dado
+ *   privado em jogo — qualquer pessoa poderia abrir esse mesmo PR por um fork.
+ *   O que o servidor empresta aqui é só a identidade que assina o PR.
+ *
+ * - **Repositório privado**: exige o token DO USUÁRIO, sempre. Emprestar o
+ *   token do servidor aqui é exatamente o furo do AUDITORIA.md#SEC-06 — quem
+ *   não tem acesso passaria a ler e escrever em todo repositório privado ao
+ *   qual o token do servidor alcança, bastando saber a URL.
+ *
+ * O token informado pelo usuário tem prioridade nos dois casos: escolha
+ * explícita ganha de padrão.
+ */
+export function tokenForPullRequest(opts: {
+  userToken?: string | null;
+  isPrivate: boolean;
+}): string {
+  const own = opts.userToken?.trim();
+  if (own) return own;
+
+  if (opts.isPrivate) {
+    throw new GitHubTokenRequired(
+      "Este repositório é privado: use um token seu, com permissão de escrita."
+    );
+  }
+
+  // Público: o token do servidor serve. `SINGLE_TENANT` deixa de ser exigido
+  // porque o risco que ele barrava (acesso a repositório privado alheio) não
+  // existe aqui.
+  const doServidor = process.env.GITHUB_TOKEN?.trim();
+  if (!doServidor) {
+    throw new GitHubTokenRequired(
+      "Informe um token do GitHub com permissão de escrita para abrir o pull request."
+    );
+  }
+  return doServidor;
+}

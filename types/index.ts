@@ -115,6 +115,31 @@ export interface Vulnerability {
   explain?: FindingExplain;
 }
 
+/**
+ * O que o fluxo de correção precisa saber sobre um achado.
+ *
+ * Existe para o modal de correção servir tanto a uma vulnerabilidade de código
+ * quanto a uma dependência vulnerável — que não é `Vulnerability` (não tem
+ * arquivo nem linha próprios) mas tem correção igualmente. `Vulnerability`
+ * satisfaz esta forma naturalmente; a dependência é adaptada em
+ * `lib/deps-fix.ts`.
+ */
+export interface FixTarget {
+  id: string;
+  ruleId: string;
+  title: string;
+  severity: Severity;
+  file: string;
+  line: number;
+  endLine?: number;
+  description: string;
+  suggestion?: string;
+  codeSnippet?: string;
+  cwe?: string;
+  owasp?: string;
+  explain?: FindingExplain;
+}
+
 // Regra de negócio declarada no contexto que a IA NÃO conseguiu confirmar nem
 // refutar no código analisado — reportada como ressalva, nunca como vulnerabilidade.
 export interface UnverifiedRule {
@@ -133,6 +158,12 @@ export interface DependencyVuln {
   cve: string;
   title: string;
   description: string;
+  /** Arquivo que o scanner leu (normalmente o lockfile). */
+  lockfile?: string;
+  /** Manifesto que se edita à mão — é nele que a correção mexe. */
+  manifest?: string;
+  /** "npm", "pip", "gomod"… define como regerar o lock. */
+  ecosystem?: string;
   /** Descrição enriquecida no idioma do sistema (lib/enrich.ts). */
   explain?: FindingExplain;
 }

@@ -4,6 +4,7 @@
 // (detecção de prompt injection/exfiltração). NODE-ONLY.
 // ============================================================
 import "server-only";
+import { phaseMaxTokens } from "@/lib/config";
 import { runAI, extractJSON } from "@/lib/ai";
 import type { SkillFinding, SkillValidation, Severity, SkillVerdict } from "@/types";
 
@@ -97,7 +98,7 @@ async function aiFindings(name: string, content: string): Promise<SkillFinding[]
     const text = await runAI("skills", {
       system: SKILL_SYSTEM_PROMPT,
       prompt: `Skill: ${name}\n\n---\n${content.slice(0, 20000)}\n---`,
-      maxTokens: 6000,
+      maxTokens: phaseMaxTokens(2),
     });
     const parsed = extractJSON<{ findings?: Partial<SkillFinding>[] }>(text);
     return (parsed.findings || []).map((f, i) => ({

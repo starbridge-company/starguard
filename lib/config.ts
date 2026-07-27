@@ -8,6 +8,31 @@ import type { AIProvider, PhaseKey, StepAIConfig } from "@/types";
 const DEFAULT_PROVIDER = (process.env.AI_PROVIDER as AIProvider) || "anthropic";
 const DEFAULT_MODEL = process.env.AI_MODEL || "claude-sonnet-5";
 
+/**
+ * Teto de saída por etapa, em tokens.
+ *
+ * Não é um controle de usuário — é ajuste nosso, por env. Os modelos com
+ * "extended thinking" (claude-sonnet-5 e afins) gastam ESTE MESMO orçamento
+ * raciocinando antes de escrever: uma descrição de sistema longa aumenta o
+ * pensamento e o JSON acaba cortado no meio. A Fase 1 foi a que estourou na
+ * prática. Ver AUDITORIA.md#BUG-13.
+ */
+const STEP_MAX_TOKENS: Record<1 | 2 | 3 | 4, number> = {
+  1: 16000, // modelagem de ameaças: thinking + JSON com ameaças e requisitos
+  2: 8000, // validação de skills
+  3: 16000, // revisão por IA do repositório
+  4: 16000, // correção de código (arquivo inteiro na resposta)
+};
+
+export function phaseMaxTokens(n: 1 | 2 | 3 | 4): number {
+  return Number(process.env[`STEP${n}_MAX_TOKENS`] || STEP_MAX_TOKENS[n]);
+}
+
+/** Teto absoluto do retry automático — freio contra custo desgovernado. */
+export const AI_MAX_OUTPUT_TOKENS = Number(
+  process.env.AI_MAX_OUTPUT_TOKENS || 32000
+);
+
 function stepAI(n: 1 | 2 | 3 | 4): StepAIConfig {
   const provider =
     (process.env[`STEP${n}_PROVIDER`] as AIProvider) || DEFAULT_PROVIDER;
@@ -31,11 +56,21 @@ export const AI_BY_PHASE: Record<Exclude<PhaseKey, never>, StepAIConfig> = {
  * de laços de retry — e os testes precisam zerar o backoff sem reimportar o
  * módulo inteiro.
  */
-export function aiHttp() {
+export function aiHttp(phase?: PhaseKey) {
+  // Teto de tempo por chamada. Sem ele, um provedor lento segura a fase até o
+  // `maxDuration` da rota e o usuário não recebe erro nenhum.
+  //
+  // Mas o teto GLOBAL de 120 s era curto demais para a correção: ela devolve o
+  // arquivo INTEIRO, e emitir mil linhas leva minutos. A rota tem
+  // `maxDuration = 300`, então abortar em 120 s desperdiçava dois terços do
+  // orçamento e devolvia "tempo esgotado" numa chamada que ia terminar.
+  const padrao = Number(process.env.AI_TIMEOUT_MS || 120_000);
+  const porFase =
+    phase === "refactor" || phase === "software"
+      ? Number(process.env.AI_TIMEOUT_LONG_MS || 280_000)
+      : padrao;
   return {
-    // Teto de tempo por chamada. Sem ele, um provedor lento segura a fase até
-    // o `maxDuration` da rota e o usuário não recebe erro nenhum.
-    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
+    timeoutMs: Math.max(padrao, porFase),
     // Tentativas ADICIONAIS após a primeira falha reentrante (429/5xx).
     maxRetries: Number(process.env.AI_MAX_RETRIES ?? 2),
     // Base do backoff exponencial; o `retry-after` do provedor tem prioridade.

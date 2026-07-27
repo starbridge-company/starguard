@@ -7,6 +7,7 @@ import {
   setSessionCookies,
   audit,
   hashIp,
+  InfraUnavailable,
 } from "@/lib/auth";
 import {
   rateLimit,
@@ -53,7 +54,19 @@ export async function POST(req: NextRequest) {
     return tooMany(perIp.resetMs);
   }
 
-  const user = await authenticate(v.data.email, v.data.password);
+  // Banco atrás do código derrubava o login com 500 para QUALQUER senha, e a
+  // única pista ficava no log do servidor. Ver AUDITORIA.md#ARQ-12.
+  let user;
+  try {
+    user = await authenticate(v.data.email, v.data.password);
+  } catch (e) {
+    if (e instanceof InfraUnavailable) {
+      console.error(`[login] ${e.message}`);
+      return jsonError(503, e.message, "err.schemaOutdated");
+    }
+    throw e;
+  }
+
   if (!user) {
     // Só a FALHA consome cota — nos dois baldes.
     await rateLimit(accountKey, LOGIN_RATE);

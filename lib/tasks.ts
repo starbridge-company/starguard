@@ -3,7 +3,7 @@
 // chamam estas funções. NODE-ONLY.
 // ============================================================
 import "server-only";
-import { ENGINES } from "@/lib/config";
+import { ENGINES, phaseMaxTokens } from "@/lib/config";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
 import { runAI, extractJSON, AIError } from "@/lib/ai";
 import type {
@@ -17,7 +17,21 @@ import type {
   DependencyVuln,
 } from "@/types";
 
+// Os limites de QUANTIDADE e de TAMANHO não são detalhe de estilo: sem eles a
+// saída cresce junto com a descrição do sistema, e uma descrição longa fazia o
+// JSON estourar o teto de tokens e voltar cortado pela metade — a fase inteira
+// falhava. Ver AUDITORIA.md#BUG-13.
+const THREAT_MAX_THREATS = 12;
+const THREAT_MAX_REQUIREMENTS = 15;
+
 const THREAT_SYSTEM = `Você é um especialista em DevSecOps e modelagem de ameaças. Com base na descrição do sistema, identifique as principais ameaças e gere uma lista de requisitos técnicos de segurança. Considere: autenticação, autorização, criptografia, compliance (LGPD, ANS, PCI-DSS quando aplicável), ofuscação de dados sensíveis e boas práticas OWASP. Retorne JSON com os campos threats[] e requirements[].
+
+ORÇAMENTO DE SAÍDA — respeite à risca, a resposta é lida por máquina e não pode vir cortada:
+- No máximo ${THREAT_MAX_THREATS} ameaças, priorizadas pelo risco real. Prefira poucas e certeiras a muitas e genéricas.
+- No máximo ${THREAT_MAX_REQUIREMENTS} requisitos, cada um em uma frase objetiva (até 200 caracteres).
+- "description" de cada ameaça: até 2 frases. "summary": até 3 frases.
+- Não repita a descrição do sistema na resposta e não escreva nada fora do JSON.
+
 Formato: {"summary":"...","threats":[{"id":"T-01","category":"...","title":"...","description":"...","severity":"critical|high|medium|low"}],"requirements":[{"id":"R-01","category":"...","text":"..."}]}`;
 
 export async function generateThreatModel(
@@ -29,19 +43,22 @@ export async function generateThreatModel(
 
 Escreva TODO o texto de saída em ${LOCALE_AI_NAME[locale]}.`,
     prompt: systemDescription.slice(0, 40000),
-    // Alto o bastante para caber o "thinking" (que consome max_tokens nos
-    // modelos novos) + o JSON completo, sem truncar.
-    maxTokens: 8000,
+    // O orçamento precisa caber o "thinking" (que consome max_tokens nos
+    // modelos novos) MAIS o JSON. Configurável por env, sem controle na tela:
+    // é ajuste de operação, não escolha de quem usa. Ver AUDITORIA.md#BUG-13.
+    maxTokens: phaseMaxTokens(1),
   });
   const parsed = extractJSON<{
     summary?: string;
     threats?: Threat[];
     requirements?: Requirement[];
   }>(text);
+  // Corta o excedente também aqui: o limite do prompt é uma instrução, e
+  // instrução a modelo é pedido, não garantia.
   return {
     summary: parsed.summary,
-    threats: parsed.threats || [],
-    requirements: parsed.requirements || [],
+    threats: (parsed.threats || []).slice(0, THREAT_MAX_THREATS),
+    requirements: (parsed.requirements || []).slice(0, THREAT_MAX_REQUIREMENTS),
   };
 }
 
@@ -181,7 +198,22 @@ Regras:
 
 Responda em JSON válido, sem markdown: {"fixedCode":"<código corrigido>","explanation":"<o que mudou e por quê, em 1-3 frases>"}`;
 
-const MAX_WHOLE_FILE = 100_000; // acima disso, cai para o modo trecho + splice
+/**
+ * Até que tamanho vale mandar o arquivo INTEIRO para a IA reescrever.
+ *
+ * O teto tem de sair do orçamento de SAÍDA, não de um número redondo: o modelo
+ * precisa devolver o arquivo todo. Estava fixo em 100 000 caracteres enquanto
+ * a saída cabia ~60 000 — ou seja, mandávamos arquivos que era impossível
+ * receber de volta. O resultado era resposta truncada, retry com o dobro do
+ * orçamento e, no fim, tempo esgotado: o caminho mais lento possível para
+ * chegar a um erro.
+ *
+ * ~3 caracteres por token é conservador para código; o desconto de 15% deixa
+ * espaço para o "thinking", que come o mesmo orçamento.
+ */
+function maxWholeFileChars(): number {
+  return Math.floor(phaseMaxTokens(4) * 3 * 0.85);
+}
 
 /** Achado adicional NO MESMO arquivo, corrigido na mesma passada. */
 export interface ExtraFinding {
@@ -218,6 +250,15 @@ export interface FixInput {
    * Ver AUDITORIA.md#BUG-06.
    */
   alsoFix?: ExtraFinding[];
+  /**
+   * Conteúdo de partida do arquivo, quando NÃO é o do repositório.
+   *
+   * Um arquivo com dezenas de achados não cabe num prompt só — nem em
+   * qualidade, nem no limite de `alsoFix`. Ele é corrigido em fatias, e cada
+   * fatia recebe aqui o resultado da anterior. Sem isto, a fatia 2 partiria do
+   * arquivo original e apagaria o trabalho da fatia 1.
+   */
+  baseCode?: string;
 }
 
 /** Lista "1. problema (linha X) — regra/CWE" de todos os achados do arquivo. */
@@ -308,7 +349,11 @@ function buildFixPrompt(input: FixInput, wholeFile: string | null): string {
 export async function generateFix(input: FixInput): Promise<FixResult> {
   // Engine de AGENTE (Claude Code): lê o repo e edita os arquivos. Se falhar
   // (SDK ausente, sem rede, timeout), cai para o disparo único na API abaixo.
-  if (ENGINES.fix === "agent" && input.repoUrl) {
+  //
+  // `baseCode` o desqualifica: o agente sempre parte do repositório clonado, e
+  // numa correção em fatias isso faria a fatia 2 desfazer a fatia 1. Quando há
+  // continuação, a API é o caminho — é ela que aceita um ponto de partida.
+  if (ENGINES.fix === "agent" && input.repoUrl && !input.baseCode) {
     try {
       const { agentFix } = await import("@/lib/agent-fix");
       return await agentFix(input);
@@ -321,19 +366,24 @@ export async function generateFix(input: FixInput): Promise<FixResult> {
   }
 
   // Engine de API: busca o arquivo inteiro (a árvore da Fase 3 já foi apagada).
-  let wholeFile: string | null = null;
-  if (input.repoUrl) {
+  //
+  // `baseCode` vem preenchido quando esta é a 2ª fatia (ou seguinte) de um
+  // arquivo com muitos achados: partimos do que a fatia anterior já corrigiu,
+  // não do arquivo original — senão cada fatia desfaria a anterior, que é
+  // exatamente o problema que o agrupamento por arquivo veio resolver.
+  let wholeFile: string | null = input.baseCode ?? null;
+  if (!wholeFile && input.repoUrl) {
     const { fetchFileContent } = await import("@/lib/github");
     wholeFile = await fetchFileContent(input.repoUrl, input.file, input.token);
   }
-  const useWhole = !!wholeFile && wholeFile.length <= MAX_WHOLE_FILE;
+  const useWhole = !!wholeFile && wholeFile.length <= maxWholeFileChars();
 
   const text = await runAI("refactor", {
     system: `${FIX_SYSTEM}
 
 Escreva a "explanation" em ${LOCALE_AI_NAME[input.locale || DEFAULT_LOCALE]}.`,
     prompt: buildFixPrompt(input, useWhole ? wholeFile : null),
-    maxTokens: 16000,
+    maxTokens: phaseMaxTokens(4),
   });
   const parsed = extractJSON<{ fixedCode?: string; explanation?: string }>(text);
 

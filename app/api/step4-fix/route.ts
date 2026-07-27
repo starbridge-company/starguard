@@ -13,6 +13,7 @@ import { audit } from "@/lib/auth";
 import { AI_BY_PHASE, FIX_AGENT } from "@/lib/config";
 import * as findingsRepo from "@/lib/repos/findings";
 import { getLocale } from "@/lib/i18n/server";
+import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
 // O engine de agente (FIX_ENGINE=agent) pode levar minutos: clona o repo e roda
@@ -27,14 +28,24 @@ export async function POST(req: NextRequest) {
   const v = validate(step4Schema, await readJson(req));
   if (!v.ok) return jsonError(400, v.message);
 
-  // O achado pode vir identificado (novo fluxo, com persistência) ou não
-  // (chamadas soltas à rota). Sem ele, o comportamento é o de antes: gera e
-  // devolve, sem guardar nada.
-  const finding = v.data.findingId
+  // O achado pode vir identificado pelo id persistido OU pelo par
+  // (análise, id local). O segundo caminho existe porque a tela carrega o mapa
+  // de ids de forma assíncrona: se a geração começa antes, a requisição sairia
+  // sem identificação e QUEBRARIA os dois lados do FEAT-02 — não consultaria o
+  // cache (gastando IA de novo) e não guardaria o resultado (gastando outra
+  // vez na próxima abertura). Resolver no servidor tira a tela dessa corrida.
+  let finding = v.data.findingId
     ? await findingsRepo.getById(v.data.findingId)
     : undefined;
 
-  if (v.data.findingId) {
+  if (!finding && v.data.analysisId) {
+    finding = await findingsRepo.getByLocalId(
+      v.data.analysisId,
+      v.data.vulnerabilityId
+    );
+  }
+
+  if (v.data.findingId || finding) {
     if (!finding) return jsonError(404, "Achado não encontrado.");
     const owner = await findingsRepo.ownerOfFinding(finding.id);
     if (!owner || !canAccess(session, owner)) {
@@ -64,8 +75,16 @@ export async function POST(req: NextRequest) {
           instructions: v.data.userInstructions,
           by: session.sub,
         })
-        .catch(() => {
-          /* a correção já foi gerada: não perder a resposta por falha de escrita */
+        .catch((e) => {
+          // A correção já foi gerada — não vamos perder a resposta por falha
+          // de escrita. Mas engolir em SILÊNCIO era pior: o usuário pagaria a
+          // IA de novo na próxima abertura e nada indicaria o porquê.
+          log.error("fix.save.failed", {
+            userId: session.sub,
+            findingId: finding.id,
+            engine: fix.engine,
+            error: e,
+          });
         });
     }
 

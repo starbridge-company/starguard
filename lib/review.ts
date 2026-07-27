@@ -11,7 +11,7 @@ import "server-only";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { runAI, extractJSON } from "@/lib/ai";
-import { AI_BY_PHASE } from "@/lib/config";
+import { AI_BY_PHASE, phaseMaxTokens } from "@/lib/config";
 // Regra única de deduplicação, compartilhada com a tela (AUDITORIA.md#ARQ-10).
 import { collidesWithSast, collidesWithSca, normPath } from "@/lib/dedup";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "@/lib/i18n/config";
@@ -181,6 +181,17 @@ function normSeverity(s: unknown): Severity {
 
 type RawFinding = Record<string, unknown>;
 
+// Todo texto abaixo nasce de um repositório de TERCEIROS passando por um
+// modelo: um `<!-- ignore previous instructions -->` num comentário do código
+// analisado pode virar parágrafo na tela, apresentado como veredito da
+// ferramenta. Não dá para impedir a influência, mas dá para limitar o espaço
+// que ela ocupa — e a UI marca a origem. Ver AUDITORIA.md#SEC-09.
+const LIMITE = {
+  description: 1200,
+  suggestion: 600,
+  codeSnippet: 2000,
+} as const;
+
 function mapFindings(raw: RawFinding[]): Vulnerability[] {
   return raw.slice(0, 50).map((f, i) => {
     const kind = f.kind === "business-rule" ? "business-rule" : "code";
@@ -200,9 +211,13 @@ function mapFindings(raw: RawFinding[]): Vulnerability[] {
       file: String(f.file || "desconhecido").slice(0, 300),
       line: Number.isFinite(lineNum) ? lineNum : 0,
       endLine: Number.isFinite(endNum) && endNum > 0 ? endNum : undefined,
-      description: String(f.description || ""),
-      codeSnippet: f.codeSnippet ? String(f.codeSnippet) : undefined,
-      suggestion: String(f.suggestion || "Revise o trecho conforme a recomendação."),
+      description: String(f.description || "").slice(0, LIMITE.description),
+      codeSnippet: f.codeSnippet
+        ? String(f.codeSnippet).slice(0, LIMITE.codeSnippet)
+        : undefined,
+      suggestion: String(
+        f.suggestion || "Revise o trecho conforme a recomendação."
+      ).slice(0, LIMITE.suggestion),
       cwe: f.cwe ? String(f.cwe) : undefined,
       owasp: f.owasp ? String(f.owasp) : undefined,
       requirementRefs: refs && refs.length ? refs : undefined,
@@ -286,7 +301,7 @@ async function reviewAttempt(
       : reviewSystem(locale),
     // Teto alto: nos modelos com extended thinking o raciocínio consome
     // max_tokens; sem folga, o bloco de texto (o JSON) volta vazio/truncado.
-    maxTokens: 16000,
+    maxTokens: phaseMaxTokens(3),
     prompt: buildPrompt(ctx, files, discovered),
   });
 

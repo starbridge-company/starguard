@@ -3298,6 +3298,102 @@ a.cell-strong:hover {
 }
 
 /* ============================================================
+   PROCEDÊNCIA DO TEXTO (AUDITORIA.md#SEC-09)
+   Discreto de propósito: é uma ressalva, não um alerta. Gritar aqui
+   tiraria a atenção do achado, que é o que importa.
+   ============================================================ */
+.provenance {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.provenance svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ============================================================
+   RELATÓRIO IMPRESSO / PDF (AUDITORIA.md#UX-21)
+   O relatório é o artefato que sai da ferramenta e circula por e-mail.
+   Sem isto ele saía sem margem, com cards partidos ao meio e sem dizer
+   de onde veio nem quando.
+   ============================================================ */
+@page {
+  size: A4;
+  margin: 18mm 16mm 20mm;
+}
+
+@media print {
+  /* Tinta: fundo escuro vira dezenas de páginas pretas. */
+  :root,
+  :root[data-theme="dark"] {
+    --surface: #fff;
+    --surface-solid: #fff;
+    --bg: #fff;
+    --text-primary: #111;
+    --text-secondary: #333;
+    --text-muted: #555;
+    --border: #ccc;
+    --border-strong: #999;
+  }
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  .no-print,
+  .app-sidebar,
+  .app-header,
+  .pipeline,
+  .filter-bar { display: none !important; }
+
+  .report-doc {
+    box-shadow: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  /* Nada de card partido entre duas páginas. */
+  .report-section,
+  .report-req,
+  .sev-tile,
+  .vuln-card { break-inside: avoid; page-break-inside: avoid; }
+
+  /* Título nunca fica órfão no pé da página. */
+  .report-section h3 { break-after: avoid; page-break-after: avoid; }
+  h1, h2, h3 { orphans: 3; widows: 3; }
+
+  /* O link é inútil no papel — o destino, não. */
+  .report-doc a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.7em;
+    color: #555;
+    word-break: break-all;
+  }
+
+  /* Cada seção começa numerada, para dar para citar "seção 3" numa reunião. */
+  .report-doc { counter-reset: report-section; }
+  .report-section h3::before {
+    counter-increment: report-section;
+    content: counter(report-section) ". ";
+    color: #555;
+  }
+
+  pre, code { white-space: pre-wrap; word-break: break-word; }
+  table { break-inside: auto; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+}
+
+/* ============================================================
    ACESSIBILIDADE
    Fica no fim de propósito: estas regras precisam ganhar de quem
    veio antes. Ver AUDITORIA.md#UX-12 e #UX-13.
@@ -3370,3 +3466,58 @@ a.cell-strong:hover {
     animation-iteration-count: infinite !important;
   }
 }
+
+/* Metadados da capa do relatório (AUDITORIA.md#UX-21). */
+.report-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 18px;
+  margin: 16px 0 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.report-meta dt {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.report-meta dd {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+/* Faixa de fase que falhou (AUDITORIA.md#UX-16). Fica logo abaixo do
+   cabeçalho e não some: o erro no meio do pipeline precisa alcançar quem
+   está lendo a "Visão geral". */
+.alert.phase-banner {
+  align-items: center;
+  gap: 10px;
+}
+.alert.phase-banner svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+/* Pedido de token do GitHub no momento em que ele é necessário.
+   Neutro, não vermelho: repositório privado exigir credencial é o passo
+   normal do fluxo, não uma falha. */
+.token-prompt {
+  display: grid;
+  gap: 10px;
+  align-items: stretch;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.token-prompt-head strong { color: var(--text-primary); }
+.token-prompt-head svg { color: hsl(var(--accent)); }
+.token-prompt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.token-prompt-head svg { width: 18px; height: 18px; flex-shrink: 0; }
+.token-prompt-head p { margin: 2px 0 0; font-size: 0.8rem; }

@@ -86,6 +86,10 @@ export function parseSemgrep(json: SemgrepRaw): Vulnerability[] {
 
 interface TrivyRaw {
   Results?: Array<{
+    /** Arquivo onde a dependência foi declarada (ex.: "package-lock.json"). */
+    Target?: string;
+    /** Ecossistema: "npm", "pip", "gomod", "maven"… */
+    Type?: string;
     Vulnerabilities?: Array<{
       VulnerabilityID?: string;
       PkgName?: string;
@@ -94,8 +98,37 @@ interface TrivyRaw {
       Severity?: string;
       Title?: string;
       Description?: string;
+      /** Caminho do manifesto quando difere do Target (monorepo, workspace). */
+      PkgPath?: string;
     }>;
   }>;
+}
+
+/**
+ * O Trivy aponta o LOCKFILE (`package-lock.json`), não o manifesto que se
+ * edita à mão. Corrigir uma dependência é mexer no manifesto e regerar o
+ * lock — então guardamos o palpite do manifesto ao lado do alvo original.
+ */
+const MANIFEST_BY_LOCK: Record<string, string> = {
+  "package-lock.json": "package.json",
+  "yarn.lock": "package.json",
+  "pnpm-lock.yaml": "package.json",
+  "poetry.lock": "pyproject.toml",
+  "Pipfile.lock": "Pipfile",
+  "Gemfile.lock": "Gemfile",
+  "composer.lock": "composer.json",
+  "Cargo.lock": "Cargo.toml",
+  "go.sum": "go.mod",
+};
+
+export function manifestForTarget(target?: string): string | undefined {
+  if (!target) return undefined;
+  const norm = target.replace(/\\/g, "/");
+  const base = norm.split("/").pop() || norm;
+  const mapped = MANIFEST_BY_LOCK[base];
+  if (!mapped) return norm; // já é um manifesto (requirements.txt, go.mod…)
+  const dir = norm.slice(0, norm.length - base.length);
+  return `${dir}${mapped}`;
 }
 
 export function parseTrivy(json: TrivyRaw): DependencyVuln[] {
@@ -108,6 +141,10 @@ export function parseTrivy(json: TrivyRaw): DependencyVuln[] {
         package: v.PkgName || "desconhecido",
         installedVersion: v.InstalledVersion || "?",
         fixedVersion: v.FixedVersion,
+        // Onde a dependência vive: sem isto não dá para corrigir, só relatar.
+        lockfile: res.Target,
+        manifest: manifestForTarget(v.PkgPath || res.Target),
+        ecosystem: res.Type,
         severity: mapTrivySeverity(v.Severity),
         cve: v.VulnerabilityID || "CVE-desconhecido",
         title: (v.Title || v.VulnerabilityID || "Dependência vulnerável").slice(

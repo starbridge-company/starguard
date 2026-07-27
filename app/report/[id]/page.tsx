@@ -91,6 +91,32 @@ export default function ReportPage() {
           </div>
         </div>
 
+        {/* Metadados da capa. No papel, um relatório sem data, sem id e sem os
+            motores usados é impossível de auditar depois — e este documento
+            circula por e-mail. Ver AUDITORIA.md#UX-21. */}
+        <dl className="report-meta">
+          <div>
+            <dt>{t("report.metaAnalysis")}</dt>
+            <dd className="mono">{job.id}</dd>
+          </div>
+          <div>
+            <dt>{t("report.metaRunAt")}</dt>
+            <dd>{new Date(job.createdAt).toLocaleString(locale)}</dd>
+          </div>
+          <div>
+            <dt>{t("report.metaPrintedAt")}</dt>
+            <dd>{new Date().toLocaleString(locale)}</dd>
+          </div>
+          <div>
+            <dt>{t("report.metaEngines")}</dt>
+            <dd>
+              {[scan?.sast.engine, scan?.sca.engine, review?.engine]
+                .filter(Boolean)
+                .join(" · ") || "—"}
+            </dd>
+          </div>
+        </dl>
+
         {/* Vulnerabilidades por severidade */}
         <div className="report-section">
           <h3>{t("report.bySeverity")}</h3>

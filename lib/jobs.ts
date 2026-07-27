@@ -10,6 +10,7 @@ import { AI_BY_PHASE, ENGINES, FIX_AGENT, engineSummary } from "@/lib/config";
 import { generateThreatModel, validateSkills, runScan } from "@/lib/tasks";
 import { audit } from "@/lib/auth";
 import { redactError } from "@/lib/redact";
+import { log, timed } from "@/lib/logger";
 import * as analysesRepo from "@/lib/repos/analyses";
 import * as tokensRepo from "@/lib/repos/tokens";
 import * as findingsRepo from "@/lib/repos/findings";
@@ -207,7 +208,9 @@ async function runPhase<T>(
     .patchAnalysis(id, { phases, status: "running" })
     .catch(() => {});
   try {
-    ph.result = await fn();
+    // `timed` registra duração e `ok` no mesmo evento — é o que dá métrica de
+    // tempo por fase e taxa de erro sem parsear texto (AUDITORIA.md#ARQ-07).
+    ph.result = await timed("phase", { jobId: id, phase: key }, fn);
     ph.status = "done";
   } catch (e) {
     ph.status = "error";
@@ -275,7 +278,7 @@ export async function expireStaleAnalyses(): Promise<number> {
       })
       .catch(() => {});
   }
-  if (n > 0) console.warn(`[jobs] ${n} análise(s) abandonada(s) encerrada(s)`);
+  if (n > 0) log.warn("jobs.expired", { count: n });
   return n;
 }
 
@@ -303,7 +306,7 @@ export async function runJob(id: string): Promise<void> {
         finishedAt: new Date(),
       })
       .catch(() => {});
-    console.warn(`[job ${id}] segredos ausentes — análise marcada como erro`);
+    log.warn("job.orphan", { jobId: id });
     return;
   }
   const phases = initialPhases();
@@ -352,10 +355,10 @@ export async function runJob(id: string): Promise<void> {
           .persistScanFindings(id, userId, raw.repoUrl || null, scanResult)
           .then((herdados) => {
             if (herdados > 0) {
-              console.info(`[job ${id}] ${herdados} achado(s) com estado herdado`);
+              log.info("findings.inherited", { jobId: id, count: herdados });
             }
           })
-          .catch((e) => console.error(`[job ${id}] falha ao gravar achados`, e));
+          .catch((e) => log.error("findings.persist.failed", { jobId: id, error: e }));
       }
     }
 
@@ -396,7 +399,7 @@ export async function runJob(id: string): Promise<void> {
         metrics: computeMetrics(phases),
       })
       .catch(() => {});
-    console.error(`[job ${id}] erro inesperado`, e);
+    log.error("job.failed", { jobId: id, error: e });
   } finally {
     // Token e skills só vivem em memória durante o job.
     secrets.delete(id);
@@ -406,6 +409,6 @@ export async function runJob(id: string): Promise<void> {
 /** Dispara a orquestração sem bloquear a resposta HTTP. */
 export function startJob(id: string): void {
   void runJob(id).catch((e) => {
-    console.error(`[job ${id}] erro inesperado`, e);
+    log.error("job.failed", { jobId: id, error: e });
   });
 }

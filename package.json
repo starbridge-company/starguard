@@ -8,7 +8,8 @@
     "predev": "node scripts/gen-keys.mjs",
     "dev": "next dev",
     "build": "next build",
-    "prestart": "node scripts/gen-keys.mjs",
+    "prestart": "node scripts/gen-keys.mjs && node scripts/check-schema.mjs",
+    "check:schema": "node scripts/check-schema.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -24,6 +25,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "node e2e/run.mjs",
+    "test:live": "vitest run --config vitest.live.mjs",
     "db:backfill-findings": "node scripts/backfill-findings.mjs"
   },
   "dependencies": {

@@ -130,7 +130,45 @@ describe("resposta truncada · BUG-13", () => {
     await expect(callAI(ANTHROPIC, OPTS)).rejects.toMatchObject({
       code: "truncated",
     });
-    await expect(callAI(ANTHROPIC, OPTS)).rejects.toThrow(/truncada|limite de tokens/i);
+    // A mensagem NÃO manda "aumentar o limite de saída": esse teto é
+    // configuração nossa e não existe controle na tela.
+    await expect(callAI(ANTHROPIC, OPTS)).rejects.toThrow(/não coube no limite/i);
+    await expect(callAI(ANTHROPIC, OPTS)).rejects.not.toThrow(/aumente o limite/i);
+  });
+
+  it("tenta de novo sozinho com o DOBRO do orçamento antes de desistir", async () => {
+    // O usuário não tem como aumentar o teto — quem ajusta somos nós.
+    mockFetch([
+      respostaOk({ stop_reason: "max_tokens", content: [{ type: "text", text: "{" }] }),
+      respostaOk({ stop_reason: "end_turn", content: [{ type: "text", text: '{"ok":1}' }] }),
+    ]);
+    await expect(callAI(ANTHROPIC, { ...OPTS, maxTokens: 4000 })).resolves.toBe(
+      '{"ok":1}'
+    );
+    expect(chamadas).toHaveLength(2);
+    expect(chamadas[0].body.max_tokens).toBe(4000);
+    expect(chamadas[1].body.max_tokens).toBe(8000);
+  });
+
+  it("cresce UMA vez só — não entra em escalada de custo", async () => {
+    mockFetch([
+      respostaOk({ stop_reason: "max_tokens", content: [{ type: "text", text: "{" }] }),
+    ]);
+    await expect(
+      callAI(ANTHROPIC, { ...OPTS, maxTokens: 4000 })
+    ).rejects.toMatchObject({ code: "truncated" });
+    expect(chamadas).toHaveLength(2);
+  });
+
+  it("respeita o teto absoluto: não cresce além de AI_MAX_OUTPUT_TOKENS", async () => {
+    mockFetch([
+      respostaOk({ stop_reason: "max_tokens", content: [{ type: "text", text: "{" }] }),
+    ]);
+    await expect(
+      callAI(ANTHROPIC, { ...OPTS, maxTokens: 32000 })
+    ).rejects.toMatchObject({ code: "truncated" });
+    // Já estava no teto: nada de segunda chamada.
+    expect(chamadas).toHaveLength(1);
   });
 
   it("OpenAI com finish_reason=length idem", async () => {

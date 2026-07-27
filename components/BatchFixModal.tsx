@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Vulnerability, FixResult } from "@/types";
+import type { FixResult, FixTarget } from "@/types";
 import SeverityBadge from "@/components/SeverityBadge";
 import InfoTip from "@/components/InfoTip";
 import Modal from "@/components/Modal";
 import CodeDiff from "@/components/CodeDiff";
+import TokenPrompt, { type TokenChoice } from "@/components/TokenPrompt";
 import { apiPost, ApiError, isAbortError } from "@/lib/client";
+import {
+  FIX_CHUNK_SIZE,
+  clampFix,
+  clampPrBody,
+  clampPrTitle,
+} from "@/lib/validation";
+import { useRepoVisibility } from "@/lib/useRepoVisibility";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
   IconX,
@@ -66,6 +74,13 @@ function normPath(f: string): string {
   return f.replace(/\\/g, "/").toLowerCase();
 }
 
+/** Divide em blocos de no máximo `size`. Nada sobra de fora. */
+function chunk<T>(list: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
 export default function BatchFixModal({
   vulns,
   repoUrl,
@@ -74,7 +89,7 @@ export default function BatchFixModal({
   onPrOpened,
   onClose,
 }: {
-  vulns: Vulnerability[];
+  vulns: FixTarget[];
   repoUrl?: string;
   analysisId?: string;
   /** localId ("V-3") -> id do achado persistido, para guardar a correção. */
@@ -94,14 +109,24 @@ export default function BatchFixModal({
   const [prState, setPrState] = useState<"idle" | "loading" | "done">("idle");
   const [pr, setPr] = useState<BatchPR | null>(null);
   const [prError, setPrError] = useState<string | null>(null);
+  // Falta de token tem tratamento próprio: as correções já estão geradas e
+  // guardadas, então basta a credencial e repetir — sem gastar IA de novo.
+  const [needToken, setNeedToken] = useState<string | null>(null);
+  // Repositório privado exige token do usuário. Saber disso ANTES do clique
+  // evita a tentativa que falha só para descobrir.
+  const { isPrivate } = useRepoVisibility(repoUrl);
+  const pedirToken = needToken !== null || isPrivate === true;
   const abortRef = useRef<AbortController | null>(null);
+  // Distingue "o usuário mandou parar" de "o modal fechou".
+  const cancelRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // Achados do MESMO arquivo viram UMA correção. Gerar uma por achado fazia
   // cada uma partir do arquivo original, e o PR (que deduplica por caminho)
   // guardava só a última — as demais sumiam em silêncio, com a tela dizendo
   // que tinham sido corrigidas. Ver AUDITORIA.md#BUG-06.
   const groups = useMemo(() => {
-    const m = new Map<string, Vulnerability[]>();
+    const m = new Map<string, FixTarget[]>();
     for (const v of vulns) {
       const k = normPath(v.file);
       const list = m.get(k);
@@ -116,51 +141,112 @@ export default function BatchFixModal({
     if (phase !== "working") return;
     const controller = new AbortController();
     abortRef.current = controller;
+    mountedRef.current = true;
     const queue = [...groups];
 
-    const setItem = (id: string, patch: Partial<ItemState>) =>
+    // Depois de desmontado, o trabalho continua no servidor mas a tela não
+    // existe mais — atualizar estado aqui seria inútil.
+    const setItem = (id: string, patch: Partial<ItemState>) => {
+      if (!mountedRef.current) return;
       setItems((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    };
 
     async function worker() {
       while (queue.length && !controller.signal.aborted) {
         const group = queue.shift()!;
-        const [primary, ...rest] = group;
-        if (!primary) continue;
+        if (!group.length) continue;
         for (const v of group) setItem(v.id, { status: "running" });
 
         try {
-          const fix = await apiPost<FixResult>(
-            "/api/step4-fix",
-            {
-              findingId: findingIdByLocal?.[primary.id],
-              vulnerabilityId: primary.id,
-              file: primary.file,
-              originalCode:
-                primary.codeSnippet || primary.description || primary.title,
-              description: primary.description || primary.title,
-              suggestion: primary.suggestion,
-              language: guessLang(primary.file),
-              line: primary.line,
-              endLine: primary.endLine,
-              cwe: primary.cwe,
-              owasp: primary.owasp,
-              ruleId: primary.ruleId,
-              repoUrl,
-              alsoFix: rest.map((v) => ({
-                vulnerabilityId: v.id,
-                description: v.description || v.title,
-                suggestion: v.suggestion,
-                line: v.line,
-                endLine: v.endLine,
-                cwe: v.cwe,
-                owasp: v.owasp,
-                ruleId: v.ruleId,
-              })),
-            },
-            { signal: controller.signal }
-          );
+          // Um arquivo pode ter mais achados do que cabe numa passada — o
+          // scan real deste repositório concentrou 576 em poucos arquivos.
+          // Fatiamos e ENCADEAMOS: cada fatia parte do resultado da anterior
+          // (`baseCode`), então nada é descartado e nada é reescrito por cima.
+          const chunks = chunk(group, FIX_CHUNK_SIZE);
+          let fix: FixResult | null = null;
+          // O que a fatia anterior já corrigiu — entra como base da próxima.
+          let base: string | undefined;
+          // O engine de agente pode tocar em VÁRIOS arquivos numa fatia. O
+          // resultado final é o da última, que só conhece o arquivo principal
+          // — sem acumular aqui, o que as fatias anteriores mudaram em outros
+          // arquivos sumiria do PR. Ver AUDITORIA.md#BUG-07.
+          type Alterado = NonNullable<FixResult["changedFiles"]>[number];
+          const extras = new Map<string, Alterado>();
+
+          for (const bloco of chunks) {
+            if (controller.signal.aborted) break;
+            const [primary, ...rest] = bloco;
+            if (!primary) continue;
+
+            fix = await apiPost<FixResult>(
+              "/api/step4-fix",
+              {
+                // Só a ÚLTIMA fatia grava a correção do achado: guardar as
+                // intermediárias deixaria o cache do FEAT-02 com um arquivo
+                // corrigido pela metade.
+                findingId:
+                  bloco === chunks[chunks.length - 1]
+                    ? findingIdByLocal?.[primary.id]
+                    : undefined,
+                analysisId,
+                vulnerabilityId: primary.id,
+                file: primary.file,
+                // Cortado antes de enviar — ver `clampFix` em lib/validation.
+                originalCode: clampFix(
+                  "originalCode",
+                  primary.codeSnippet || primary.description || primary.title
+                ),
+                description: clampFix(
+                  "description",
+                  primary.description || primary.title
+                ),
+                suggestion: clampFix("suggestion", primary.suggestion),
+                language: guessLang(primary.file),
+                line: primary.line,
+                endLine: primary.endLine,
+                cwe: primary.cwe,
+                owasp: primary.owasp,
+                ruleId: primary.ruleId,
+                repoUrl,
+                baseCode: base,
+                alsoFix: rest.map((v) => ({
+                  vulnerabilityId: v.id,
+                  description: clampFix("description", v.description || v.title),
+                  suggestion: clampFix("suggestion", v.suggestion),
+                  line: v.line,
+                  endLine: v.endLine,
+                  cwe: v.cwe,
+                  owasp: v.owasp,
+                  ruleId: v.ruleId,
+                })),
+              },
+              { signal: controller.signal }
+            );
+            base = fix.fixedCode;
+            // Última gravação por caminho vence — dentro de uma mesma fatia o
+            // conteúdo já vem consolidado pelo engine.
+            for (const c of fix.changedFiles || []) {
+              extras.set(normPath(c.file), c);
+            }
+          }
+
+          if (!fix) continue;
+          // O arquivo principal fica com o conteúdo da ÚLTIMA fatia (o que
+          // acumulou todas as correções); os demais, com o que cada fatia
+          // deixou.
+          extras.set(normPath(fix.file), {
+            file: fix.file,
+            originalCode: fix.originalCode,
+            fixedCode: fix.fixedCode,
+          });
+          const resultado: FixResult =
+            extras.size > 1 ? { ...fix, changedFiles: [...extras.values()] } : fix;
           for (const v of group) {
-            setItem(v.id, { status: "done", fix, groupSize: group.length });
+            setItem(v.id, {
+              status: "done",
+              fix: resultado,
+              groupSize: group.length,
+            });
           }
         } catch (err) {
           if (isAbortError(err)) {
@@ -182,7 +268,20 @@ export default function BatchFixModal({
     void Promise.all(
       Array.from({ length: Math.min(CONCURRENCY, groups.length) }, worker)
     );
-    return () => controller.abort();
+
+    return () => {
+      mountedRef.current = false;
+      // FECHAR o modal não é o mesmo que CANCELAR.
+      //
+      // Abortar na desmontagem jogava fora exatamente as `CONCURRENCY` (3)
+      // chamadas em voo — já pagas — e elas eram as únicas que precisavam
+      // rodar a IA de novo ao reabrir. Deixando-as terminar, o servidor grava
+      // a correção e na próxima abertura ela volta do cache, de graça.
+      //
+      // Cancelar de propósito (o botão) continua abortando: aí a intenção é
+      // parar de gastar.
+      if (cancelRef.current) controller.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
@@ -195,6 +294,23 @@ export default function BatchFixModal({
   ).length;
   const generating = phase === "working" && pending > 0;
   const total = vulns.length;
+
+  // Fechar a aba durante a geração perde o que está em voo — e cada item em
+  // voo é uma chamada de IA já paga, que o servidor vai terminar e jogar fora.
+  // É o único caso que sobrou do AUDITORIA.md#UX-20: o FEAT-02 guarda tudo o
+  // que JÁ ficou pronto, e o UX-03 cuida do texto digitado nos modais.
+  useEffect(() => {
+    if (!generating) return;
+    const aviso = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Navegador moderno ignora o texto e mostra o diálogo padrão; o
+      // `returnValue` continua sendo o que dispara o diálogo.
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", aviso);
+    return () => window.removeEventListener("beforeunload", aviso);
+  }, [generating]);
+
   const settled = doneCount + errorCount + cancelledCount;
   const pct = total ? Math.round((settled / total) * 100) : 0;
 
@@ -233,26 +349,34 @@ export default function BatchFixModal({
       return next;
     });
 
-  const openBatchPR = async () => {
+  const openBatchPR = async (tokenChoice?: TokenChoice) => {
     if (!repoUrl || !prFiles.length) return;
 
     setPrState("loading");
     setPrError(null);
+    setNeedToken(null);
     try {
-      const body = [
-        `Correções de segurança geradas pelo StarGuard (${total} achado(s) em ${prFiles.length} arquivo(s)).`,
-        "",
-        ...prFiles.map((f) => `- \`${f.file}\`: ${f.explanation}`),
-        "",
-        "Revise cada alteração antes de mergear.",
-      ].join("\n");
+      // O corpo é texto NOSSO: uma linha por arquivo com a explicação da IA.
+      // Ele cresce com o tamanho do lote e passava do limite — derrubando o PR
+      // DEPOIS de toda a geração já estar paga. Cortar na origem é o certo:
+      // recusar a própria saída no último passo não protege nada.
+      const body = clampPrBody(
+        [
+          `Correções de segurança geradas pelo StarGuard (${total} achado(s) em ${prFiles.length} arquivo(s)).`,
+          "",
+          ...prFiles.map((f) => `- \`${f.file}\`: ${f.explanation}`),
+          "",
+          "Revise cada alteração antes de mergear.",
+        ].join("\n")
+      );
 
       const result = await apiPost<BatchPR>("/api/github/pr-batch", {
         repoUrl,
         files: prFiles.map((f) => ({ file: f.file, fixedCode: f.fixedCode })),
-        title: `Correções de segurança StarGuard (${total})`,
+        title: clampPrTitle(`Correções de segurança StarGuard (${total})`),
         body,
         analysisId,
+        ...tokenChoice,
       });
       setPr(result);
       setPrState("done");
@@ -265,7 +389,15 @@ export default function BatchFixModal({
           .flatMap((g) => g.map((v) => v.id))
       );
     } catch (err) {
-      setPrError(err instanceof ApiError ? err.message : "Falha ao abrir o PR.");
+      // Falta de token não é erro a exibir: a tela pede a credencial.
+      if (err instanceof ApiError && err.key === "err.githubTokenRequired") {
+        setNeedToken(err.message);
+      } else {
+        setPrError(err instanceof ApiError ? err.message : "Falha ao abrir o PR.");
+      }
+      // `finally`, e não uma linha por caminho: um `return` dentro do catch já
+      // pulou este reset uma vez e travou os dois botões girando para sempre.
+      // Estado de carregamento precisa morrer em TODA saída.
       setPrState("idle");
     }
   };
@@ -348,7 +480,10 @@ export default function BatchFixModal({
           <button
             type="button"
             className="button ghost small"
-            onClick={() => abortRef.current?.abort()}
+            onClick={() => {
+              cancelRef.current = true;
+              abortRef.current?.abort();
+            }}
           >
             <IconX /> {t("batch.cancel")}
           </button>
@@ -446,16 +581,27 @@ export default function BatchFixModal({
       ) : (
         <div className="batch-footer">
           {prError && <div className="alert error">{prError}</div>}
+          {/* As correções já estão geradas e guardadas; falta a credencial.
+              Pedir aqui evita perder o lote inteiro por um 502 genérico. */}
+          {pedirToken && (
+            <TokenPrompt
+              busy={prState === "loading"}
+              onRetry={(escolha) => void openBatchPR(escolha)}
+            />
+          )}
           {noChangeCount > 0 && !generating && (
             <div className="alert info">
               {t("batch.noChangeCount", { n: noChangeCount })}
             </div>
           )}
-          {repoUrl ? (
+          {/* Com o seletor de token na tela, ele é quem abre o PR. Mostrar
+              também o botão principal deixava DOIS botões fazendo a mesma
+              coisa, um deles sem a credencial escolhida. */}
+          {repoUrl && !pedirToken ? (
             <button
               type="button"
               className="button primary"
-              onClick={openBatchPR}
+              onClick={() => void openBatchPR()}
               disabled={generating || prFiles.length === 0 || prState === "loading"}
               aria-busy={prState === "loading"}
             >
@@ -468,11 +614,11 @@ export default function BatchFixModal({
                 ? t("batch.waiting")
                 : t("batch.openPr", { n: prFiles.length })}
             </button>
-          ) : (
-            <span className="field-hint">
-              {t("fix.needRepo")}
-            </span>
-          )}
+          ) : !repoUrl ? (
+            // Só quando falta o REPOSITÓRIO. Com o seletor de token na tela o
+            // botão some, e mostrar "informe a URL" ali seria mentira.
+            <span className="field-hint">{t("fix.needRepo")}</span>
+          ) : null}
         </div>
       )}
     </Modal>

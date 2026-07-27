@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { Vulnerability, FixResult, PullRequest } from "@/types";
+import type { FixTarget, FixResult, PullRequest } from "@/types";
 import SeverityBadge from "@/components/SeverityBadge";
 import InfoTip from "@/components/InfoTip";
 import Modal from "@/components/Modal";
 import CodeDiff from "@/components/CodeDiff";
+import TokenPrompt, { type TokenChoice } from "@/components/TokenPrompt";
 import { FIX_GUIDE, isGenericSuggestion } from "@/lib/constants";
 import { useT } from "@/lib/i18n";
 import {
@@ -17,7 +18,7 @@ import {
 
 // Instrução default já escrita na textarea ao abrir: a sugestão do scanner
 // (só quando é específica) + a linha-guia, que entra uma única vez.
-function defaultInstructions(vuln: Vulnerability): string {
+function defaultInstructions(vuln: FixTarget): string {
   const sug = vuln.suggestion?.trim();
   // A recomendação enriquecida é sempre mais útil que a do scanner.
   const melhor = vuln.explain?.howToFix?.trim() || sug;
@@ -38,8 +39,11 @@ export default function FixModal({
   prState,
   pr,
   canOpenPR,
+  needToken,
+  onRetryWithToken,
+  repoIsPrivate,
 }: {
-  vuln: Vulnerability;
+  vuln: FixTarget;
   fix: FixResult | null;
   loading: boolean;
   error?: string | null;
@@ -49,6 +53,11 @@ export default function FixModal({
   prState: "idle" | "loading" | "done";
   pr: PullRequest | null;
   canOpenPR: boolean;
+  /** Mensagem do servidor quando o PR falhou por falta de token. */
+  needToken?: string | null;
+  onRetryWithToken?: (choice: TokenChoice) => void;
+  /** Privado exige token do usuário — o seletor aparece antes do clique. */
+  repoIsPrivate?: boolean | null;
 }) {
   const t = useT();
   const [instructions, setInstructions] = useState(() => defaultInstructions(vuln));
@@ -193,6 +202,12 @@ export default function FixModal({
                 </a>
               </span>
             </div>
+          ) : (needToken !== null && needToken !== undefined) || repoIsPrivate ? (
+            // A correção já está gerada e guardada — falta só a credencial.
+            <TokenPrompt
+              busy={prState === "loading"}
+              onRetry={onRetryWithToken!}
+            />
           ) : (
             <div className="vuln-actions">
               <button
