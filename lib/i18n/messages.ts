@@ -96,7 +96,7 @@ export const PT_BR = {
   "tab.overview": "Visão geral",
   "tab.fixes": "Correções",
   "tab.deps": "Dependências",
-  "tab.threats": "Ameaças",
+  "tab.requirements": "Requisitos",
   "tab.skills": "Skills",
   "tab.ariaLabel": "Seções da análise",
 
@@ -473,9 +473,12 @@ export const PT_BR = {
   "help.deps": "Dependências (SCA)",
   "help.depsText":
     "Pacotes com CVE conhecido detectados pela análise de composição de software. A correção é atualizar para a versão corrigida indicada.",
-  "help.threats": "Modelagem de ameaças",
+  "help.threats": "Ameaças e requisitos",
+  // A descrição antiga ("levanta ameaças plausíveis…") deixava a aba parecer um
+  // segundo lugar onde se lê achado. Ela não é: é o CONTRATO que a Fase 3
+  // confere. Quem procura problema tem de ser mandado para Correções.
   "help.threatsText":
-    "A IA analisa o contexto do sistema e levanta ameaças plausíveis (STRIDE, LGPD, OWASP) e os requisitos técnicos que as mitigam.",
+    "O que a IA entendeu do contexto que você descreveu: ameaças plausíveis (STRIDE, LGPD, OWASP) e os requisitos técnicos que as mitigam. Esta lista não traz problemas do seu código — é o contrato contra o qual a Fase 3 confere o repositório. As regras violadas aparecem em Correções, marcadas com o id do requisito (R-01, R-02…); as que não deu para verificar no código ficam listadas lá embaixo, na mesma aba. Vale a leitura: se os requisitos saírem genéricos, é sinal de que o contexto do sistema precisa de mais detalhe.",
   "help.skills": "Validação de skills",
   "help.skillsText":
     "Cada skill/prompt é checada contra prompt-injection, exfiltração de dados e desvio de política. O veredito indica se é seguro usá-la.",
@@ -498,7 +501,7 @@ export const PT_BR = {
   "results.goToFixes": "Ir para correções",
   "results.rowFixes": "Correções de segurança",
   "results.rowDeps": "Dependências (SCA)",
-  "results.rowThreats": "Ameaças",
+  "results.rowRequirements": "Requisitos",
   "results.rowSkills": "Skills",
   "results.nFixes": "{n} correção(ões)",
   "results.nCves": "{n} com CVE",
@@ -841,7 +844,7 @@ const EN: Record<MessageKey, string> = {
   "tab.overview": "Overview",
   "tab.fixes": "Fixes",
   "tab.deps": "Dependencies",
-  "tab.threats": "Threats",
+  "tab.requirements": "Requirements",
   "tab.skills": "Skills",
   "tab.ariaLabel": "Analysis sections",
 
@@ -1197,9 +1200,9 @@ const EN: Record<MessageKey, string> = {
   "help.deps": "Dependencies (SCA)",
   "help.depsText":
     "Packages with a known CVE detected by software composition analysis. The fix is upgrading to the indicated fixed version.",
-  "help.threats": "Threat modeling",
+  "help.threats": "Threats and requirements",
   "help.threatsText":
-    "The AI analyzes the system context and raises plausible threats (STRIDE, GDPR/LGPD, OWASP) and the technical requirements that mitigate them.",
+    "What the AI understood from the context you described: plausible threats (STRIDE, GDPR/LGPD, OWASP) and the technical requirements that mitigate them. This list holds no problems from your code — it is the contract Phase 3 checks the repository against. Violated rules show up under Fixes, tagged with the requirement id (R-01, R-02…); the ones that could not be verified in the code are listed at the bottom of that same tab. Worth reading: generic requirements are a sign the system context needs more detail.",
   "help.skills": "Skill validation",
   "help.skillsText":
     "Each skill/prompt is checked against prompt injection, data exfiltration and policy bypass. The verdict tells whether it is safe to use.",
@@ -1221,7 +1224,7 @@ const EN: Record<MessageKey, string> = {
   "results.goToFixes": "Go to fixes",
   "results.rowFixes": "Security fixes",
   "results.rowDeps": "Dependencies (SCA)",
-  "results.rowThreats": "Threats",
+  "results.rowRequirements": "Requirements",
   "results.rowSkills": "Skills",
   "results.nFixes": "{n} fix(es)",
   "results.nCves": "{n} with CVE",
@@ -1546,7 +1549,7 @@ const ES: Record<MessageKey, string> = {
   "tab.overview": "Vista general",
   "tab.fixes": "Correcciones",
   "tab.deps": "Dependencias",
-  "tab.threats": "Amenazas",
+  "tab.requirements": "Requisitos",
   "tab.skills": "Skills",
   "tab.ariaLabel": "Secciones del análisis",
 
@@ -1904,9 +1907,9 @@ const ES: Record<MessageKey, string> = {
   "help.deps": "Dependencias (SCA)",
   "help.depsText":
     "Paquetes con CVE conocido detectados por el análisis de composición de software. La corrección es actualizar a la versión corregida indicada.",
-  "help.threats": "Modelado de amenazas",
+  "help.threats": "Amenazas y requisitos",
   "help.threatsText":
-    "La IA analiza el contexto del sistema y plantea amenazas plausibles (STRIDE, RGPD/LGPD, OWASP) y los requisitos técnicos que las mitigan.",
+    "Lo que la IA entendió del contexto que describiste: amenazas plausibles (STRIDE, RGPD/LGPD, OWASP) y los requisitos técnicos que las mitigan. Esta lista no trae problemas de tu código — es el contrato con el que la Fase 3 comprueba el repositorio. Las reglas incumplidas aparecen en Correcciones, marcadas con el id del requisito (R-01, R-02…); las que no se pudieron verificar en el código quedan listadas al final de esa misma pestaña. Vale la pena leerla: unos requisitos genéricos indican que el contexto del sistema necesita más detalle.",
   "help.skills": "Validación de skills",
   "help.skillsText":
     "Cada skill/prompt se comprueba contra prompt injection, exfiltración de datos y evasión de política. El veredicto indica si es seguro usarla.",
@@ -1929,7 +1932,7 @@ const ES: Record<MessageKey, string> = {
   "results.goToFixes": "Ir a las correcciones",
   "results.rowFixes": "Correcciones de seguridad",
   "results.rowDeps": "Dependencias (SCA)",
-  "results.rowThreats": "Amenazas",
+  "results.rowRequirements": "Requisitos",
   "results.rowSkills": "Skills",
   "results.nFixes": "{n} corrección(es)",
   "results.nCves": "{n} con CVE",

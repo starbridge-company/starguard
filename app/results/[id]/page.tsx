@@ -27,6 +27,7 @@ import {
   lockfileWarning,
 } from "@/lib/deps-fix";
 import { Segmented, SearchBox } from "@/components/filters";
+import { buildResultsTabs, type TabId } from "@/lib/results-tabs";
 import { useApiError, useT, type MessageKey } from "@/lib/i18n";
 
 import { SEVERITY_ORDER } from "@/types";
@@ -54,8 +55,6 @@ import {
 
 /** Cards renderizados por vez na aba de correções. */
 const PAGE = 25;
-
-type TabId = "overview" | "code" | "deps" | "threats" | "skills";
 
 // Nome legível da fase, reaproveitando as chaves do PipelineStepper.
 const PHASE_NAME: Record<PhaseKey, MessageKey> = {
@@ -537,25 +536,12 @@ export default function ResultsPage() {
     return null;
   };
 
-  const tabs: SectionTab[] = [
-    { id: "overview", label: t("tab.overview") },
-    {
-      id: "code",
-      label: t("tab.fixes"),
-      count: corrections.length,
-      tone: criticalCount > 0 ? "danger" : "accent",
-    },
-    {
-      id: "deps",
-      label: t("tab.deps"),
-      count: deps.length,
-      tone: deps.some((d) => d.severity === "critical" || d.severity === "high")
-        ? "warning"
-        : "default",
-    },
-    { id: "threats", label: t("tab.threats"), count: plan?.threats.length ?? 0 },
-    { id: "skills", label: t("tab.skills"), count: skills.length },
-  ];
+  // A montagem (e a regra de qual aba carrega contador) mora em
+  // `lib/results-tabs.ts`, onde tem teste. Aqui só aplicamos o idioma.
+  const tabs: SectionTab[] = buildResultsTabs({
+    corrections: corrections.length,
+    criticals: criticalCount,
+  }).map(({ labelKey, ...tab }) => ({ ...tab, label: t(labelKey) }));
 
   const overviewRows = [
     {
@@ -577,7 +563,7 @@ export default function ResultsPage() {
     {
       id: "threats" as TabId,
       Icon: IconPlan,
-      label: t("results.rowThreats"),
+      label: t("results.rowRequirements"),
       value: plan
         ? t("results.nThreats", { threats: plan.threats.length, reqs: plan.requirements.length })
         : statusText(job.phases.plan.status),

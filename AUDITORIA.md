@@ -34,7 +34,7 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **Contínuo — Qualidade** | ARQ-01 · ARQ-02 · ARQ-03 · BUG-17 | ✅ **entregue** em 27/07/2026 |
 | **Varredura de pendências** | 18 das 19 pendências abertas | ✅ **resolvidas e verificadas** em 27/07/2026 |
 | **7 — Backlog P1/P2/P3** | SEC-06 · BUG-11 a BUG-22 · ARQ-10 · UX-03 · UX-04 (resto) · UX-07 · UX-08 · UX-10 · UX-11 · UX-12 · UX-13 · UX-19 · PEND-23 | ✅ **entregue** em 27/07/2026 |
-| **8 — Vistoria de idioma** | FEAT-04 (fechamento) · PEND-29 | ✅ **entregue** em 27/07/2026 |
+| **8 — Vistoria de idioma** | FEAT-04 (fechamento) · UX-22 · PEND-29 | ✅ **entregue** em 27/07/2026 |
 | Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-31 | ⬜ a fazer |
 
 <details>
@@ -58,11 +58,42 @@ banco** — ver PEND-30 e PEND-31.
 | `npm run typecheck` | limpo |
 | `npm run lint` | 0 erros; 10 avisos de `set-state-in-effect`, todos **pré-existentes** |
 
-Testes novos: `tests/i18n-server.test.ts` (7), mais os de paridade dos três
-idiomas, varredura de literal por atributo, contrato do `jsonError` e idioma da
-exportação.
+Testes novos: `tests/i18n-server.test.ts` (7) e `tests/results-tabs.test.ts`
+(7), mais os de paridade dos três idiomas, varredura de literal por atributo,
+contrato do `jsonError` e idioma da exportação.
 
 </details>
+
+### UX-22 · A aba "Ameaças" prometia achados e entregava contrato ✅
+**P2 · Esforço P**
+
+> ✅ **Entregue em 27/07/2026.** A aba foi renomeada para **Requisitos**, perdeu
+> o contador e ganhou uma descrição que diz o que ela é.
+
+- **Evidência:** o rótulo "Ameaças" e a descrição *"levanta ameaças plausíveis…"*
+  faziam a aba parecer um segundo lugar onde se lê achado. Não é: ela mostra os
+  **requisitos** que a Fase 1 extraiu do contexto e que a Fase 3 usa como
+  contrato ([review.ts:253](lib/review.ts#L253) injeta a lista no prompt; o foco
+  nº 1 da revisão é conferir o código contra ela). As **violações** aparecem em
+  Correções, com o selo `R-xx` no card. Confundir as duas coisas custa caro num
+  produto de segurança: quem procurava problema abria a aba errada.
+- **O contador era o pior dos dois:** `Ameaças 12` ao lado de `Correções 3` dá
+  peso visual a 12 hipóteses **não verificadas** sobre 3 achados exploráveis —
+  o oposto do que a própria revisão exige de si (*"nada de vulnerabilidade
+  teórica"*, [review.ts:47](lib/review.ts#L47)). Contador agora só em
+  Correções, que é de onde sai o Pull Request.
+- **Entregue:** rótulo `tab.requirements` nos três idiomas; descrição reescrita
+  dizendo explicitamente que a lista **não** traz problemas do código e para
+  onde ir; contadores removidos de Dependências, Requisitos e Skills; regra
+  extraída para [lib/results-tabs.ts](lib/results-tabs.ts) — antes ela vivia
+  inline num componente de 1200 linhas e só o navegador a alcançava.
+- **Ordem mantida** (Visão geral · Correções · Dependências · Requisitos ·
+  Skills), e agora travada em teste: trabalho primeiro (as duas abas que geram
+  PR), leitura depois. Bate com o subtítulo e com o CTA, que mandam começar
+  pelas correções.
+- **Aceite:** abrir a aba e entender, sem ler o código, que aquilo é o que será
+  conferido — e não o que foi encontrado. ⚠️ **Não verificado em navegador** —
+  ver PEND-29.
 
 <details>
 <summary><strong>Como o Sprint 7 foi validado</strong></summary>
