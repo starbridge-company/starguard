@@ -14,7 +14,7 @@
 // de vista, e falha transitória volta sozinha (só vira erro visível depois de
 // algumas seguidas).
 // ============================================================
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiGet, ApiError, isAbortError } from "@/lib/client";
 import { useT } from "@/lib/i18n";
 import type { Job } from "@/types";

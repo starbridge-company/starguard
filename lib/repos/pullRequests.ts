@@ -2,7 +2,7 @@
 // Repositório de Pull Requests abertos (rastreamento). NODE-ONLY.
 // ============================================================
 import "server-only";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { analyses, pullRequests, type PullRequestRow } from "@/db/schema";
 import { paged, type PageParams, type Paged } from "@/lib/pagination";

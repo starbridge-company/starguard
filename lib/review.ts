@@ -163,6 +163,7 @@ async function collectSourceFiles(
     }
     if (content.length > perFileBytes) {
       content = content.slice(0, perFileBytes) + "\n/* … [truncado pelo StarGuard] … */";
+      truncated++; // alimenta a cobertura exibida na tela (AUDITORIA.md#UX-06)
     }
     files.push({ path: c.path, content });
     used += content.length;

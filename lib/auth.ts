@@ -210,7 +210,7 @@ export function audit(
   ipHash?: string
 ): void {
   // Log estruturado, nunca senhas/tokens.
-  console.log(`[audit] ${event}`, JSON.stringify(meta));
+  console.info(`[audit] ${event}`, JSON.stringify(meta));
   void auditRepo.log(event, meta, userId ?? (meta.userId as string | undefined), ipHash);
 }
 

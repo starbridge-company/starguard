@@ -267,7 +267,7 @@ export async function runJob(id: string): Promise<void> {
           .persistScanFindings(id, userId, raw.repoUrl || null, scanResult)
           .then((herdados) => {
             if (herdados > 0) {
-              console.log(`[job ${id}] ${herdados} achado(s) com estado herdado`);
+              console.info(`[job ${id}] ${herdados} achado(s) com estado herdado`);
             }
           })
           .catch((e) => console.error(`[job ${id}] falha ao gravar achados`, e));

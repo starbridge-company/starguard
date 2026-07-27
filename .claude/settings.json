@@ -51,7 +51,11 @@
       "Bash(node -)",
       "Bash(xargs -I{} echo \"{} pendências abertas\")",
       "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/marcar6.mjs\")",
-      "Bash(node -pe \"const p=require\\('./package.json'\\); Object.entries\\(p.devDependencies\\).filter\\(\\([k]\\)=>/vitest|eslint/.test\\(k\\)\\).map\\(\\([k,v]\\)=>k+' '+v\\).join\\('\\\\n'\\)\")"
+      "Bash(node -pe \"const p=require\\('./package.json'\\); Object.entries\\(p.devDependencies\\).filter\\(\\([k]\\)=>/vitest|eslint/.test\\(k\\)\\).map\\(\\([k,v]\\)=>k+' '+v\\).join\\('\\\\n'\\)\")",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(node -pe \"JSON.stringify\\(require\\('./node_modules/eslint-config-next/package.json'\\).exports || require\\('./node_modules/eslint-config-next/package.json'\\).main, null, 1\\)\")",
+      "Bash(node \"C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/marcar8.mjs\")"
     ]
   }
 }

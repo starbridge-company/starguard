@@ -31,7 +31,37 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **4 — Interface** | UX-01 · UX-02 · UX-04 · UX-05 · UX-06 | ✅ **entregue e testado em navegador** em 27/07/2026 |
 | **5 — Descrições** | FEAT-03 · ARQ-11 | ✅ **entregue e testado em navegador** em 27/07/2026 |
 | **6 — Idioma** | FEAT-04 | 🟡 **fundação entregue e testada; extração parcial** em 27/07/2026 |
-| 7 em diante | ver plano de execução no fim | ⬜ a fazer |
+| **Contínuo — Qualidade** | ARQ-01 · ARQ-02 · ARQ-03 · BUG-17 | ✅ **entregue** em 27/07/2026 |
+| 7 em diante | backlog P2/P3 do documento + pendências | ⬜ a fazer |
+
+<details>
+<summary><strong>Como a fase Contínuo foi validada</strong></summary>
+
+| Verificação | Resultado |
+|---|---|
+| `npm test` | **59 testes em 7 arquivos**, 2,7 s, sem banco nem rede |
+| `npm run lint` | **0 erros** (11 avisos da regra nova do React — ver PEND-20) |
+| `npm run typecheck` | limpo |
+| Cobertura dos módulos testados | `catalog` 100% · `fingerprint` 100% · `redact` 100% · `validation` 93% · `diff` 93% · `ratelimit` 88% · `pagination` 88% · `parsers` 76% |
+
+**Cada teste cita o item da auditoria que protege** — `redact · SEC-01`,
+`rateLimit · BUG-02`, `clientIp · SEC-04`, `fingerprint · FEAT-01`,
+`diff · UX-02`, `step4Schema · BUG-06`, `catálogo · FEAT-03`,
+`translate · FEAT-04`. Regressão em qualquer um deles aparece pelo nome.
+
+**Dois defeitos encontrados pela própria montagem da fase:**
+- `prefer-const` denunciou que o contador `truncated` da cobertura da revisão
+  por IA (UX-06) **nunca era incrementado** — o `truncated++` se perdeu numa
+  edição do Sprint 4 e a tela sempre reportaria zero arquivos truncados.
+- `npm run lint` chamava `next lint`, removido no Next 16 (BUG-17): o comando
+  simplesmente não existia.
+
+**Ferramental:** vitest (unidade), ESLint 9 com flat config nativo do
+`eslint-config-next` (o FlatCompat não sobrevive ao ESLint 10), GitHub Actions
+com `typecheck + lint + testes + build da imagem` e um passo de **dogfooding**
+rodando o Opengrep sobre o próprio repositório. As actions do workflow estão
+fixadas por SHA — que é exatamente o achado que este produto reporta.
+</details>
 
 <details>
 <summary><strong>Como o Sprint 6 foi validado</strong> (Chromium com <code>Accept-Language: en-US</code>)</summary>
@@ -216,6 +246,9 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-17** | FEAT-04 (S6) | Mensagens de erro da API em pt-BR fixo | `jsonError(401, "Não autenticado.")` e afins. O desenho previsto é devolver uma CHAVE e traduzir no cliente. |
 | **PEND-18** | FEAT-04/03 (S6) | Catálogo só existe em pt-BR | `lookupCatalog` devolve `undefined` para outros idiomas de propósito (texto em português para quem pediu inglês seria pior). Em inglês, os achados caem na IA ou ficam com o texto original da ferramenta. Traduzir as 38 entradas devolve o custo zero também para o inglês. |
 | **PEND-19** | FEAT-04 (S6) | Idioma vive só no cookie do navegador | Não há `users.locale`: entrar de outra máquina volta ao padrão. Uma coluna + `/api/me` resolveria. |
+| **PEND-20** | ARQ-02 | 11 avisos de `react-hooks/set-state-in-effect` | Regra nova do React Compiler sobre o padrão "efeito busca dados e chama setState". Os 11 pontos funcionam e estão verificados em navegador; refatorar todos agora arriscaria regressão sem ganho. Deixada como AVISO, não erro. |
+| **PEND-21** | ARQ-01 | Cobertura só dos módulos puros | 59 testes cobrem `lib/` sem banco. `lib/repos/**`, rotas de API e componentes React não têm teste de unidade — dependem de Postgres e de ambiente de render. Um teste de integração com Postgres em container fecharia a maior parte. |
+| **PEND-22** | ARQ-03 | Ponta a ponta fora do CI | As 3 suítes de `e2e/` rodam sob demanda: exigem Postgres, build da imagem e rede para o GitHub. Colocá-las no CI traria instabilidade externa para o sinal de build. |
 | **PEND-12** | FEAT-01 (S3) | Rota `step3-scan` avulsa não persiste | Só o fluxo completo (`/api/analyze` → `runJob`) grava achados. A rota de scan isolada continua devolvendo o resultado sem criar estado. |
 
 ---
@@ -765,6 +798,8 @@ create table starguard.finding_fixes (
 ### BUG-17 · `npm run lint` não existe mais ✅
 **P3 · Esforço P** — [package.json:13](package.json#L13) chama `next lint`, **removido no Next 16** (confirmado: `next lint --help` não reconhece o comando). Não há `.eslintrc*` nem `eslint.config.*`. Corrigir: adicionar `eslint` + `eslint-config-next` com flat config e trocar o script para `eslint .`.
 
+> ✅ **Entregue em 27/07/2026.** `npm run lint` passou a chamar `eslint .`; `next lint` não existe mais no Next 16.
+
 ### BUG-18 · `PRIVATE_HOST_RE` é código morto ✅
 **P3 · Esforço P** — [lib/validation.ts:37](lib/validation.ts#L37) testa IP privado **depois** de já ter exigido `host === "github.com"` ([:36](lib/validation.ts#L36)). Nunca pode ser verdadeiro. Inofensivo, mas passa falsa sensação de proteção anti-SSRF; ou remover, ou reposicionar caso a allowlist deixe de ser fixa.
 
@@ -787,11 +822,17 @@ create table starguard.finding_fixes (
 ### ARQ-01 · Nenhum teste automatizado ✅
 **Esforço G** — sem Jest/Vitest/Playwright e sem `__tests__`. Num produto de segurança, o mínimo: testes unitários de `parsers`, `validation`, `ratelimit`, `crypto`, `jwt`; testes de integração das rotas de auth (incluindo os cenários de `SEC-02`/`SEC-03`); e um teste de fumaça ponta a ponta. **Comece pelos bugs deste documento** — cada correção entra com o teste que a trava.
 
+> ✅ **Entregue em 27/07/2026.** 59 testes de unidade (vitest) em `tests/`, cada um citando o item da auditoria que protege. Cobertura: catálogo/fingerprint/redação 100%, validação e diff 93%, rate limit e paginação 88%. As 3 suítes de navegador foram promovidas para `e2e/` com README de execução.
+
 ### ARQ-02 · Sem ESLint configurado ✅
 **Esforço P** — ver `BUG-17`. Adicionar `eslint-plugin-jsx-a11y` (pegaria boa parte do bloco de UX) e `eslint-plugin-security`.
 
+> ✅ **Entregue em 27/07/2026.** ESLint 9 com flat config nativo do `eslint-config-next` — 0 erros. `no-explicit-any` como erro e `jsx-a11y` incluído.
+
 ### ARQ-03 · Sem CI ✅
 **Esforço M** — não há `.github/workflows`. Mínimo: `typecheck` + `lint` + testes + `docker build` em cada PR. E, como *dogfooding* já previsto no README, rodar o próprio StarGuard sobre o repositório.
+
+> ✅ **Entregue em 27/07/2026.** `.github/workflows/ci.yml` com typecheck + lint + testes + build da imagem, mais um passo de dogfooding rodando o Opengrep sobre o próprio repositório. Actions fixadas por SHA.
 
 ### ARQ-04 · Jobs em memória, sem fila 💡
 **Esforço G** — causa raiz de `BUG-11`. Com o Render reiniciando a cada deploy, análises longas morrem. Solução proporcional ao MVP: tabela `job_queue` no Postgres (`SELECT ... FOR UPDATE SKIP LOCKED`), com `heartbeat` e retomada na inicialização. Evita introduzir Redis/BullMQ agora.

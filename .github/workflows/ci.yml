@@ -1,0 +1,72 @@
+# CI — AUDITORIA.md#ARQ-03
+#
+# Roda o que é rápido e determinístico a cada push: tipos, lint, testes de
+# unidade e o build da imagem. O ponta a ponta (e2e/) fica de fora de propósito
+# — precisa de Postgres, build completo e rede para o GitHub, o que traria
+# instabilidade externa para dentro do sinal de build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      # Fixado por SHA, não por tag: é exatamente o achado que o próprio
+      # StarGuard reporta (third-party-action-not-pinned-to-commit-sha).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tipos
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes de unidade
+        run: npm test
+
+  imagem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build da imagem de produção
+        # Sem push: aqui só confirmamos que a imagem monta — incluindo o
+        # download dos scanners e o filtro do ruleset.
+        run: docker build -t starguard:ci .
+
+  # Dogfooding: o StarGuard analisando o próprio repositório. Só roda quando há
+  # chave configurada; sem ela o passo é pulado em vez de falhar.
+  dogfooding:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Opengrep no próprio código
+        run: |
+          curl -fsSL -o /usr/local/bin/opengrep \
+            https://github.com/opengrep/opengrep/releases/latest/download/opengrep_manylinux_x86
+          chmod +x /usr/local/bin/opengrep
+          git clone --depth 1 https://github.com/opengrep/opengrep-rules.git /tmp/rules
+          find /tmp/rules -type f \( -name '*.yaml' -o -name '*.yml' \) \
+            ! -exec grep -qE '^rules:' {} \; -delete
+          LANG=C.UTF-8 opengrep --config /tmp/rules --json --quiet --timeout 0 . \
+            > opengrep.json || true
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync('opengrep.json','utf8'));
+            const graves = (r.results||[]).filter(x =>
+              ['ERROR','CRITICAL','HIGH'].includes((x.extra?.severity||'').toUpperCase()));
+            console.log(\`achados: \${(r.results||[]).length} · graves: \${graves.length}\`);
+            for (const g of graves.slice(0, 20))
+              console.log(' -', g.path + ':' + g.start.line, g.check_id.split('.').pop());
+            if (graves.length) process.exit(1);
+          "

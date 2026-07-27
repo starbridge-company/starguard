@@ -20,7 +20,6 @@ import { useT } from "@/lib/i18n";
 
 import { SEVERITY_ORDER } from "@/types";
 import type {
-  Job,
   Vulnerability,
   FixResult,
   PullRequest,
