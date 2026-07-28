@@ -19,7 +19,7 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **Prefixo** | `BUG` lógica · `SEC` segurança · `UX` interface · `FEAT` funcionalidade · `ARQ` arquitetura |
 | **Status** | ✅ confirmado no código · ⚠️ confirmado por leitura, sem execução · 💡 proposta |
 
-**Placar:** 22 bugs · 9 itens de segurança · 21 de UX/UI · 8 features · 11 de arquitetura = **71 itens**.
+**Placar:** 23 bugs · 9 itens de segurança · 21 de UX/UI · 8 features · 11 de arquitetura = **72 itens**.
 
 ## Progresso
 
@@ -35,7 +35,8 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **Varredura de pendências** | 18 das 19 pendências abertas | ✅ **resolvidas e verificadas** em 27/07/2026 |
 | **7 — Backlog P1/P2/P3** | SEC-06 · BUG-11 a BUG-22 · ARQ-10 · UX-03 · UX-04 (resto) · UX-07 · UX-08 · UX-10 · UX-11 · UX-12 · UX-13 · UX-19 · PEND-23 | ✅ **entregue** em 27/07/2026 |
 | **8 — Vistoria de idioma** | FEAT-04 (fechamento) · UX-22 · PEND-29 | ✅ **entregue** em 27/07/2026 |
-| Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-31 | ⬜ a fazer |
+| **Correção pontual** | BUG-23 | ✅ **corrigido e medido em Chromium** em 28/07/2026 — a suíte de `e2e/` pela tela real segue pendente, ver PEND-32 |
+| Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-32 | ⬜ a fazer |
 
 <details>
 <summary><strong>Como o Sprint 8 foi validado</strong></summary>
@@ -365,6 +366,7 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-27** | BUG-12/13/14 | Os três provedores continuam sem chamada real | O retry, o timeout, o `stop_reason` e o `max_completion_tokens` estão cobertos com `fetch` mockado. Nenhuma chave de IA foi usada. O BUG-14 em especial nasceu de um contrato do provedor: só uma chamada real prova que a OpenAI voltou a funcionar. |
 | **PEND-29** | Sprint 8 | Nenhuma tela foi aberta em espanhol | As 583 chaves × 3 idiomas estão travadas por tipo e por teste, mas **paridade de chave não é qualidade de tradução**: quebra de layout por texto mais longo, concordância de gênero e frase que só fica errada em contexto não aparecem em teste de unidade. Abrir o app nos três idiomas e percorrer os fluxos principais; de preferência com revisão de um falante nativo de espanhol. |
 | **PEND-30** | Sprint 8 | O texto gerado por IA em espanhol nunca foi visto | `LOCALE_AI_NAME.es` instrui o modelo a responder em espanhol nas 4 fases (ameaças, skills, enriquecimento, correção). Isso é **instrução a modelo — pedido, não garantia**. Nenhuma chamada real foi feita em espanhol. Rodar uma análise com `sg_locale=es` e conferir que ameaças, explicações e a `explanation` da correção saem no idioma certo. |
+| **PEND-32** | BUG-23 | A suíte `e2e/modal-foco.mjs` não rodou contra a app | O comportamento **foi medido em Chromium**, mas com o `NewUserModal` montado fora do Next por um banco de provas descartável — sem rota, sem sessão e sem banco. A suíte de `e2e/` cobre o mesmo percurso *pela tela real* (login → `/admin/users` → botão → modal) e não pôde rodar: a senha do `admin@starguard.local` no banco configurado não é mais a do `scripts/seed.mjs`. Rodar `node e2e/modal-foco.mjs` com uma credencial válida, ou contra o banco descartável do `e2e/README.md`. Vai junto do PEND-24. |
 | **PEND-31** | Sprint 8 | A troca de `errorKey` não foi exercitada contra rota real | `jsonError(..., null)` para mensagem dinâmica e `useApiError()` na tela estão cobertos por unidade (7 asserções) e pelos testes de rota com repositório mockado. O percurso completo — rota real devolve 409/403, a tela mostra o texto no idioma do usuário — **não rodou**. Vai junto do PEND-24. |
 
 ### Histórico
@@ -1040,6 +1042,60 @@ create table starguard.finding_fixes (
 **P3 · Esforço P** — a coluna `analyses.deleted_at` existe e é filtrada nas consultas, mas **nenhuma rota** exclui uma análise. Ou expor a exclusão (com CSRF e checagem de dono), ou remover a coluna.
 
 > ✅ **Corrigido em 27/07/2026.** A exclusão foi **exposta** — decisão do dono do produto entre as duas saídas do item. `DELETE /api/analyses/:id` com CSRF, checagem de dono (404 para análise alheia, sem confirmar existência) e soft delete idempotente (já excluída devolve 404, não 200 mentindo). Botão com confirmação na listagem e evento `analysis.delete` na auditoria.
+
+### BUG-23 · Não dá para digitar em formulário dentro de modal ✅
+**P0 · Esforço P**
+
+> ⚠️ **Encontrado em uso real em 28/07/2026**, relatado por quem tentou criar um
+> usuário: *"não consigo digitar, quando digito ele seleciona o pop-up"*.
+
+[components/Modal.tsx:48-90](components/Modal.tsx#L48-L90) — o efeito que trava a
+rolagem, põe o foco inicial e devolve o foco ao desmontar declarava
+`[requestClose]` como dependência. `requestClose` é um `useCallback` que depende
+de `confirmClose`, e os **três** modais consumidores passam `confirmClose` como
+arrow inline — identidade nova a cada render.
+
+A cadeia, uma tecla por vez:
+
+1. a pessoa digita um caractere → `setName` → `NewUserModal` renderiza de novo;
+2. `confirmClose` muda de identidade → `requestClose` muda → o efeito remonta;
+3. a limpeza chama `restoreTo.current.focus()` — o foco sai do modal;
+4. o corpo do efeito foca `querySelector(FOCUSABLE)`, o **primeiro** focável em
+   ordem de documento. No cabeçalho está o `InfoTip`, um `<span tabIndex={0}>`
+   que abre o balão no `onFocus`.
+
+Resultado: um caractere por campo, e o pop-up de ajuda por cima do formulário.
+Atingia `NewUserModal` (nome, e-mail, senha) e `FixModal` (área de instruções);
+o `BatchFixModal` escapava por não ter campo de texto.
+
+**Medido em Chromium** montando o `NewUserModal` real fora do Next (sem banco e
+sem autenticação), digitando `"Maria Silva"` tecla a tecla em `#nu-name`:
+
+| Medida | Código original | Corrigido |
+|---|---|---|
+| Foco ao abrir o modal | `infotip` | `nu-name` |
+| Balão de ajuda aberto ao abrir | 1 | 0 |
+| O que entrou no campo | `"M"` | `"Maria Silva"` |
+| Foco ao terminar de digitar | `infotip` | `nu-name` |
+| `body.style.overflow` após fechar | `""` | `""` |
+| Erro no console | nenhum | nenhum |
+
+A rolagem **não** vazava, ao contrário do que a primeira leitura deste item
+supunha: a limpeza restaura `""` antes de o corpo do efeito recapturar
+`prevOverflow`, então o valor guardado nunca chega a ser `"hidden"`. Fica
+registrado porque a suposição estava neste documento e foi **refutada pela
+medição** — a linha da tabela existe para travar isso.
+
+> ✅ **Corrigido em 28/07/2026.** O efeito foi partido em dois: rolagem, foco
+> inicial e restauração ficam num efeito de **montagem** (`[]`), e só o ouvinte
+> de teclado reassina em `[requestClose]` — trocar ouvinte não mexe em foco nem
+> em rolagem. O foco inicial passou a preferir o primeiro **campo** ao primeiro
+> focável, com recuo para o primeiro focável que não seja `InfoTip`: abrir o
+> modal já não escancara o balão de ajuda. Suíte `e2e/modal-foco.mjs`.
+>
+> Nem o tipo nem o lint pegariam isto: `react-hooks/exhaustive-deps` **pedia**
+> a dependência que causava o bug. É o terceiro defeito do projeto que só o
+> navegador revela, ao lado do `hasFix` e do contador `truncated`.
 
 ---
 

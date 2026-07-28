@@ -38,6 +38,7 @@ npm run test:e2e
 | `sessao.mjs` | **BUG-01** — remove o cookie de acesso mantendo o refresh e confirma a sequência `401 → refresh → repete`, sem cair no login |
 | `fluxo-correcao.mjs` | **UX-01/02/04/05 · FEAT-01/02** — filtros, paginação, estado do achado, diff, cache de correção, acessibilidade do modal, confirmação do lote |
 | `idioma.mjs` | **FEAT-04** — `Accept-Language` na primeira visita, troca de idioma, persistência em cookie |
+| `modal-foco.mjs` | **BUG-23** — digitar tecla a tecla no formulário de novo usuário sem que o foco escape para o `InfoTip`, e rolagem da página destravada ao fechar |
 
 `fluxo-correcao.mjs` e `idioma.mjs` dependem de uma análise existente: ajuste a
 constante `ID` no topo do arquivo para uma análise real da sua base, ou rode o
