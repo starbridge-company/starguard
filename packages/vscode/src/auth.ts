@@ -395,7 +395,20 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
     const res = await fetch(`${base}/api/me`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) throw new Error("Não foi possível ler a conta.");
+    if (!res.ok) {
+      // O status e a chave do erro vão na mensagem de propósito. A versão
+      // anterior dizia só "Não foi possível ler a conta." — e essa frase
+      // escondeu por horas um 401 vindo do MIDDLEWARE, que recusava o Bearer
+      // antes de a rota existir. Um erro de autenticação sem o status é um
+      // beco: não dá para distinguir credencial recusada de rota ausente, de
+      // servidor fora, de cota estourada.
+      const corpo = (await res.json().catch(() => ({}))) as { errorKey?: string };
+      throw new Error(
+        `${t("auth.readAccountFailed")} (HTTP ${res.status}${
+          corpo.errorKey ? ` · ${corpo.errorKey}` : ""
+        })`
+      );
+    }
     const j = (await res.json()) as { id?: string; sub?: string; email?: string };
     return { id: j.id ?? j.sub ?? "desconhecido", email: j.email ?? "conta" };
   }

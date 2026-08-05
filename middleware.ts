@@ -8,6 +8,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifyToken } from "@/lib/jwt";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { API_RATE, COOKIE, ROLES } from "@/lib/config";
+import { credencialDoPedido, decidirAcesso } from "@/lib/auth-edge";
 
 // Rotas públicas (não exigem sessão).
 //
@@ -82,12 +83,30 @@ export async function middleware(req: NextRequest) {
   }
 
   // ---- Sessão ----
-  const token = req.cookies.get(COOKIE.access)?.value;
-  const claims = token ? await verifyToken(token) : null;
-  const authed = !!claims && claims.type === "access" && !!claims.role;
+  //
+  // Cookie E Bearer. O segundo demorou a existir aqui, e a ausência dele foi
+  // um bug caro: a extensão e o CLI levavam 401 na borda, sem nunca chegar à
+  // rota que já sabia tratá-los. Ver `lib/auth-edge.ts`.
+  //
+  // O público do token é o que separa as duas credenciais: cookie de
+  // navegador é `web`, token de cliente é `client`. Um não vale pelo outro,
+  // então um cookie roubado não serve à API de ferramenta e vice-versa.
+  const credencial = credencialDoPedido(
+    req.headers.get("authorization"),
+    req.cookies.get(COOKIE.access)?.value
+  );
+  const claims = credencial
+    ? await verifyToken(credencial.token, credencial.origem === "bearer" ? "client" : "web")
+    : null;
 
-  // Usuário logado tentando abrir /login -> manda pra home.
-  if (authed && pathname === "/login") {
+  // Usuário logado tentando abrir /login -> manda pra home. Só faz sentido
+  // para navegação: quem chega com Bearer não está numa aba de navegador.
+  if (
+    credencial?.origem === "cookie" &&
+    claims?.type === "access" &&
+    !!claims.role &&
+    pathname === "/login"
+  ) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
@@ -95,33 +114,41 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Default-deny.
-  if (!authed) {
-    if (isApi) {
-      return json(401, {
-        error: "Não autenticado.",
-        errorKey: "err.unauthenticated",
-      });
-    }
-    const url = new URL("/login", req.url);
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  // RBAC: a área de governança (/admin e /api/admin) é exclusiva do superadmin.
-  const isAdminArea =
+  const areaAdmin =
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
     pathname.startsWith("/api/admin");
-  if (isAdminArea && claims!.role !== ROLES.superadmin) {
-    if (isApi) {
+
+  const veredito = decidirAcesso({
+    origem: credencial?.origem ?? null,
+    claims,
+    areaAdmin,
+    papelDeAdmin: ROLES.superadmin,
+  });
+
+  if (veredito.acao === "recusar") {
+    if (veredito.motivo === "sem_credencial") {
+      if (isApi) {
+        return json(401, {
+          error: "Não autenticado.",
+          errorKey: "err.unauthenticated",
+        });
+      }
+      const url = new URL("/login", req.url);
+      url.searchParams.set("next", pathname);
+      return NextResponse.redirect(url);
+    }
+    // Proibido. Quem chegou com Bearer recebe JSON mesmo fora de `/api`:
+    // redirecionar uma ferramenta para uma página de login devolve HTML que
+    // ela não sabe ler, e o erro vira "resposta inesperada".
+    if (isApi || credencial?.origem === "bearer") {
       return json(403, { error: "Acesso restrito.", errorKey: "err.forbidden" });
     }
     return NextResponse.redirect(new URL("/", req.url));
   }
 
   const res = NextResponse.next();
-  res.headers.set("x-sg-user", claims!.sub);
+  if (veredito.sub) res.headers.set("x-sg-user", veredito.sub);
   return res;
 }
 
