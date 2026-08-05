@@ -820,6 +820,33 @@ export const PT_BR = {
   // Rótulo de estado fica CURTO de propósito: o VS Code trunca a descrição
   // com reticências, e meia frase cortada não informa nada. O motivo inteiro
   // vai no tooltip, que não trunca.
+  // ---- Painel lateral do VS Code (webview) ----
+  "panel.signInTitle": "StarGuard",
+  "panel.signInSub":
+    "Análise de segurança dentro do editor. Roda no nosso servidor — você não instala scanner nenhum.",
+  "panel.analyzers": "Analisadores",
+  "panel.selectAll": "Tudo",
+  "panel.clearSel": "Limpar",
+  "panel.run": "Analisar",
+  "panel.running": "Analisando…",
+  "panel.nothingSelected": "Escolha ao menos um analisador",
+  "panel.describeSystem": "Descrição do sistema",
+  "panel.describeHelp":
+    "O que o sistema faz, quem usa, e as regras que valem — «só o dono da conta apaga um pedido», «pagamento acima de mil exige aprovação». É isto que as regras de negócio e a modelagem de ameaças verificam contra o código.",
+  "panel.describeEmpty": "vazia",
+  "panel.result": "Resultado",
+  "panel.noFindings": "nada encontrado",
+  "panel.notRunYet": "Escolha os analisadores e clique em Analisar.",
+  "panel.usesAi": "IA",
+  "panel.onServer": "servidor",
+  "panel.unavailable": "indisponível",
+  "panel.fix": "Corrigir",
+  "panel.doctor": "Diagnóstico",
+  "panel.signOut": "Sair",
+  "panel.privacy":
+    "Dependências: só os manifestos saem daqui. Código, regras, ameaças e correções enviam o código-fonte ao nosso servidor, que o descarta ao terminar.",
+  "panel.analyzing": "Analisando {n} de {total}…",
+
   "tree.state.unavailable": "indisponível",
   "tree.state.running": "analisando…",
   "tree.state.clean": "nada encontrado",
@@ -883,11 +910,11 @@ export const PT_BR = {
     "Já existe um hook de pre-commit de outra ferramenta em {path}. Não vou sobrescrevê-lo — chame `starguard scan . --only sast,sca --no-ai` de dentro dele.",
   "cli.hook.notInstalled": "Não há hook do StarGuard instalado aqui.",
 
-  // ---- Consentimento da IA pela conta (o código sai da máquina) ----
-  "consent.title": "Usar a IA pela sua conta StarGuard?",
+  // ---- Consentimento: a análise acontece no SERVIDOR (os arquivos saem) ----
+  "consent.title": "Analisar pelo servidor do StarGuard?",
   "consent.detail":
-    "Trechos do código analisado serão enviados ao servidor do StarGuard e de lá ao modelo de IA. O servidor registra quem pediu, qual repositório e quanto custou — NUNCA o código, que é descartado após a análise. Se preferir que nada saia desta máquina, cancele e configure uma chave de IA local.",
-  "consent.accept": "Enviar e continuar",
+    "Para você não precisar instalar nada, a análise acontece no nosso servidor — e para isso os arquivos saem desta máquina.\n\nDependências: só os manifestos (package.json, lockfiles). Nenhuma linha escrita por você é enviada.\n\nCódigo, regras de negócio, ameaças e correções: o código-fonte é enviado.\n\nO servidor guarda apenas metadado — quem pediu, qual regra, arquivo e linha. Os arquivos vivem num diretório temporário durante a análise e são apagados em seguida.",
+  "consent.accept": "Entendi, pode analisar",
 
   "auth.required":
     "Entre com a sua conta StarGuard para usar a extensão. Se ainda não tem conta, use 'StarGuard: solicitar acesso'.",
@@ -1720,6 +1747,33 @@ const EN: Record<MessageKey, string> = {
   "fix.cannot.noWorkspace": "No access to the code: provide the repository or open the project.",
 
   // ---- VS Code side tree ----
+  // ---- VS Code side panel (webview) ----
+  "panel.signInTitle": "StarGuard",
+  "panel.signInSub":
+    "Security analysis inside the editor. It runs on our server — you install no scanner at all.",
+  "panel.analyzers": "Analyzers",
+  "panel.selectAll": "All",
+  "panel.clearSel": "Clear",
+  "panel.run": "Analyze",
+  "panel.running": "Analyzing…",
+  "panel.nothingSelected": "Pick at least one analyzer",
+  "panel.describeSystem": "System description",
+  "panel.describeHelp":
+    "What the system does, who uses it, and the rules that hold — \"only the account owner deletes an order\", \"payments above one thousand need approval\". This is what business rules and threat modelling check against the code.",
+  "panel.describeEmpty": "empty",
+  "panel.result": "Result",
+  "panel.noFindings": "nothing found",
+  "panel.notRunYet": "Pick the analyzers and click Analyze.",
+  "panel.usesAi": "AI",
+  "panel.onServer": "server",
+  "panel.unavailable": "unavailable",
+  "panel.fix": "Fix",
+  "panel.doctor": "Diagnostics",
+  "panel.signOut": "Sign out",
+  "panel.privacy":
+    "Dependencies: only manifests leave this machine. Code, rules, threats and fixes send the source to our server, which discards it when done.",
+  "panel.analyzing": "Analyzing {n} of {total}…",
+
   "tree.state.unavailable": "unavailable",
   "tree.state.running": "analyzing…",
   "tree.state.clean": "nothing found",
@@ -1779,10 +1833,10 @@ const EN: Record<MessageKey, string> = {
   "cli.hook.notInstalled": "No StarGuard hook installed here.",
 
   // ---- Consent for account AI (code leaves the machine) ----
-  "consent.title": "Use AI through your StarGuard account?",
+  "consent.title": "Analyze on the StarGuard server?",
   "consent.detail":
-    "Snippets of the analyzed code will be sent to the StarGuard server and from there to the AI model. The server records who asked, which repository and the cost — NEVER the code, which is discarded after the analysis. If you prefer nothing to leave this machine, cancel and configure a local AI key.",
-  "consent.accept": "Send and continue",
+    "So that you do not have to install anything, the analysis runs on our server — and for that the files leave this machine.\n\nDependencies: manifests only (package.json, lockfiles). No line you wrote is sent.\n\nCode, business rules, threats and fixes: the source code is sent.\n\nThe server keeps metadata only — who asked, which rule, file and line. The files live in a temporary directory during the analysis and are deleted right after.",
+  "consent.accept": "Understood, go ahead",
 
   "auth.required":
     "Sign in with your StarGuard account to use the extension. If you do not have one yet, run 'StarGuard: request access'.",
@@ -2614,6 +2668,33 @@ const ES: Record<MessageKey, string> = {
   "fix.cannot.noWorkspace": "Sin acceso al código: indica el repositorio o abre el proyecto.",
 
   // ---- Árbol lateral de VS Code ----
+  // ---- Panel lateral de VS Code (webview) ----
+  "panel.signInTitle": "StarGuard",
+  "panel.signInSub":
+    "Análisis de seguridad dentro del editor. Se ejecuta en nuestro servidor — no instalas ningún escáner.",
+  "panel.analyzers": "Analizadores",
+  "panel.selectAll": "Todo",
+  "panel.clearSel": "Limpiar",
+  "panel.run": "Analizar",
+  "panel.running": "Analizando…",
+  "panel.nothingSelected": "Elige al menos un analizador",
+  "panel.describeSystem": "Descripción del sistema",
+  "panel.describeHelp":
+    "Qué hace el sistema, quién lo usa y las reglas que rigen — «solo el dueño de la cuenta borra un pedido», «un pago superior a mil exige aprobación». Esto es lo que las reglas de negocio y el modelado de amenazas contrastan con el código.",
+  "panel.describeEmpty": "vacía",
+  "panel.result": "Resultado",
+  "panel.noFindings": "nada encontrado",
+  "panel.notRunYet": "Elige los analizadores y pulsa Analizar.",
+  "panel.usesAi": "IA",
+  "panel.onServer": "servidor",
+  "panel.unavailable": "no disponible",
+  "panel.fix": "Corregir",
+  "panel.doctor": "Diagnóstico",
+  "panel.signOut": "Salir",
+  "panel.privacy":
+    "Dependencias: solo salen los manifiestos. Código, reglas, amenazas y correcciones envían el código fuente a nuestro servidor, que lo descarta al terminar.",
+  "panel.analyzing": "Analizando {n} de {total}…",
+
   "tree.state.unavailable": "no disponible",
   "tree.state.running": "analizando…",
   "tree.state.clean": "nada encontrado",
@@ -2673,10 +2754,10 @@ const ES: Record<MessageKey, string> = {
   "cli.hook.notInstalled": "No hay ningún hook de StarGuard instalado aquí.",
 
   // ---- Consentimiento de la IA por cuenta (el código sale del equipo) ----
-  "consent.title": "¿Usar la IA con tu cuenta de StarGuard?",
+  "consent.title": "¿Analizar en el servidor de StarGuard?",
   "consent.detail":
-    "Fragmentos del código analizado se enviarán al servidor de StarGuard y de ahí al modelo de IA. El servidor registra quién lo pidió, qué repositorio y cuánto costó — NUNCA el código, que se descarta tras el análisis. Si prefieres que nada salga de este equipo, cancela y configura una clave de IA local.",
-  "consent.accept": "Enviar y continuar",
+    "Para que no tengas que instalar nada, el análisis se ejecuta en nuestro servidor — y para eso los archivos salen de este equipo.\n\nDependencias: solo los manifiestos (package.json, lockfiles). No se envía ninguna línea escrita por ti.\n\nCódigo, reglas de negocio, amenazas y correcciones: se envía el código fuente.\n\nEl servidor guarda solo metadatos — quién lo pidió, qué regla, archivo y línea. Los archivos viven en un directorio temporal durante el análisis y se borran enseguida.",
+  "consent.accept": "Entendido, adelante",
 
   "auth.required":
     "Inicia sesión con tu cuenta de StarGuard para usar la extensión. Si aún no tienes una, usa 'StarGuard: solicitar acceso'.",

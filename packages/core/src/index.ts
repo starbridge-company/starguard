@@ -61,6 +61,15 @@ export {
   type AiTransport,
   type RemoteTransport,
 } from "./ai-transport";
+export {
+  setScanTransport,
+  getScanTransport,
+  usingRemoteScan,
+  RemoteScanError,
+  type ScanTransport,
+  type RemoteScanTransport,
+} from "./scan-transport";
+export { empacotarParaScan, type Pacote, type ArquivoEmpacotado } from "./bundle";
 
 // ---- Repositório remoto ----
 export {

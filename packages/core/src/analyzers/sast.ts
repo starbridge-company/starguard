@@ -14,7 +14,10 @@ import { ScanUnavailable } from "../git";
 import { probeBinary } from "../binaries";
 import { enrichFindings } from "../enrich";
 import { makeCodeFixer } from "../fix/code-fixer";
+import { empacotarParaScan } from "../bundle";
+import { callRemoteScan, getScanTransport, usingRemoteScan } from "../scan-transport";
 import type { Analyzer } from "../contracts";
+import type { Locale } from "../i18n/config";
 import type { Vulnerability } from "../types";
 
 const pExecFile = promisify(execFile);
@@ -62,6 +65,28 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
   }
 }
 
+/**
+ * O mesmo scan, feito pelo servidor.
+ *
+ * Aqui o que viaja é CÓDIGO-FONTE — não tem como ser diferente, é ele que
+ * está sendo analisado. É a diferença em relação ao SCA, que manda só
+ * manifestos, e é por isso que a interface separa os dois na hora de pedir
+ * consentimento.
+ */
+async function sastRemoto(dir: string, locale: Locale): Promise<Vulnerability[]> {
+  const t = getScanTransport();
+  if (t.kind !== "remote") return runSast(dir);
+
+  const pacote = await empacotarParaScan(dir, "sast");
+  if (pacote.files.length === 0) return [];
+  const cru = await callRemoteScan(t, {
+    analyzer: "sast",
+    files: pacote.files,
+    locale,
+  });
+  return (cru ?? []) as Vulnerability[];
+}
+
 export const sastAnalyzer: Analyzer<Vulnerability[]> = {
   id: "sast",
   needs: { workspace: true, ai: false },
@@ -71,6 +96,8 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
   async probe({ hasWorkspace }) {
     if (ENGINES.sast === "none") return { ok: false, reason: "engine_off" };
     if (!hasWorkspace) return { ok: false, reason: "no_workspace" };
+    // No modo remoto quem tem o binário é o SERVIDOR. Ver `scan-transport.ts`.
+    if (usingRemoteScan()) return { ok: true, detail: "servidor" };
     const bin = sastBinary()!;
     const r = await probeBinary(bin);
     // O motivo carrega o NOME do binário: "instale o opengrep" é acionável,
@@ -82,8 +109,10 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
 
   async run(ctx) {
     const dir = ctx.workspace!.root;
-    ctx.report?.(ENGINES.sast);
-    const achados = await runSast(dir);
+    ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sast);
+    const achados = usingRemoteScan()
+      ? await sastRemoto(dir, ctx.locale)
+      : await runSast(dir);
     // Descrições legíveis no idioma de quem pediu. O catálogo local resolve a
     // maioria sem custo; a IA entra em lote só no que sobra, e nunca lança.
     // Ver AUDITORIA.md#FEAT-03.

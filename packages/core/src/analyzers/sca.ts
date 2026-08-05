@@ -14,7 +14,10 @@ import { ScanUnavailable } from "../git";
 import { probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
+import { empacotarParaScan } from "../bundle";
+import { callRemoteScan, getScanTransport, usingRemoteScan } from "../scan-transport";
 import type { Analyzer } from "../contracts";
+import type { Locale } from "../i18n/config";
 import type { DependencyVuln } from "../types";
 
 const pExecFile = promisify(execFile);
@@ -59,6 +62,33 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
   }
 }
 
+/**
+ * O mesmo scan, feito pelo servidor.
+ *
+ * Manda só MANIFESTOS: o Trivy resolve CVE a partir da árvore declarada de
+ * dependências e não olha o seu código. São alguns kilobytes, e nenhuma linha
+ * escrita por você sai da máquina — o que faz do SCA remoto a opção sem custo
+ * de privacidade.
+ */
+async function scaRemoto(dir: string, locale: Locale): Promise<DependencyVuln[]> {
+  const t = getScanTransport();
+  if (t.kind !== "remote") return runSca(dir);
+
+  const pacote = await empacotarParaScan(dir, "sca");
+  if (pacote.files.length === 0) {
+    // Sem manifesto não há o que resolver. Devolver vazio é correto e é
+    // diferente de falhar: o projeto pode simplesmente não declarar
+    // dependências de um jeito que o Trivy leia.
+    return [];
+  }
+  const cru = await callRemoteScan(t, {
+    analyzer: "sca",
+    files: pacote.files,
+    locale,
+  });
+  return (cru ?? []) as DependencyVuln[];
+}
+
 export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   id: "sca",
   needs: { workspace: true, ai: false, binary: "trivy" },
@@ -66,6 +96,10 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   async probe({ hasWorkspace }) {
     if (ENGINES.sca === "none") return { ok: false, reason: "engine_off" };
     if (!hasWorkspace) return { ok: false, reason: "no_workspace" };
+    // No modo remoto o binário que importa é o do SERVIDOR. Exigir um aqui
+    // faria o analisador aparecer indisponível justamente para quem escolheu
+    // não instalar nada — ver `scan-transport.ts`.
+    if (usingRemoteScan()) return { ok: true, detail: "servidor" };
     const r = await probeBinary(BIN.trivy);
     return r.present
       ? { ok: true, detail: r.version }
@@ -73,8 +107,10 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   },
 
   async run(ctx) {
-    ctx.report?.(ENGINES.sca);
-    const deps = await runSca(ctx.workspace!.root);
+    ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sca);
+    const deps = usingRemoteScan()
+      ? await scaRemoto(ctx.workspace!.root, ctx.locale)
+      : await runSca(ctx.workspace!.root);
     // Dependência não passa por IA: o texto é montado por template — o Trivy
     // já diz o pacote, a versão instalada e a que corrige. Ver o princípio do
     // CLAUDE.md ("resolva pelo catálogo antes de chamar a IA").

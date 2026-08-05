@@ -26,22 +26,29 @@ Os achados vão para o painel **Problemas**, com `source: starguard/<analisador>
 IA**, que mostra o **diff antes de gravar**. Nada é escrito até você confirmar.
 
 Analisador que não pode rodar **não some da lista**: fica desabilitado com o
-motivo no tooltip. Nunca confundir "não encontrou nada" com "não procurou".
+motivo escrito no cartão. Nunca confundir "não encontrou nada" com "não
+procurou".
 
 ## Comece aqui
 
 1. Instale e abra o painel **StarGuard** na barra lateral
 2. **Entrar** → o login acontece no navegador, na tela do StarGuard
-3. ▶ em qualquer analisador
+3. Marque os analisadores que quiser — **quantos quiser de uma vez** — e clique
+   em **Analisar**
 
-Os analisadores de código e dependências usam o **Opengrep/Semgrep** e o
-**Trivy** instalados na sua máquina. Rode **StarGuard: diagnóstico** para ver o
-que está disponível e o que falta.
+**Você não instala scanner nenhum.** O Opengrep e o Trivy rodam no servidor da
+Starbridge; a extensão manda os arquivos e recebe os achados. Rode
+**StarGuard: diagnóstico** para ver o estado da conta e dos analisadores.
 
 ## Privacidade — o que sai da sua máquina
 
-**Código e dependências:** os scanners rodam **localmente**, com binários seus.
-Nada sai daqui.
+**Dependências:** só os **manifestos** (`package.json`, lockfiles) são enviados.
+O Trivy resolve CVE a partir da árvore declarada e não olha o seu código —
+nenhuma linha escrita por você sai da máquina.
+
+**Código:** o código-fonte é enviado ao servidor, que roda o scanner e o
+descarta. É o preço de não precisar instalar nada, e a extensão **pergunta uma
+vez** antes da primeira vez.
 
 **Regras de negócio, ameaças e correções:** usam IA. Trechos do código
 analisado são enviados ao servidor da Starbridge e, dele, ao provedor de
@@ -76,7 +83,7 @@ Funciona em **Remote SSH** e **Codespaces**.
 
 | Comando | O que faz |
 |---|---|
-| `StarGuard: analisar tudo` | roda os analisadores habilitados |
+| `StarGuard: analisar tudo` | roda os analisadores marcados no painel |
 | `StarGuard: analisar…` | escolhe um da lista |
 | `StarGuard: validar a skill aberta` | o arquivo do editor é a skill |
 | `StarGuard: corrigir com IA` | lâmpada no achado; mostra o diff antes |
@@ -88,14 +95,13 @@ Funciona em **Remote SSH** e **Codespaces**.
 
 | Chave | Padrão | Para quê |
 |---|---|---|
-| `starguard.analyzers.enabled` | `["sast","sca"]` | o que "analisar tudo" roda |
-| `starguard.semgrepPath` · `starguard.trivyPath` | PATH | caminho dos executáveis |
+| `starguard.analyzers.enabled` | `["sast","sca"]` | quais já vêm marcados |
 | `starguard.locale` | `pt-BR` | idioma dos achados (pt-BR, en, es) |
-| `starguard.systemDescription` | — | usada por **regras de negócio** e ameaças |
+| `starguard.systemDescription` | — | usada por **regras de negócio** e ameaças; dá para escrevê-la no próprio painel |
+| `starguard.semgrepPath` · `starguard.trivyPath` | — | opcional: scanner local, para quem prefere não enviar arquivo nenhum |
 | `starguard.server` | — | troque apenas se a sua equipe hospeda a própria instância |
 
-O padrão traz só os dois analisadores que **não custam IA**; os outros continuam
-disponíveis um a um pela árvore.
+Já vêm marcados os dois que **não custam IA**; os outros são um clique no cartão.
 
 ## Limitações — leia antes de confiar
 

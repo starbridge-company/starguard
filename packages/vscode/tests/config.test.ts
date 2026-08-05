@@ -86,12 +86,12 @@ describe("o servidor bate entre o código e o manifesto", () => {
 
 describe("a extensão tem lugar próprio na barra lateral", () => {
   // Nasceu de um caso REAL: a v0.1.0 declarava `views: { explorer: [...] }`, o
-  // que põe a árvore como uma SEÇÃO dentro do Explorer, abaixo de Outline e
+  // que põe a view como uma SEÇÃO dentro do Explorer, abaixo de Outline e
   // Timeline. Não há ícone na barra de atividades, e quem instala procura ali
   // — então a extensão simplesmente "não aparece", sem erro nenhum.
   const c = manifesto.contributes as {
     viewsContainers?: { activitybar?: Array<{ id: string; icon: string }> };
-    views: Record<string, Array<{ id: string }>>;
+    views: Record<string, Array<{ id: string; type?: string }>>;
   };
 
   it("tem contêiner PRÓPRIO na barra de atividades", () => {
@@ -101,18 +101,21 @@ describe("a extensão tem lugar próprio na barra lateral", () => {
   });
 
   it("o ícone do contêiner é SVG — o VS Code aplica máscara e tema", () => {
-    // PNG aqui aparece sem tratamento de tema e destoa dos vizinhos.
     expect(c.viewsContainers!.activitybar![0]!.icon).toMatch(/\.svg$/);
   });
 
-  it("a árvore vive no contêiner próprio, NÃO no explorer", () => {
+  it("a view vive no contêiner próprio, NÃO no explorer", () => {
     expect(c.views.explorer).toBeUndefined();
-    expect(c.views.starguard?.[0]?.id).toBe("starguard.analyzers");
+    expect(c.views.starguard?.[0]?.id).toBe("starguard.painel");
+  });
+
+  it("é um WEBVIEW — o painel desenha a própria interface", () => {
+    // Sem `type: "webview"` o VS Code espera um `TreeDataProvider` e a view
+    // fica permanentemente vazia, sem erro nenhum no log.
+    expect(c.views.starguard?.[0]?.type).toBe("webview");
   });
 
   it("ativa na inicialização — o painel tem de estar pronto ao primeiro clique", () => {
-    // Sem isto, quem já está logado vê a tela de "Entrar" piscar antes de o
-    // contexto `starguard.signedIn` ser resolvido.
     const eventos = (manifesto as unknown as { activationEvents: string[] }).activationEvents;
     expect(eventos).toContain("onStartupFinished");
     // `onUri` é o retorno do navegador no login: sem ele o código de
@@ -121,99 +124,49 @@ describe("a extensão tem lugar próprio na barra lateral", () => {
   });
 });
 
-describe("o portão de login está declarado no manifesto", () => {
-  const c = manifesto.contributes as {
-    viewsWelcome?: Array<{ view: string; when?: string; contents: string }>;
-    menus: Record<string, Array<{ command: string; when?: string }>>;
-  };
+describe("o portão de login é desenhado pelo painel", () => {
+  // O `viewsWelcome` do VS Code só existe para árvore. Num webview quem
+  // decide o que aparece é a própria página — e por isso a tela de entrada
+  // passou a ser responsabilidade do `painel-html.ts`.
+  const fonteHtml = readFileSync(join(aqui, "..", "src", "painel-html.ts"), "utf8");
 
-  it("a árvore tem tela de boas-vindas para quem NÃO entrou", () => {
-    // Sem ela, quem instala da Marketplace vê uma lista vazia e nenhuma pista
-    // do que fazer — e a via de contato vira a aba de avaliações.
-    const bemVindo = c.viewsWelcome?.find((v) => v.view === "starguard.analyzers");
-    expect(bemVindo).toBeDefined();
-    expect(bemVindo!.when).toBe("!starguard.signedIn");
+  it("a tela de entrada existe na página", () => {
+    expect(fonteHtml).toContain("function porta()");
+    expect(fonteHtml).toContain('data-acao="entrar"');
   });
 
-  it("a tela oferece ENTRAR e SOLICITAR ACESSO", () => {
-    const conteudo = c.viewsWelcome![0]!.contents;
-    expect(conteudo).toContain("command:starguard.signIn");
-    expect(conteudo).toContain("command:starguard.requestAccess");
+  it("oferece também SOLICITAR ACESSO — quem não tem conta precisa de saída", () => {
+    // Sem isto, a via de contato de quem instalou da Marketplace vira a aba
+    // de avaliações.
+    expect(fonteHtml).toContain('data-acao="solicitar"');
   });
 
-  it("o ▶ por analisador só aparece com sessão", () => {
-    // Um botão que sempre responde "faça login" treina a pessoa a ignorá-lo.
-    const item = c.menus["view/item/context"]![0]!;
-    expect(item.when).toContain("starguard.signedIn");
-  });
-
-  it("o `analisar tudo` da barra de título também", () => {
-    const titulo = c.menus["view/title"]!.find((m) => m.command === "starguard.runAll");
-    expect(titulo!.when).toContain("starguard.signedIn");
+  it("o painel só desenha os analisadores com sessão", () => {
+    const fontePainel = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+    expect(fontePainel).toContain("analisadores: sessao ? cartoes() : []");
   });
 });
 
-describe("a árvore fica VAZIA sem sessão — é o que revela o botão Entrar", () => {
-  // Nasceu de um caso REAL na v0.1.1: o ícone já aparecia na barra lateral,
-  // mas o painel abria com os cinco analisadores riscados e NENHUM botão de
-  // entrar. O `viewsWelcome` do VS Code só é renderizado quando o provider
-  // devolve zero filhos da raiz — devolver os analisadores desabilitados
-  // escondia a única saída que a tela tinha.
+describe("nada precisa ser instalado na máquina de quem usa", () => {
   const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
 
-  it("`getChildren` da raiz desiste quando não há sessão", () => {
-    expect(fonte).toMatch(/if\s*\(!this\.logado\)\s*return\s*\[\]/);
+  it("o transporte de SCAN é ligado junto com o de IA", () => {
+    // É isto que faz `sast` e `sca` rodarem no servidor. Sem esta linha a
+    // extensão volta a exigir `opengrep` e `trivy` no PATH de quem instalou.
+    expect(fonte).toContain("setScanTransport({ kind: \"remote\"");
   });
 
-  it("o estado de sessão chega ao provider, não só ao `setContext`", () => {
-    // `setContext` governa os BOTÕES; quem esvazia a árvore é o provider. Ter
-    // só o primeiro foi exatamente o bug.
-    expect(fonte).toContain("definirSessao");
-    expect(fonte).toMatch(/arvore\?\.definirSessao\(!!sessao\)/);
-  });
-});
-
-describe("o painel bloqueado oferece a saída, não só o diagnóstico", () => {
-  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
-
-  it("cada motivo de indisponibilidade tem uma ação correspondente", () => {
-    // Sem isto o painel diz "falta a descrição do sistema" e deixa a pessoa
-    // procurando onde se configura isso. Ver AUDITORIA.md#UX-15.
-    for (const razao of [
-      "binary_missing",
-      "no_workspace",
-      "no_ai_key",
-      "engine_off",
-      "no_input",
-    ]) {
-      expect(fonte, razao).toContain(`case "${razao}":`);
-    }
+  it("o cartão anuncia quando o analisador roda no servidor", () => {
+    expect(fonte).toContain("remoto: remoto && (id === \"sast\" || id === \"sca\")");
   });
 
-  it("o comando da ação de IA está declarado no manifesto", () => {
-    // Ação que aponta para comando inexistente falha em silêncio no clique.
-    const cmds = (
-      manifesto.contributes as { commands: Array<{ command: string }> }
-    ).commands.map((c) => c.command);
-    expect(cmds).toContain("starguard.enableAccountAi");
-  });
-
-  it("a disponibilidade é recalculada com a IA da conta já ligada", () => {
-    // `hasAnyAiKey()` responde `true` no transporte remoto. Sem ligar o
-    // transporte ANTES de montar o plano, a árvore anunciava "precisa de uma
-    // chave de IA" para quem fez login justamente para não precisar de uma.
-    expect(fonte).toMatch(/await ligarIaSeJaConsentiu\(\);\s*\n\s*const execPlan/);
-  });
-
-  it("ligar a IA para a árvore NÃO abre modal de consentimento", () => {
-    // Desenhar um painel não é hora de pedir autorização para mandar código
-    // para fora: aqui só se lê um consentimento já dado.
-    const corpo = fonte.slice(
-      fonte.indexOf("async function ligarIaSeJaConsentiu"),
-      fonte.indexOf("function raiz()")
+  it("a disponibilidade é recalculada com o transporte já ligado", () => {
+    // `probe()` de sast/sca responde `ok` no modo remoto. Sem ligar o
+    // transporte ANTES de montar o plano, o painel anunciaria "instale o
+    // trivy" para quem escolheu não instalar nada.
+    expect(fonte).toMatch(
+      /await ligarIaSeJaConsentiu\(\);[\s\S]*?ultimoPlano = await montarPlano/
     );
-    expect(corpo).not.toContain("showWarningMessage");
-    expect(corpo).toContain("globalState.get");
   });
 });
 

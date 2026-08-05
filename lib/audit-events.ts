@@ -56,6 +56,10 @@ export const EVENT_CATALOG: Record<string, EventMeta> = {
   // sumirem dentro de um "falha de login": os dois significam que uma
   // credencial foi apresentada por quem não deveria tê-la.
   "oauth.code_reuse": { category: "auth" },
+  // Scan no servidor pela extensão/CLI. Metadado apenas — quem pediu, qual
+  // analisador, quantos arquivos e quanto demorou. O conteúdo NUNCA entra
+  // aqui: a rota o descarta antes de responder. Ver app/api/scan/route.ts.
+  "scan.remote": { category: "analise" },
   "oauth.reuse_detected": { category: "auth" },
 };
 

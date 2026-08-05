@@ -2,7 +2,7 @@
   "name": "starguard-vscode",
   "displayName": "StarGuard",
   "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "publisher": "starbridge",
   "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
@@ -27,11 +27,6 @@
       {
         "command": "starguard.runAnalyzer",
         "title": "StarGuard: analisar…",
-        "icon": "$(play)"
-      },
-      {
-        "command": "starguard.runOne",
-        "title": "StarGuard: rodar este analisador",
         "icon": "$(play)"
       },
       {
@@ -71,33 +66,22 @@
     "views": {
       "starguard": [
         {
-          "id": "starguard.analyzers",
-          "name": "Analisadores"
+          "type": "webview",
+          "id": "starguard.painel",
+          "name": "StarGuard"
         }
       ]
     },
     "menus": {
       "view/title": [
         {
-          "command": "starguard.runAll",
-          "when": "view == starguard.analyzers && starguard.signedIn",
+          "command": "starguard.clear",
+          "when": "view == starguard.painel && starguard.signedIn",
           "group": "navigation@1"
         },
         {
-          "command": "starguard.clear",
-          "when": "view == starguard.analyzers && starguard.signedIn",
-          "group": "navigation@2"
-        },
-        {
           "command": "starguard.doctor",
-          "when": "view == starguard.analyzers"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "starguard.runOne",
-          "when": "view == starguard.analyzers && viewItem == analyzer-ready && starguard.signedIn",
-          "group": "inline"
+          "when": "view == starguard.painel"
         }
       ]
     },
@@ -120,17 +104,17 @@
             "sast",
             "sca"
           ],
-          "markdownDescription": "Analisadores que rodam em **StarGuard: analisar tudo**. O padrão traz só os dois que não custam IA; os outros continuam disponíveis um a um pela árvore."
+          "markdownDescription": "Analisadores marcados por padrão ao abrir o painel. O padrão traz os dois que não custam IA; os outros continuam disponíveis com um clique no cartão."
         },
         "starguard.semgrepPath": {
           "type": "string",
           "default": "",
-          "description": "Caminho do executável do Opengrep/Semgrep. Vazio = procura no PATH."
+          "description": "Opcional. Caminho do Opengrep/Semgrep local — só é usado sem conta conectada; com conta, o scan roda no servidor e nada precisa estar instalado."
         },
         "starguard.trivyPath": {
           "type": "string",
           "default": "",
-          "description": "Caminho do executável do Trivy. Vazio = procura no PATH."
+          "description": "Opcional. Caminho do Trivy local — só é usado sem conta conectada; com conta, o scan roda no servidor e nada precisa estar instalado."
         },
         "starguard.locale": {
           "type": "string",
@@ -145,7 +129,7 @@
         "starguard.systemDescription": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Descrição do sistema, usada pela modelagem de ameaças e pela revisão de **regras de negócio**. Sem ela, esses dois analisadores não têm o que verificar."
+          "markdownDescription": "Descrição do sistema usada por **regras de negócio** e **modelagem de ameaças**. Dá para escrevê-la direto no painel lateral, que é onde ela faz sentido."
         },
         "starguard.server": {
           "type": "string",
@@ -163,13 +147,6 @@
       {
         "id": "starguard",
         "label": "StarGuard"
-      }
-    ],
-    "viewsWelcome": [
-      {
-        "view": "starguard.analyzers",
-        "when": "!starguard.signedIn",
-        "contents": "Análise de segurança dentro do editor: vulnerabilidades de código, dependências com CVE, regras de negócio, modelagem de ameaças e skills.\n\n[Entrar na conta StarGuard](command:starguard.signIn)\n\nO login acontece no navegador — a sua senha nunca é digitada dentro do editor.\n\nAinda não tem conta?\n[Solicitar acesso](command:starguard.requestAccess)"
       }
     ],
     "viewsContainers": {
