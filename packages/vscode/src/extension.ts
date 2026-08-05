@@ -33,7 +33,7 @@ import type {
   Workspace,
 } from "@starguard/core/contracts";
 import { achadosDe, type Achado } from "./findings.js";
-import { StarGuardAuthProvider, pedirLogin, sessaoAtual } from "./auth.js";
+import { StarGuardAuthProvider, definirLog, pedirLogin, sessaoAtual } from "./auth.js";
 import { setAiTransport } from "@starguard/core/ai-transport";
 import { cfg, servidor, urlDeAcesso } from "./config.js";
 
@@ -885,6 +885,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   );
   arvore = new ArvoreDeAnalisadores();
 
+  // O log do login vai para o MESMO canal da análise. Um segundo canal só
+  // para autenticação obrigaria quem relata um problema a saber de antemão
+  // qual dos dois abrir.
+  definirLog((m) => saida.appendLine(`[auth] ${m}`));
+
   // A conta aparece no menu Contas do editor, ao lado do GitHub — e sai de
   // lá também. O provider guarda o refresh no chaveiro do sistema.
   const auth = new StarGuardAuthProvider(ctx);
@@ -973,12 +978,26 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     }),
 
     vscode.commands.registerCommand("starguard.signIn", async () => {
-      const s = await exigirConta(true);
-      if (s) {
+      // O `try` existe porque sem ele o erro subia para o VS Code e virava um
+      // aviso genérico de "o comando falhou" — ou nada. Quem clicou em Entrar
+      // via a tela continuar igual, sem saber se estava esperando ou se tinha
+      // dado errado. Ver AUDITORIA.md#PEND-37.
+      try {
+        const s = await exigirConta(true);
+        if (!s) return;
         void vscode.window.showInformationMessage(
-          `StarGuard: conectado como ${s.account.label}.`
+          t("auth.connected", { email: s.account.label })
         );
         await arvore.recarregar();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        saida.appendLine(`[auth] Falhou: ${msg}`);
+        const verLog = t("common.details");
+        const escolha = await vscode.window.showErrorMessage(
+          t("auth.failed", { erro: msg }),
+          verLog
+        );
+        if (escolha === verLog) saida.show();
       }
     }),
 

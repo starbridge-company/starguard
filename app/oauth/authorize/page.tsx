@@ -55,6 +55,9 @@ export default function AuthorizePage() {
   const [erro, setErro] = useState<string | null>(null);
   /** O `redirect_uri` já com o código — nulo até haver autorização. */
   const [destino, setDestino] = useState<string | null>(null);
+  /** O código em claro, para a saída manual quando o editor não abre. */
+  const [codigo, setCodigo] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
 
   useEffect(() => {
     initTheme();
@@ -103,6 +106,7 @@ export default function AuthorizePage() {
       const alvo = url.toString();
 
       setDestino(alvo);
+      setCodigo(r.code);
       setEnviando(false);
 
       // Tentativa automática — que pode simplesmente NÃO acontecer, e é por
@@ -193,6 +197,30 @@ export default function AuthorizePage() {
               </a>
             </div>
             <p className="oauth-hint">{t("oauth.openHint")}</p>
+
+            {/* O caminho que não depende do sistema operacional, do navegador
+                nem do roteamento da URI. Quando o salto para o editor falha —
+                e ele falha em silêncio — este é o único que sobra. */}
+            {codigo && (
+              <details className="oauth-manual">
+                <summary>{t("oauth.manualTitle")}</summary>
+                <p className="oauth-hint">{t("oauth.manualHint")}</p>
+                <div className="oauth-code">
+                  <code>{codigo}</code>
+                  <button
+                    type="button"
+                    className="button ghost"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(codigo);
+                      setCopiado(true);
+                    }}
+                  >
+                    {copiado ? t("oauth.copied") : t("oauth.copy")}
+                  </button>
+                </div>
+              </details>
+            )}
+
             <p className="oauth-hint">{t("oauth.openExpires")}</p>
           </>
         ) : (

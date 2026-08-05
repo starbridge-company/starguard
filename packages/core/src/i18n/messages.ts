@@ -41,6 +41,7 @@ export const PT_BR = {
   "common.retry": "Tentar novamente",
   "common.refresh": "Atualizar",
   "common.cancel": "Cancelar",
+  "common.details": "Ver detalhes",
   "common.close": "Fechar",
   "common.open": "Abrir",
   "common.report": "Relatório",
@@ -911,6 +912,26 @@ export const PT_BR = {
   "oauth.approve": "Autorizar",
   "oauth.deny": "Cancelar",
   "oauth.done": "Pronto. Pode voltar para {client}.",
+  // O caminho de volta ao editor, quando o salto automático não acontece.
+  "oauth.manualTitle": "Não abriu o editor?",
+  "oauth.manualHint":
+    "Copie o código abaixo e cole no StarGuard, em «Colar o código».",
+  "oauth.copy": "Copiar",
+  "oauth.copied": "Copiado",
+
+  // ---- Login visto de DENTRO do editor ----
+  "auth.waiting": "StarGuard: conclua a autorização no navegador.",
+  "auth.pasteCode": "Colar o código",
+  "auth.pastePrompt": "Cole o código mostrado no navegador",
+  "auth.pasteInvalid": "Isto não parece o código do navegador.",
+  "auth.cancelled": "Autorização cancelada.",
+  "auth.mismatch": "A resposta não corresponde a este pedido de login.",
+  "auth.timeout": "Tempo esgotado esperando a autorização no navegador.",
+  "auth.failed": "StarGuard: não foi possível entrar. {erro}",
+  "auth.connected": "StarGuard: conectado como {email}.",
+  "auth.signedOut":
+    "StarGuard: desconectado deste editor. Para encerrar a sessão no servidor, revogue o dispositivo em Conta.",
+
   "oauth.opening": "Autorizado. Abrindo o {client}…",
   "oauth.openApp": "Abrir o {client}",
   "oauth.openHint":
@@ -984,6 +1005,7 @@ const EN: Record<MessageKey, string> = {
   "common.retry": "Try again",
   "common.refresh": "Refresh",
   "common.cancel": "Cancel",
+  "common.details": "See details",
   "common.close": "Close",
   "common.open": "Open",
   "common.report": "Report",
@@ -1784,6 +1806,23 @@ const EN: Record<MessageKey, string> = {
   "oauth.approve": "Authorize",
   "oauth.deny": "Cancel",
   "oauth.done": "Done. You can go back to {client}.",
+  "oauth.manualTitle": "The editor did not open?",
+  "oauth.manualHint": "Copy the code below and paste it into StarGuard, under «Paste the code».",
+  "oauth.copy": "Copy",
+  "oauth.copied": "Copied",
+
+  "auth.waiting": "StarGuard: finish the authorization in the browser.",
+  "auth.pasteCode": "Paste the code",
+  "auth.pastePrompt": "Paste the code shown in the browser",
+  "auth.pasteInvalid": "That does not look like the code from the browser.",
+  "auth.cancelled": "Authorization cancelled.",
+  "auth.mismatch": "The response does not match this sign-in request.",
+  "auth.timeout": "Timed out waiting for the authorization in the browser.",
+  "auth.failed": "StarGuard: could not sign in. {erro}",
+  "auth.connected": "StarGuard: signed in as {email}.",
+  "auth.signedOut":
+    "StarGuard: signed out of this editor. To end the session on the server, revoke the device under Account.",
+
   "oauth.opening": "Authorized. Opening {client}…",
   "oauth.openApp": "Open {client}",
   "oauth.openHint":
@@ -1850,6 +1889,7 @@ const ES: Record<MessageKey, string> = {
   "common.retry": "Intentar de nuevo",
   "common.refresh": "Actualizar",
   "common.cancel": "Cancelar",
+  "common.details": "Ver detalles",
   "common.close": "Cerrar",
   "common.open": "Abrir",
   "common.report": "Informe",
@@ -2659,6 +2699,23 @@ const ES: Record<MessageKey, string> = {
   "oauth.approve": "Autorizar",
   "oauth.deny": "Cancelar",
   "oauth.done": "Listo. Puedes volver a {client}.",
+  "oauth.manualTitle": "¿No se abrió el editor?",
+  "oauth.manualHint": "Copia el código de abajo y pégalo en StarGuard, en «Pegar el código».",
+  "oauth.copy": "Copiar",
+  "oauth.copied": "Copiado",
+
+  "auth.waiting": "StarGuard: completa la autorización en el navegador.",
+  "auth.pasteCode": "Pegar el código",
+  "auth.pastePrompt": "Pega el código mostrado en el navegador",
+  "auth.pasteInvalid": "Esto no parece el código del navegador.",
+  "auth.cancelled": "Autorización cancelada.",
+  "auth.mismatch": "La respuesta no corresponde a esta solicitud de inicio de sesión.",
+  "auth.timeout": "Se agotó el tiempo esperando la autorización en el navegador.",
+  "auth.failed": "StarGuard: no se pudo iniciar sesión. {erro}",
+  "auth.connected": "StarGuard: sesión iniciada como {email}.",
+  "auth.signedOut":
+    "StarGuard: sesión cerrada en este editor. Para terminar la sesión en el servidor, revoca el dispositivo en Cuenta.",
+
   "oauth.opening": "Autorizado. Abriendo {client}…",
   "oauth.openApp": "Abrir {client}",
   "oauth.openHint":

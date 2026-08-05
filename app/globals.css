@@ -3687,6 +3687,40 @@ a.cell-strong:hover {
   text-align: center;
 }
 
+.oauth-manual {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.oauth-manual > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.oauth-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.oauth-code code {
+  flex: 1;
+  min-width: 0;
+  /* O código tem 43 caracteres e não pode quebrar em duas linhas ao ser
+     copiado a olho: rola na horizontal em vez de embrulhar. */
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+}
+
 .device-list {
   display: grid;
   gap: 10px;

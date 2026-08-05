@@ -20,7 +20,32 @@
 // ============================================================
 import * as vscode from "vscode";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { servidor } from "./config.js";
+import { translate } from "@starguard/core/i18n/translate";
+import { normalizeLocale } from "@starguard/core/i18n/config";
+import type { MessageKey } from "@starguard/core/i18n/messages";
+import { cfg, servidor } from "./config.js";
+import { extrairCodigo } from "./codigo.js";
+
+function t(k: MessageKey, v?: Record<string, string | number>): string {
+  return translate(normalizeLocale(cfg().get<string>("locale")), k, v);
+}
+
+/**
+ * Onde o login conta o que está fazendo.
+ *
+ * Existe por um sintoma concreto: o navegador autorizava, o editor não mudava
+ * nada, e **não havia uma linha em lugar nenhum** dizendo em que passo o fluxo
+ * tinha parado — nem no log do extension host, nem no canal de saída. Um fluxo
+ * de autenticação que falha calado não é depurável nem por quem o escreveu.
+ *
+ * Só passo e resultado. Código de autorização, `state`, `verifier` e token
+ * NUNCA entram aqui: o canal de saída é copiável e vai parar em relato de bug.
+ */
+let registrar: (msg: string) => void = () => {};
+
+export function definirLog(fn: (msg: string) => void): void {
+  registrar = fn;
+}
 
 export const PROVIDER_ID = "starguard";
 const CLIENT_ID = "starguard-vscode";
@@ -53,12 +78,25 @@ class RetornoDeAuth implements vscode.UriHandler {
   handleUri(uri: vscode.Uri): void {
     const q = new URLSearchParams(uri.query);
     const state = q.get("state");
+    registrar(`URI recebida: ${uri.path} (state ${state ? "presente" : "AUSENTE"})`);
+
     if (!state) return;
     const espera = this.pendentes.get(state);
-    if (espera) {
-      this.pendentes.delete(state);
-      espera(uri);
+    if (!espera) {
+      // Acontece de verdade, e não é raro: a URI chegou depois do tempo
+      // esgotado, ou o extension host reiniciou entre abrir o navegador e
+      // voltar (uma reinstalação da extensão basta). O pedido que esperava
+      // este `state` já não existe em memória — e antes disto o descarte era
+      // mudo, o que fazia o login parecer simplesmente não acontecer.
+      registrar(
+        `Nenhum login esperando por esta resposta (${this.pendentes.size} em espera). ` +
+          `Provável tempo esgotado ou recarga da extensão. Entre de novo.`
+      );
+      void vscode.window.showWarningMessage(t("auth.timeout"));
+      return;
     }
+    this.pendentes.delete(state);
+    espera(uri);
   }
 
   aguardar(state: string): Promise<vscode.Uri> {
@@ -66,7 +104,8 @@ class RetornoDeAuth implements vscode.UriHandler {
       this.pendentes.set(state, resolve);
       setTimeout(() => {
         if (this.pendentes.delete(state)) {
-          reject(new Error("Tempo esgotado esperando a autorização no navegador."));
+          registrar("Tempo esgotado esperando o navegador.");
+          reject(new Error(t("auth.timeout")));
         }
       }, TIMEOUT_MS);
     });
@@ -107,6 +146,7 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
 
     const access = await this.accessToken(guardado);
     if (!access) {
+      registrar("Renovação recusada pelo servidor — a credencial local foi apagada.");
       // Refresh recusado: revogado, senha trocada, ou reuso detectado. Em
       // qualquer caso a credencial local não vale mais — apagá-la evita a
       // extensão insistir em algo morto a cada clique.
@@ -144,20 +184,20 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
     );
 
     const espera = this.retorno.aguardar(state);
+    registrar(`Abrindo o navegador em ${base}/oauth/authorize`);
+    registrar(`Destino de volta: ${redirectUri}`);
     // `asExternalUri` é o que faz isto funcionar em Remote SSH e Codespaces.
     await vscode.env.openExternal(await vscode.env.asExternalUri(autorizar));
 
-    const uri = await espera;
-    const q = new URLSearchParams(uri.query);
-
-    if (q.get("error")) throw new Error("Autorização cancelada.");
-
-    const code = q.get("code");
-    const stateVolta = q.get("state");
-    // Conferido aqui, no cliente que sorteou — é o único que sabe o esperado.
-    if (!code || !stateVolta || !confereState(stateVolta, state)) {
-      throw new Error("A resposta não corresponde a este pedido de login.");
-    }
+    // A saída manual, oferecida SEM esperar o fracasso.
+    //
+    // A passagem do navegador para o editor depende de coisas que não são
+    // nossas: o registro do esquema `vscode://` no sistema, o diálogo do
+    // navegador, o roteamento da URI para a janela certa. Quando qualquer uma
+    // falha, o resultado é o mesmo — nada acontece, sem erro. Um caminho que
+    // não depende de nenhuma delas é o que transforma "não funciona" em
+    // "levou dois cliques a mais".
+    const code = await this.esperarCodigo(espera, state);
 
     const tokens = await this.trocar({
       grant_type: "authorization_code",
@@ -166,8 +206,10 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
       code_verifier: verifier,
       redirect_uri: redirectUri,
     });
+    registrar("Código trocado por token.");
 
     const conta = await this.consultarConta(base, tokens.access_token);
+    registrar(`Conta: ${conta.email}`);
     const guardado: Guardado = {
       server: base,
       refreshToken: tokens.refresh_token,
@@ -210,12 +252,69 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
     // A sessão no SERVIDOR continua até expirar ou ser revogada. Quem
     // desconectou por desconfiar de vazamento precisa saber que o passo que
     // resolve é revogar em Conta → Dispositivos conectados.
-    void vscode.window.showInformationMessage(
-      "StarGuard: desconectado deste editor. Para encerrar a sessão no servidor, revogue o dispositivo em Conta."
-    );
+    void vscode.window.showInformationMessage(t("auth.signedOut"));
   }
 
   // ---- Interno ----
+
+  /**
+   * O código de autorização, venha ele de onde vier.
+   *
+   * Duas origens concorrem, e a primeira que chegar vence: a URI de volta
+   * (`vscode://…`, o caminho normal) e o que a pessoa colar da tela do
+   * navegador. A notificação fica em pé o tempo todo — não aparece depois de
+   * um fracasso, porque o fracasso aqui é MUDO e não haveria o que detectar.
+   */
+  private async esperarCodigo(
+    daUri: Promise<vscode.Uri>,
+    state: string
+  ): Promise<string> {
+    const manual = new Promise<string>((resolve, reject) => {
+      void vscode.window
+        .showInformationMessage(t("auth.waiting"), t("auth.pasteCode"))
+        .then(async (escolha) => {
+          if (escolha !== t("auth.pasteCode")) return;
+          const v = await vscode.window.showInputBox({
+            prompt: t("auth.pastePrompt"),
+            ignoreFocusOut: true,
+            // Aceita o código puro OU a URL inteira: quem copia da barra de
+            // endereços do navegador traz a URL, e recusá-la seria exigir uma
+            // edição manual justo de quem já está com dificuldade.
+            validateInput: (s) =>
+              extrairCodigo(s) ? undefined : t("auth.pasteInvalid"),
+          });
+          if (!v) return;
+          const code = extrairCodigo(v);
+          if (code) {
+            registrar("Código recebido por colagem manual.");
+            resolve(code);
+          } else {
+            reject(new Error(t("auth.pasteInvalid")));
+          }
+        });
+    });
+
+    const daUriValidada = daUri.then((uri) => {
+      const q = new URLSearchParams(uri.query);
+      if (q.get("error")) {
+        registrar("O navegador respondeu com recusa.");
+        throw new Error(t("auth.cancelled"));
+      }
+      const code = q.get("code");
+      const stateVolta = q.get("state");
+      // Conferido aqui, no cliente que sorteou — é o único que sabe o
+      // esperado. Na colagem manual não há `state` a conferir: o que protege
+      // ali é o `code_verifier`, que nunca saiu desta máquina.
+      if (!code || !stateVolta || !confereState(stateVolta, state)) {
+        registrar("A resposta não corresponde a este pedido.");
+        throw new Error(t("auth.mismatch"));
+      }
+      registrar("Código recebido pela URI de volta.");
+      return code;
+    });
+
+    return Promise.race([daUriValidada, manual]);
+  }
 
   private async lerGuardado(): Promise<Guardado | null> {
     const bruto = await this.ctx.secrets.get(CHAVE_SEGREDO);
