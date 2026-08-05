@@ -1,0 +1,34 @@
+{
+  // Build do pacote publicável (`npm run build -w @starguard/core`).
+  //
+  // O app web e os testes NÃO passam por aqui: o tsconfig da raiz aponta
+  // `@starguard/core` direto para `src/`, então `next dev` e `vitest` compilam
+  // o código-fonte e não exigem build prévio. Este arquivo existe para quem
+  // consome o pacote de fora do repositório — o binário do CLI publicado e o
+  // bundle da extensão do VS Code.
+  "compilerOptions": {
+    "target": "ES2022",
+    // `lib` sem "dom" de propósito: o núcleo roda em Node. Se um `document`
+    // ou um `window` entrar aqui por engano, o compilador precisa reclamar —
+    // no terminal e no extension host não existe nenhum dos dois.
+    "lib": ["ES2022"],
+    // `bundler` e não `nodenext`: com `nodenext`, o compilador EXIGIRIA a
+    // extensão `.js` nos imports relativos do fonte — e o fonte precisa ficar
+    // sem ela, porque o Turbopack do Next não resolve `.js` para `.ts` e não
+    // tem como ser configurado para isso. As extensões voltam na emissão, por
+    // `scripts/add-extensions.mjs`.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

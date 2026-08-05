@@ -1,0 +1,22 @@
+# O que NÃO vai no .vsix.
+#
+# A extensão publicada é um bundle só (`dist/extension.js`, ~423 kB) mais o
+# manifesto e o README. Nada de código-fonte e nada de `node_modules`: para uma
+# ferramenta de segurança, distribuir uma árvore de terceiros para dentro do
+# editor de alguém seria contraditório com o que ela mesma verifica.
+#
+# Regra prática ao mexer aqui: se o arquivo não é lido em tempo de EXECUÇÃO
+# pela extensão, ele não entra.
+
+src/**
+tests/**
+node_modules/**
+build.mjs
+scripts/**
+tsconfig.build.json
+**/*.map
+**/*.ts
+.vscodeignore
+
+# Artefato do próprio empacotamento — não se empacota o pacote.
+*.vsix

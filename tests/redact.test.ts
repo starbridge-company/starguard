@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redact, redactError } from "@/lib/redact";
+import { redact, redactError } from "@starguard/core/redact";
 
 // AUDITORIA.md#SEC-01 — a mensagem de erro do git repete a URL do remote, que
 // carrega o PAT. Esse texto é PERSISTIDO no JSONB e exibido na tela.

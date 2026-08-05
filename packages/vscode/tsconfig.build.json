@@ -1,0 +1,20 @@
+{
+  // A extensão roda no extension host, que é Node — mesma configuração do
+  // núcleo e do CLI. Consome `@starguard/core` como PACOTE (dist + exports),
+  // não pelo código-fonte: ver a nota em `packages/cli/tsconfig.build.json`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": false,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

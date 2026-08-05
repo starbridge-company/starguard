@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "setup": "node scripts/gen-keys.mjs",
     "predev": "node scripts/gen-keys.mjs",
@@ -12,7 +15,8 @@
     "check:schema": "node scripts/check-schema.mjs",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run build:core && npm run typecheck --workspaces --if-present",
+    "build:core": "npm run build -w @starguard/core",
     "gen:keys": "node scripts/gen-keys.mjs --force",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -26,7 +30,11 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "node e2e/run.mjs",
     "test:live": "vitest run --config vitest.live.mjs",
-    "db:backfill-findings": "node scripts/backfill-findings.mjs"
+    "db:backfill-findings": "node scripts/backfill-findings.mjs",
+    "build:packages": "npm run build -w @starguard/core && npm run build -w @starguard/cli && npm run build -w starguard-vscode",
+    "cli": "node packages/cli/bin/starguard.mjs",
+    "package:vscode": "npm run build:packages && npm run package -w starguard-vscode",
+    "check:github-app": "node scripts/check-github-app.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.216",

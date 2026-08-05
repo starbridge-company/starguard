@@ -1,0 +1,26 @@
+{
+  // Mesma configuração do núcleo, e pelo mesmo motivo: `bundler` no fonte,
+  // extensões acrescentadas na emissão. Ver `packages/core/tsconfig.build.json`.
+  //
+  // SEM `paths` para o núcleo, de propósito: aqui ele é consumido como PACOTE
+  // (pelo `dist` e pelo mapa de `exports`), não pelo código-fonte. Apontar para
+  // o fonte colocaria os arquivos do núcleo dentro do programa do CLI e
+  // quebraria o `rootDir` — e, pior, esconderia um erro real: se o `exports` do
+  // núcleo não expuser um subcaminho, é AQUI que isso precisa aparecer, não em
+  // produção. Por isso o build do CLI depende do build do núcleo.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": false,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

@@ -7,35 +7,13 @@ import ThreatInput from "@/components/ThreatInput";
 import SkillInput, { type SkillEntry } from "@/components/SkillInput";
 import RepoInput from "@/components/RepoInput";
 import TokenPicker, { type TokenSelection } from "@/components/TokenPicker";
+import AnalyzerPicker from "@/components/AnalyzerPicker";
 import Collapsible from "@/components/Collapsible";
-import InfoTip from "@/components/InfoTip";
 import { apiPost } from "@/lib/client";
 import { parseGitHubRepo } from "@/lib/validation";
-import { IconPlan, IconSkills, IconScan, IconRefactor, IconRepo } from "@/lib/icons";
-import { useApiError, useT, type MessageKey } from "@/lib/i18n";
-
-const PHASES = [
-  {
-    Icon: IconPlan,
-    labelKey: "phase1.label" as MessageKey,
-    descKey: "phase1.desc" as MessageKey,
-  },
-  {
-    Icon: IconSkills,
-    labelKey: "phase2.label" as MessageKey,
-    descKey: "phase2.desc" as MessageKey,
-  },
-  {
-    Icon: IconScan,
-    labelKey: "phase3.label" as MessageKey,
-    descKey: "phase3.desc" as MessageKey,
-  },
-  {
-    Icon: IconRefactor,
-    labelKey: "phase4.label" as MessageKey,
-    descKey: "phase4.desc" as MessageKey,
-  },
-];
+import { IconRepo } from "@/lib/icons";
+import { useApiError, useT } from "@/lib/i18n";
+import { ANALYZER_IDS, type AnalyzerId } from "@/types";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -46,6 +24,9 @@ export default function OnboardingPage() {
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [repoUrl, setRepoUrl] = useState("");
   const [tokenSel, setTokenSel] = useState<TokenSelection>({});
+  // Começa com tudo marcado: quem não quer escolher nada continua tendo a
+  // análise completa de sempre, sem precisar entender a novidade.
+  const [select, setSelect] = useState<AnalyzerId[]>([...ANALYZER_IDS]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +34,24 @@ export default function OnboardingPage() {
   // antes, o erro só aparecia depois do envio, vindo do servidor.
   // Ver AUDITORIA.md#UX-19.
   const repoOk = !repoUrl.trim() || parseGitHubRepo(repoUrl.trim()) !== null;
-  const canSubmit = !!projectName.trim() && !!systemDescription.trim() && repoOk;
+
+  // O que é obrigatório depende do que foi ESCOLHIDO — a mesma regra que o
+  // `analyzeSchema` aplica no servidor. Repetida aqui para o botão desabilitar
+  // antes do envio em vez de a rota recusar depois; a rota continua sendo a
+  // autoridade.
+  const pedidos = new Set(select);
+  const precisaDescricao = pedidos.has("threat") || pedidos.has("business");
+  const precisaRepo =
+    pedidos.has("sast") || pedidos.has("sca") || pedidos.has("business");
+  const temSkills = skills.some((s) => s.content.trim());
+
+  const canSubmit =
+    !!projectName.trim() &&
+    select.length > 0 &&
+    repoOk &&
+    (!precisaDescricao || !!systemDescription.trim()) &&
+    (!precisaRepo || !!repoUrl.trim()) &&
+    (!pedidos.has("skills") || temSkills);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +62,7 @@ export default function OnboardingPage() {
       const { id } = await apiPost<{ id: string }>("/api/analyze", {
         projectName: projectName.trim(),
         systemDescription: systemDescription.trim(),
+        select,
         repoUrl: repoUrl.trim() || undefined,
         tokenId: tokenSel.tokenId || undefined,
         token: tokenSel.token?.trim() || undefined,
@@ -90,19 +89,6 @@ export default function OnboardingPage() {
         </div>
       </header>
 
-      {/* Pipeline compacto — cada fase explica-se num toque, sem poluir a tela */}
-      <div className="mini-pipeline" aria-label={t("onb.phases")}>
-        {PHASES.map((p, i) => (
-          <InfoTip key={p.labelKey} side="bottom" content={t(p.descKey)}>
-            <span className="mini-step">
-              <span className="mini-step-num">{i + 1}</span>
-              <p.Icon />
-              <span className="mini-step-label">{t(p.labelKey)}</span>
-            </span>
-          </InfoTip>
-        ))}
-      </div>
-
       <form className="panel" onSubmit={submit}>
         {error && <div className="alert error">{error}</div>}
 
@@ -118,12 +104,28 @@ export default function OnboardingPage() {
           />
         </div>
 
-        <ThreatInput value={systemDescription} onChange={setSystemDescription} />
+        {/* A escolha vem ANTES dos campos: é ela que decide o que é exigido.
+            Pedir a descrição do sistema para quem só quer rodar o Trivy era o
+            custo do fluxo linear. */}
+        <AnalyzerPicker
+          value={select}
+          onChange={setSelect}
+          repoUrl={repoOk ? repoUrl : ""}
+          hasDescription={!!systemDescription.trim()}
+          hasSkills={temSkills}
+        />
+
+        {precisaDescricao && (
+          <ThreatInput value={systemDescription} onChange={setSystemDescription} />
+        )}
 
         <Collapsible
           title={t("onb.optional")}
           hint={t("onb.optionalHint")}
           icon={<IconRepo />}
+          // Abre sozinho quando o repositório passou a ser obrigatório: o campo
+          // exigido não pode ficar escondido atrás de "opcional".
+          defaultOpen={precisaRepo || pedidos.has("skills")}
         >
           <div style={{ display: "grid", gap: 20 }}>
             <RepoInput repoUrl={repoUrl} onRepoUrl={setRepoUrl} hideToken />

@@ -24,6 +24,6 @@ export async function GET(req: NextRequest) {
   const v = validate(githubUrlField, req.nextUrl.searchParams.get("repoUrl"));
   if (!v.ok) return jsonError(400, v.message, null);
 
-  const { isPrivateRepo } = await import("@/lib/github");
+  const { isPrivateRepo } = await import("@starguard/core/git");
   return jsonOk({ private: await isPrivateRepo(v.data) });
 }

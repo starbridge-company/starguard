@@ -5,7 +5,7 @@ import {
   tokenForPullRequest,
   isSingleTenant,
   GitHubTokenRequired,
-} from "@/lib/github-auth";
+} from "@starguard/core/github-auth";
 
 // Regra de segurança: o caminho NEGATIVO é o que precisa estar travado — o
 // token do servidor não pode agir em nome de quem não o forneceu.

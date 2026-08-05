@@ -1,0 +1,26 @@
+{
+  "name": "@starguard/cli",
+  "version": "0.1.0",
+  "description": "StarGuard no terminal: o mesmo motor do painel web, sem servidor e sem banco.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "starguard": "./bin/starguard.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "hooks"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../core/scripts/add-extensions.mjs --dir ./dist",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "dependencies": {
+    "@starguard/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.7.0"
+  }
+}

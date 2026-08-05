@@ -8,12 +8,12 @@ import {
   canAccess,
 } from "@/lib/http";
 import { validate, step4Schema } from "@/lib/validation";
-import { generateFix } from "@/lib/tasks";
+import { generateFix } from "@starguard/core";
 import { audit } from "@/lib/auth";
 import { AI_BY_PHASE, FIX_AGENT } from "@/lib/config";
 import * as findingsRepo from "@/lib/repos/findings";
 import { getLocale } from "@/lib/i18n/server";
-import { log } from "@/lib/logger";
+import { log } from "@starguard/core/logger";
 
 export const runtime = "nodejs";
 // O engine de agente (FIX_ENGINE=agent) pode levar minutos: clona o repo e roda

@@ -1,29 +1,29 @@
 // ============================================================
-// Orquestração das 4 fases + persistência no Postgres.
-// /api/analyze cria a linha (status pending) e dispara runJob (fire-and-forget);
-// a Tela 2 faz polling em /api/status/[id] (lê do BD). Segredos (token do
-// GitHub decifrado + conteúdo das skills) vivem APENAS num mapa em memória
-// durante o job e são apagados no fim — nunca são persistidos.
+// Ciclo de vida da análise no painel web.
+//
+// O que este arquivo NÃO faz mais: orquestrar. As quatro fases em sequência
+// saíram daqui — quem decide o que roda, em que ordem e com quanto paralelismo
+// é `@starguard/core/orchestrator`, o mesmo que o terminal e a extensão do VS
+// Code usam. O que sobrou é o que só existe no painel: criar a linha no banco,
+// guardar os segredos em memória enquanto o job vive, disparar sem bloquear a
+// resposta HTTP e recolher análises abandonadas.
+//
+// Segredos (token do GitHub decifrado + conteúdo das skills) vivem APENAS num
+// mapa em memória durante o job e são apagados no fim — nunca são persistidos.
 // ============================================================
 import "server-only";
-import { AI_BY_PHASE, ENGINES, FIX_AGENT, engineSummary } from "@/lib/config";
-import { generateThreatModel, validateSkills, runScan } from "@/lib/tasks";
+import { engineSummary } from "@/lib/config";
+import { analyze, plan } from "@starguard/core";
 import { audit } from "@/lib/auth";
-import { redactError } from "@/lib/redact";
-import { log, timed } from "@/lib/logger";
+import { redactError } from "@starguard/core/redact";
+import { log } from "@starguard/core/logger";
 import * as analysesRepo from "@/lib/repos/analyses";
 import * as tokensRepo from "@/lib/repos/tokens";
-import * as findingsRepo from "@/lib/repos/findings";
+import { computeMetrics, computeProgress, initialPhases, postgresSink } from "@/lib/sinks/postgres";
 import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "@/lib/i18n/config";
 import { translate } from "@/lib/i18n/translate";
-import type {
-  Job,
-  JobInput,
-  JobInputPublic,
-  PhaseKey,
-  PhaseState,
-  Severity,
-} from "@/types";
+import { ANALYZER_IDS, type AnalyzerId } from "@/types";
+import type { Job, JobInput, JobInputPublic, PhaseState } from "@/types";
 
 // Segredos transitórios (nunca vão ao BD).
 interface Transient {
@@ -34,38 +34,13 @@ interface Transient {
   repoUrl?: string;
   token?: string;
   skills: { name: string; content: string }[];
+  /** Analisadores escolhidos na Tela 1. */
+  selected: AnalyzerId[];
 }
 
 const g = globalThis as unknown as { __sg_secrets?: Map<string, Transient> };
 g.__sg_secrets ||= new Map();
 const secrets = g.__sg_secrets!;
-
-function engineLabels(phase: PhaseKey): string[] {
-  const ai = AI_BY_PHASE[phase];
-  if (phase === "software") return [ENGINES.sast, ENGINES.sca];
-  if (phase === "refactor" && ENGINES.fix === "agent")
-    return ["claude-code", FIX_AGENT.model || ai.model];
-  return [`${ai.provider}`, ai.model];
-}
-
-function newPhase<T>(key: PhaseKey, label: string): PhaseState<T> {
-  return {
-    key,
-    label,
-    status: "pending",
-    ai: AI_BY_PHASE[key],
-    engines: engineLabels(key),
-  };
-}
-
-function initialPhases(): Job["phases"] {
-  return {
-    plan: newPhase("plan", "Plan · Modelagem de ameaças"),
-    skills: newPhase("skills", "Code · Validação de Skills"),
-    software: newPhase("software", "Code · Scan do software"),
-    refactor: newPhase("refactor", "Refactor · Correção"),
-  };
-}
 
 /**
  * Resolve o token a usar: por id de token salvo (decifra) ou token inline.
@@ -99,6 +74,8 @@ export interface CreateAnalysisInput extends JobInput {
   tokenId?: string;
   saveToken?: boolean;
   tokenName?: string;
+  /** Vazio ou ausente = todos os analisadores (é o comportamento de sempre). */
+  select?: AnalyzerId[];
 }
 
 /** Cria a análise no BD (status pending) e guarda os segredos em memória. */
@@ -107,11 +84,14 @@ export async function createAnalysis(
   input: CreateAnalysisInput
 ): Promise<string> {
   const token = await resolveToken(userId, input);
+  const selected =
+    input.select?.length ? input.select : ([...ANALYZER_IDS] as AnalyzerId[]);
   const id = await analysesRepo.createAnalysis({
     userId,
     projectName: input.projectName,
     systemDescription: input.systemDescription,
     repoUrl: input.repoUrl || null,
+    selected,
     engineSummary: engineSummary() as unknown as Record<string, unknown>,
     phases: initialPhases(),
   });
@@ -121,6 +101,7 @@ export async function createAnalysis(
     repoUrl: input.repoUrl || undefined,
     token,
     skills: input.skills || [],
+    selected,
   });
   sweepIfDue();
   return id;
@@ -138,6 +119,10 @@ export async function getAnalysis(id: string): Promise<Job | undefined> {
     repoUrl: row.repoUrl ?? undefined,
     hasToken: false,
     skillNames,
+    // Linha antiga não tem a coluna preenchida: ela rodou as quatro fases, que
+    // é o mesmo que ter escolhido todos os analisadores. Ler `null` como
+    // "todos" evita migrar dado histórico só para registrar o óbvio.
+    selected: (row.selected as AnalyzerId[] | null) ?? [...ANALYZER_IDS],
   };
   return {
     id: row.id,
@@ -154,86 +139,22 @@ export async function getAnalysisOwner(id: string): Promise<string | undefined> 
   return row?.userId;
 }
 
-/**
- * Progresso = fases efetivamente CONCLUÍDAS. Gravar 100 no fim do job mesmo
- * com fase em erro fazia a lista mostrar "100%" ao lado de "erro" — duas
- * informações que se contradizem. Ver AUDITORIA.md#BUG-21.
- */
-export function computeProgress(phases: Job["phases"]): number {
-  const all = Object.values(phases) as PhaseState[];
-  if (!all.length) return 0;
-  const done = all.filter((p) => p.status === "done").length;
-  return Math.round((done / all.length) * 100);
-}
-
-// `prsCount` fica de fora de propósito: quem o mantém é o repositório de PRs,
-// que incrementa a cada PR aberto. Recalculá-lo aqui zeraria o contador, já
-// que `phases.refactor.prs` está sempre vazio. Ver AUDITORIA.md#BUG-08.
-function computeMetrics(
-  phases: Job["phases"]
-): Omit<analysesRepo.AnalysisMetrics, "prsCount"> {
-  const scan = phases.software.result;
-  const refactor = phases.refactor.result;
-  const sast = scan?.sast.vulnerabilities ?? [];
-  const sca = scan?.sca.dependencies ?? [];
-  const review = scan?.review?.findings ?? [];
-  const sev = (s: Severity) =>
-    sast.filter((v) => v.severity === s).length +
-    review.filter((v) => v.severity === s).length +
-    sca.filter((d) => d.severity === s).length;
-  return {
-    criticalCount: sev("critical"),
-    highCount: sev("high"),
-    mediumCount: sev("medium"),
-    lowCount: sev("low"),
-    infoCount: sev("info"),
-    sastCount: sast.length,
-    scaCount: sca.length,
-    reviewCount: review.length,
-    fixesCount: refactor?.fixes.length ?? 0,
-    totalFindings: sast.length + sca.length + review.length,
-  };
-}
-
-async function runPhase<T>(
-  phases: Job["phases"],
-  id: string,
-  key: PhaseKey,
-  fn: () => Promise<T>,
-  locale: Locale = DEFAULT_LOCALE
-): Promise<void> {
-  const ph = phases[key] as PhaseState<T>;
-  ph.status = "running";
-  ph.startedAt = Date.now();
-  // Persiste o "running" para o polling refletir o andamento em tempo real.
-  await analysesRepo
-    .patchAnalysis(id, { phases, status: "running" })
-    .catch(() => {});
-  try {
-    // `timed` registra duração e `ok` no mesmo evento — é o que dá métrica de
-    // tempo por fase e taxa de erro sem parsear texto (AUDITORIA.md#ARQ-07).
-    ph.result = await timed("phase", { jobId: id, phase: key }, fn);
-    ph.status = "done";
-  } catch (e) {
-    ph.status = "error";
-    // Redigido: este texto é PERSISTIDO no JSONB e exibido na tela; erros de
-    // ferramenta externa podem carregar credenciais (AUDITORIA.md#SEC-01).
-    ph.error = redactError(e) || translate(locale, "job.phaseFailed");
-  } finally {
-    ph.finishedAt = Date.now();
-  }
-}
+export { computeProgress, computeMetrics };
 
 /**
  * Marca como erro toda fase que não chegou ao fim, com um motivo legível.
  * Sem isto, a análise fica `status: "error"` e a tela não diz o porquê.
+ *
+ * Fase `skipped` é pulada: não terminar algo que ninguém pediu não é falha.
  */
 export function failUnfinishedPhases(
   phases: Job["phases"],
   motivo: string
 ): Job["phases"] {
   for (const p of Object.values(phases) as PhaseState[]) {
-    if (p.status === "done" || p.status === "error") continue;
+    if (p.status === "done" || p.status === "error" || p.status === "skipped") {
+      continue;
+    }
     p.status = "error";
     p.error = motivo;
     p.finishedAt = Date.now();
@@ -333,110 +254,43 @@ export async function runJob(id: string): Promise<void> {
     log.warn("job.orphan", { jobId: id });
     return;
   }
-  const phases = initialPhases();
+
   const locale = raw.locale || DEFAULT_LOCALE;
+  const userId = await analysesRepo
+    .getById(id)
+    .then((r) => r?.userId)
+    .catch(() => undefined);
   audit("analyze.start", { jobId: id });
 
-  // O progresso é derivado das fases concluídas, nunca cravado à mão: era
-  // assim que "100%" convivia com "erro" na lista (#BUG-21).
-  const persist = () =>
-    analysesRepo
-      .patchAnalysis(id, { phases, progress: computeProgress(phases) })
-      .catch(() => {});
+  const sink = postgresSink({
+    analysisId: id,
+    userId: userId ?? "",
+    locale,
+    repoUrl: raw.repoUrl,
+    selected: raw.selected,
+  });
 
   try {
-    await analysesRepo
-      .patchAnalysis(id, { status: "running", startedAt: new Date() })
-      .catch(() => {});
-
-    await runPhase(
-      phases,
-      id,
-      "plan",
-      () => generateThreatModel(raw.systemDescription, locale),
-      locale
-    );
-    await persist();
-
-    await runPhase(
-      phases,
-      id,
-      "skills",
-      () => validateSkills(raw.skills || [], locale),
-      locale
-    );
-    await persist();
-
-    await runPhase(
-      phases,
-      id,
-      "software",
-      () =>
-        runScan(raw.repoUrl, raw.token, {
-          systemDescription: raw.systemDescription,
-          requirements: phases.plan.result?.requirements,
-          locale,
-        }),
-      locale
-    );
-
-    // Cada achado vira uma linha com estado próprio, herdando o que já foi
-    // resolvido em análises anteriores do mesmo repositório. Falhar aqui não
-    // pode derrubar a análise — o JSONB `phases` continua sendo a fonte dos
-    // dados; a tabela é o que dá memória. Ver AUDITORIA.md#FEAT-01.
-    const scanResult = phases.software.result;
-    if (scanResult) {
-      const userId = await analysesRepo
-        .getById(id)
-        .then((r) => r?.userId)
-        .catch(() => undefined);
-      if (userId) {
-        await findingsRepo
-          .persistScanFindings(id, userId, raw.repoUrl || null, scanResult)
-          .then((herdados) => {
-            if (herdados > 0) {
-              log.info("findings.inherited", { jobId: id, count: herdados });
-            }
-          })
-          .catch((e) => log.error("findings.persist.failed", { jobId: id, error: e }));
-      }
-    }
-
-    await persist();
-
-    // A Fase 4 não gera mais correção automática. Ela gerava UMA — só do achado
-    // mais grave — e pelo pior caminho disponível: sem `repoUrl`, ou seja, sem
-    // o arquivo inteiro e sem o engine de agente. O usuário comparava com a
-    // correção sob demanda (que usa os dois) e via duas qualidades diferentes
-    // para o mesmo produto. Somado a isso, com FIX_ENGINE=agent — o padrão —
-    // toda análise custava um clone do repositório e até 4,5 min de agente que
-    // ninguém pediu, contra o princípio já adotado em UX-05 e o cache do
-    // FEAT-02. Correção agora é sempre sob demanda. Ver AUDITORIA.md#BUG-16.
-    await runPhase(
-      phases,
-      id,
-      "refactor",
-      async () => ({ fixes: [], prs: [] }),
-      locale
-    );
-
-    const anyError = (Object.values(phases) as PhaseState[]).some(
-      (p) => p.status === "error"
-    );
-    await analysesRepo.patchAnalysis(id, {
-      phases,
-      progress: computeProgress(phases),
-      status: anyError ? "error" : "done",
-      finishedAt: new Date(),
-      metrics: computeMetrics(phases),
+    await analyze({
+      select: raw.selected,
+      // Sem repositório a origem é `none`: os analisadores que precisam de
+      // código ficam de fora COM motivo, em vez de rodar sobre o vazio.
+      source: raw.repoUrl
+        ? { type: "git", url: raw.repoUrl, token: raw.token }
+        : { type: "none" },
+      locale,
+      systemDescription: raw.systemDescription,
+      skills: raw.skills,
+      sinks: [sink],
     });
     audit("analyze.done", { jobId: id });
   } catch (e) {
-    // Falha inesperada fora das fases: marca a análise como erro — e as fases
-    // que ficaram no meio do caminho recebem o motivo, senão a tela mostra
-    // "erro" sem dizer onde (#BUG-11).
-    failUnfinishedPhases(
-      phases,
+    // Falha FORA dos analisadores (clone impossível, banco fora do ar): o
+    // orquestrador isola a falha de cada analisador, então chegar aqui
+    // significa que a execução inteira caiu. As fases que ficaram no meio do
+    // caminho recebem o motivo, senão a tela mostra "erro" sem dizer onde.
+    const phases = failUnfinishedPhases(
+      sink.phases,
       redactError(e) || translate(locale, "job.unexpected")
     );
     await analysesRepo
@@ -455,9 +309,57 @@ export async function runJob(id: string): Promise<void> {
   }
 }
 
-/** Dispara a orquestração sem bloquear a resposta HTTP. */
-export function startJob(id: string): void {
-  void runJob(id).catch((e) => {
-    log.error("job.failed", { jobId: id, error: e });
+/**
+ * Enfileira a análise. A rota responde sem esperar.
+ *
+ * Antes era `fire-and-forget`: a promessa era disparada e esquecida, e um
+ * restart do processo (todo deploy é um) deixava a linha em `running` para
+ * sempre — o BUG-11. Agora o trabalho vive no banco e alguém volta a pegá-lo.
+ *
+ * **O que a fila NÃO resolve**, e continua aberto no ARQ-06: os SEGREDOS do
+ * job (token do GitHub decifrado, conteúdo das skills) seguem num mapa em
+ * memória. Se o job for retomado por outro processo, eles não estarão lá e a
+ * análise termina como órfã, com a mensagem explicando. Resolver isso exige
+ * decidir onde guardar segredo transitório — e guardá-lo em lugar nenhum foi
+ * uma escolha deliberada de segurança, não um esquecimento.
+ */
+export async function startJob(id: string): Promise<void> {
+  const { enqueue } = await import("@/lib/queue");
+  await enqueue({
+    kind: "analysis",
+    // Só a REFERÊNCIA: o payload é gravado em claro e sobrevive ao job.
+    payload: { analysisId: id },
+    // Mesma análise enfileirada duas vezes é engano de quem chamou.
+    dedupeKey: `analysis:${id}`,
+  }).catch((e) => {
+    log.error("job.enqueue.failed", { jobId: id, error: e });
+    // A fila fora do ar não pode impedir a análise de rodar: cai no caminho
+    // antigo, que é pior (não sobrevive a restart) mas melhor que nada.
+    void runJob(id).catch((err) => log.error("job.failed", { jobId: id, error: err }));
+  });
+}
+
+/**
+ * O que roda e o que não roda, ANTES de criar a análise.
+ *
+ * É o que a Tela 1 consulta para desenhar o seletor: cada analisador com a sua
+ * disponibilidade e, quando indisponível, o motivo. Vale a pena ser a mesma
+ * função que o job usa — se divergissem, a tela ofereceria o que o job recusa.
+ */
+export async function previewPlan(input: {
+  select?: AnalyzerId[];
+  repoUrl?: string;
+  systemDescription?: string;
+  skills?: { name: string; content: string }[];
+  locale?: Locale;
+}) {
+  return plan({
+    select: input.select,
+    source: input.repoUrl
+      ? { type: "git", url: input.repoUrl }
+      : { type: "none" },
+    locale: input.locale,
+    systemDescription: input.systemDescription,
+    skills: input.skills,
   });
 }

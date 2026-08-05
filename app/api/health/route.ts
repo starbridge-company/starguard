@@ -1,6 +1,6 @@
 import { jsonOk } from "@/lib/http";
 import { checkSchema, schemaMessage, MIGRATE_HINT } from "@/lib/schema-check";
-import { checkBinaries } from "@/lib/binaries";
+import { checkBinaries } from "@starguard/core/binaries";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

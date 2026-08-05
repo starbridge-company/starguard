@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, prBatchSchema } from "@/lib/validation";
-import { redact } from "@/lib/redact";
+import { redact } from "@starguard/core/redact";
 import { audit } from "@/lib/auth";
 import * as prRepo from "@/lib/repos/pullRequests";
 import { getDecrypted } from "@/lib/repos/tokens";
-import { GitHubTokenRequired } from "@/lib/github-auth";
+import { GitHubTokenRequired } from "@starguard/core/github-auth";
 import { getAnalysisOwner } from "@/lib/jobs";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     if (v.data.tokenId) {
       token = (await getDecrypted(session.sub, v.data.tokenId)) ?? undefined;
     }
-    const { openPullRequestBatch } = await import("@/lib/github");
+    const { openPullRequestBatch } = await import("@starguard/core/git");
     const pr = await openPullRequestBatch({
       repoUrl: v.data.repoUrl,
       files: v.data.files,

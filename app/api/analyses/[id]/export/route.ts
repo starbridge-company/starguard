@@ -9,7 +9,7 @@ import {
   exportFilename,
   isExportFormat,
   CONTENT_TYPE,
-} from "@/lib/export";
+} from "@starguard/core/export";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

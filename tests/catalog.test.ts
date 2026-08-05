@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lookupCatalog, CATALOG_SIZE, catalogKeys } from "@/lib/catalog";
+import { lookupCatalog, CATALOG_SIZE, catalogKeys } from "@starguard/core/catalog/index";
 import { isGenericSuggestion, FIX_GUIDE } from "@/lib/constants";
 import { translate } from "@/lib/i18n";
 

@@ -4,6 +4,15 @@
 // ============================================================
 import { z } from "zod";
 import { LOCALES } from "@/lib/i18n/config";
+// A allowlist e o parser de URL de repositório passaram para o núcleo: quem
+// clona é o núcleo, e o terminal e o VS Code precisam da MESMA regra sem
+// carregar o Zod junto. Reexportados aqui porque `@/lib/validation` é o
+// endereço que a tela já usa (`RepoInput`, `app/page.tsx`, `BatchFixModal`).
+import { parseGitHubRepo, type GitHubRepoRef } from "@starguard/core/repo-url";
+import { ANALYZER_IDS, type AnalyzerId } from "@/types";
+
+export { parseGitHubRepo };
+export type { GitHubRepoRef };
 
 // E-mail e URL validados por refine (independente de versão do zod).
 const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -14,44 +23,6 @@ export const emailField = z
   .min(3)
   .max(255)
   .refine((v) => emailRe.test(v), "email inválido");
-
-// ---- SSRF: allowlist fixa ----
-// O que protege aqui é a allowlist, e só ela. Existia um `PRIVATE_HOST_RE`
-// testando IP interno DEPOIS de já ter exigido `host === "github.com"`: nunca
-// podia ser verdadeiro. Era código morto que dava falsa sensação de proteção —
-// e nem contra rebind de DNS servia, porque testava a string do host, não o IP
-// resolvido. Ver AUDITORIA.md#BUG-18.
-//
-// Se um dia a allowlist deixar de ser fixa (repositório auto-hospedado, GitHub
-// Enterprise), a checagem de destino interno precisa voltar — e no IP
-// resolvido, não no nome.
-const ALLOWED_HOSTS = new Set(["github.com", "www.github.com"]);
-
-export interface GitHubRepoRef {
-  owner: string;
-  repo: string;
-  url: string;
-}
-
-export function parseGitHubRepo(input: string): GitHubRepoRef | null {
-  let u: URL;
-  try {
-    u = new URL(input.trim());
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:") return null;
-  const host = u.hostname.toLowerCase();
-  if (!ALLOWED_HOSTS.has(host)) return null;
-  const parts = u.pathname.split("/").filter(Boolean);
-  if (parts.length < 2) return null;
-  const owner = parts[0]!;
-  const repo = parts[1]!.replace(/\.git$/, "");
-  if (!/^[\w.-]{1,100}$/.test(owner) || !/^[\w.-]{1,100}$/.test(repo)) {
-    return null;
-  }
-  return { owner, repo, url: `https://github.com/${owner}/${repo}` };
-}
 
 export const githubUrlField = z
   .string()
@@ -78,17 +49,152 @@ export const skillItemSchema = z.object({
   content: z.string().min(1).max(200_000),
 });
 
-export const analyzeSchema = z.object({
-  projectName: z.string().trim().min(1).max(200),
-  systemDescription: z.string().trim().min(1).max(50_000),
-  repoUrl: z.union([githubUrlField, z.literal("")]).optional(),
-  token: z.string().max(500).optional(),
-  // Usar um token salvo na conta (id) em vez de digitar um novo.
-  tokenId: uuidField.optional(),
-  // Ao digitar um token novo: salvá-lo na conta (cifrado) com este nome.
-  saveToken: z.boolean().optional(),
-  tokenName: z.string().trim().max(100).optional(),
-  skills: z.array(skillItemSchema).max(20).optional(),
+/**
+ * Análise — as exigências dependem do que foi PEDIDO.
+ *
+ * Antes, `systemDescription` era obrigatória sempre, porque a modelagem de
+ * ameaças era a fase 1 e rodava em toda análise. Com os analisadores
+ * independentes isso vira uma pergunta sem sentido: quem quer validar uma
+ * skill não deveria ter de descrever o sistema inteiro para poder fazê-lo.
+ *
+ * A regra passou a ser condicional, e por `superRefine` (não por campos
+ * opcionais soltos) para que o erro aponte o CAMPO certo — a tela destaca o
+ * que falta em vez de mostrar "requisição inválida".
+ *
+ * `select` vem de `ANALYZER_IDS`: acrescentar um analisador não pode depender
+ * de alguém lembrar de repetir a lista aqui, ou o seletor ofereceria uma opção
+ * que a rota recusa.
+ */
+export const analyzeSchema = z
+  .object({
+    projectName: z.string().trim().min(1).max(200),
+    // Continua exigida quando `threat` ou `business` estão no pedido — ver o
+    // `superRefine` abaixo. Vazia é aceita no schema para o erro sair de lá,
+    // com o motivo, e não de um `min(1)` genérico.
+    systemDescription: z.string().trim().max(50_000).default(""),
+    repoUrl: z.union([githubUrlField, z.literal("")]).optional(),
+    token: z.string().max(500).optional(),
+    // Usar um token salvo na conta (id) em vez de digitar um novo.
+    tokenId: uuidField.optional(),
+    // Ao digitar um token novo: salvá-lo na conta (cifrado) com este nome.
+    saveToken: z.boolean().optional(),
+    tokenName: z.string().trim().max(100).optional(),
+    skills: z.array(skillItemSchema).max(20).optional(),
+    // Vazio ou ausente = todos (é o comportamento de sempre, e o que as
+    // análises antigas fizeram).
+    select: z.array(z.enum(ANALYZER_IDS)).optional(),
+  })
+  .superRefine((d, ctx) => {
+    // Pedir explicitamente uma lista vazia é diferente de não pedir nada: o
+    // primeiro é engano de quem chama, e rodar "todos" no lugar seria fazer
+    // algo que ninguém autorizou (e que custa IA).
+    if (d.select && d.select.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["select"],
+        message: "Escolha ao menos um analisador.",
+      });
+      return;
+    }
+
+    // SEM seleção explícita = "rode o que der com o que eu forneci". É o que
+    // toda análise fez até aqui: sem repositório, o scan devolvia um resultado
+    // vazio com a nota "nenhum repositório informado", e isso é um resultado
+    // legítimo. Exigir repositório aqui quebraria quem só quer a modelagem de
+    // ameaças. O que o orquestrador faz com o que não pode rodar já está
+    // resolvido: pula, COM motivo.
+    //
+    // O único piso é haver alguma coisa a analisar — senão a análise nasce
+    // sabendo que não vai produzir nada.
+    if (!d.select?.length) {
+      if (!d.systemDescription.trim() && !d.repoUrl?.trim() && !d.skills?.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["systemDescription"],
+          message:
+            "Informe ao menos uma entrada: a descrição do sistema, um repositório ou uma skill.",
+        });
+      }
+      return;
+    }
+
+    // COM seleção explícita, a exigência é firme: nomear `sast` sem informar
+    // repositório é uma contradição, e aceitá-la só adiaria a descoberta para
+    // o relatório vazio.
+    const pedidos = new Set<AnalyzerId>(d.select);
+
+    if (
+      (pedidos.has("threat") || pedidos.has("business")) &&
+      !d.systemDescription.trim()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["systemDescription"],
+        message:
+          "Descreva o sistema: a modelagem de ameaças e a revisão de regras de negócio partem dela.",
+      });
+    }
+
+    const precisaRepo = ["sast", "sca", "business"] as const;
+    if (precisaRepo.some((id) => pedidos.has(id)) && !d.repoUrl?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["repoUrl"],
+        message: "Informe o repositório: os analisadores escolhidos leem código.",
+      });
+    }
+
+    if (pedidos.has("skills") && !d.skills?.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["skills"],
+        message: "Envie ao menos uma skill para validar.",
+      });
+    }
+  });
+
+// ---- OAuth de cliente público ----
+//
+// O `code_challenge` é base64url de um SHA-256: 43 caracteres, sempre. Aceitar
+// qualquer tamanho deixaria passar um desafio construído à mão que não é hash
+// de nada — e a comparação depois falharia num lugar mais fundo, com mensagem
+// pior.
+export const oauthAuthorizeSchema = z.object({
+  clientId: z.string().trim().min(1).max(64),
+  redirectUri: z.string().trim().min(1).max(500),
+  codeChallenge: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9\-_]{43}$/, "code_challenge inválido (base64url de SHA-256)"),
+  codeChallengeMethod: z.string().trim().max(16),
+  // Opaco para o servidor: quem sorteia e quem confere é o cliente. Aqui só se
+  // limita o tamanho, para não virar veículo de dado grande.
+  state: z.string().trim().max(256).optional(),
+});
+
+/**
+ * Proxy de IA (`/api/ai/complete`).
+ *
+ * Os limites de TAMANHO não são formalidade: esta rota chama um modelo com a
+ * chave da Starbridge e cobra da conta. Um prompt de vários megabytes é engano
+ * ou abuso, e nos dois casos custa caro — barrar na entrada é mais barato que
+ * descobrir na fatura.
+ *
+ * `provider` e `model` vêm do CLIENTE porque é ele que sabe qual analisador
+ * está rodando. Por isso são allowlist, não texto livre: sem ela, alguém
+ * pediria um modelo caro que nunca autorizamos.
+ */
+export const aiCompleteSchema = z.object({
+  provider: z.enum(["anthropic", "openai", "google"]),
+  model: z.string().trim().min(1).max(100),
+  system: z.string().max(100_000),
+  prompt: z.string().min(1).max(400_000),
+  // Teto duro do orçamento de saída. O cliente pede, o servidor limita.
+  maxTokens: z.number().int().min(1).max(64_000),
+  /** Só para atribuir o gasto na trilha: "threat", "business", "refactor"… */
+  purpose: z.string().trim().max(40).optional(),
+  /** Nome do repositório, quando a chamada nasceu de uma análise. */
+  repo: z.string().trim().max(200).optional(),
 });
 
 // Cadastro de token do GitHub na conta.

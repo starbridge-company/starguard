@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSemgrep, parseTrivy } from "@/lib/parsers";
+import { parseSemgrep, parseTrivy } from "@starguard/core/parsers";
 
 describe("parseSemgrep", () => {
   it("mapeia o achado e encurta o id da regra", () => {

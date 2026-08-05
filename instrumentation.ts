@@ -11,4 +11,12 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { verifySchemaOnBoot } = await import("@/lib/boot-check");
   await verifySchemaOnBoot();
+
+  // O worker da fila sobe junto com o servidor (AUDITORIA.md#ARQ-04). Antes,
+  // o job era disparado e esquecido: um restart deixava a análise em
+  // `running` para sempre. Agora o trabalho está no banco e alguém volta a
+  // pegá-lo. `QUEUE_WORKER=off` desliga — é o que se usa quando o worker roda
+  // num processo separado.
+  const { iniciarWorker } = await import("@/lib/worker");
+  iniciarWorker();
 }

@@ -11,7 +11,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/client";
 import type { Paged } from "@/lib/pagination";
 import { useMe, clearMe } from "@/lib/useMe";
 import { fmtDate, RoleBadge } from "@/components/listing";
-import { IconKey, IconPlus, IconTrash, IconUser, IconLock } from "@/lib/icons";
+import { IconKey, IconPlus, IconTrash, IconUser, IconLock, IconMonitor } from "@/lib/icons";
 
 interface TokenView {
   id: string;
@@ -25,6 +25,115 @@ interface Profile {
   name: string;
   email: string;
   role: string;
+}
+
+/** Dispositivo conectado — o que `/api/oauth/sessions` devolve. */
+interface DeviceView {
+  id: string;
+  clientId: string;
+  /** Chave de tradução do nome do cliente, não o nome pronto. */
+  nameKey: string;
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+/**
+ * Dispositivos conectados.
+ *
+ * Contrapartida obrigatória de emitir credencial de trinta dias para a
+ * extensão e o terminal: quem conectou precisa conseguir desconectar sozinho.
+ * É também a ação disponível a quem vê um `oauth.reuse_detected` na trilha de
+ * auditoria — sem esta tela, o alerta não teria o que oferecer.
+ */
+function ConnectedDevices() {
+  const { t } = useI18n();
+  const apiError = useApiError();
+  const [devices, setDevices] = useState<DeviceView[] | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await apiGet<{ sessions: DeviceView[] }>("/api/oauth/sessions");
+      setDevices(r.sessions);
+    } catch {
+      // Falha ao listar não pode derrubar a tela de Conta inteira: as outras
+      // seções (idioma, senha, tokens) seguem utilizáveis.
+      setDevices([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const revoke = async (id: string) => {
+    if (!confirm(t("oauth.revokeConfirm"))) return;
+    setErr(null);
+    setMsg(null);
+    setRevoking(id);
+    try {
+      await apiDelete(`/api/oauth/sessions/${id}`);
+      setMsg(t("oauth.revoked"));
+      await load();
+    } catch (e) {
+      setErr(apiError(e, "oauth.revokeFailed"));
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2 className="panel-title-row">
+            <IconMonitor /> {t("oauth.devices")}
+          </h2>
+          <p className="muted">{t("oauth.devicesHint")}</p>
+        </div>
+      </div>
+
+      {err && <div className="alert error">{err}</div>}
+      {msg && <div className="alert success">{msg}</div>}
+
+      {devices === null ? (
+        <div className="empty-state">
+          <span className="button-spinner" />
+        </div>
+      ) : devices.length === 0 ? (
+        <div className="empty-state">{t("oauth.devicesEmpty")}</div>
+      ) : (
+        <div className="device-list">
+          {devices.map((d) => (
+            <div key={d.id} className="device-row">
+              <div className="device-info">
+                <span className="device-name">
+                  {t(d.nameKey as Parameters<typeof t>[0])}
+                </span>
+                <span className="device-meta">
+                  {t("oauth.lastUsed", { when: fmtDate(d.lastUsedAt) })}
+                  {" · "}
+                  {t("oauth.connectedAt", { when: fmtDate(d.createdAt) })}
+                </span>
+                {d.label && <span className="device-agent">{d.label}</span>}
+              </div>
+              <button
+                type="button"
+                className="button ghost small"
+                disabled={revoking === d.id}
+                onClick={() => revoke(d.id)}
+              >
+                {t("oauth.revokeDevice")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function AccountPage() {
@@ -351,6 +460,8 @@ export default function AccountPage() {
           </div>
         </form>
       </section>
+
+      <ConnectedDevices />
 
       {/* Tokens do GitHub */}
       <section className="panel">

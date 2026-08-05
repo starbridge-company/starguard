@@ -17,7 +17,7 @@ import { PT_BR } from "@/lib/i18n/messages";
 
 // A IA é a parte cara e não determinística; aqui interessa a heurística, que é
 // texto NOSSO e portanto é o que precisa sair traduzido.
-vi.mock("@/lib/ai", () => ({
+vi.mock("@starguard/core/ai", () => ({
   runAI: vi.fn(async () => {
     throw new Error("sem IA neste teste");
   }),
@@ -34,7 +34,7 @@ describe("validação de skills · texto gravado no idioma do usuário", () => {
   };
 
   it("grava CHAVE e texto traduzido para cada idioma", async () => {
-    const { analyzeSkill } = await import("@/lib/skills");
+    const { analyzeSkill } = await import("@starguard/core/analyzers/skills");
 
     for (const locale of LOCALES) {
       const r = await analyzeSkill(SKILL_MALICIOSA, locale);
@@ -64,7 +64,7 @@ describe("validação de skills · texto gravado no idioma do usuário", () => {
   });
 
   it("o mesmo achado sai com textos diferentes em idiomas diferentes", async () => {
-    const { analyzeSkill } = await import("@/lib/skills");
+    const { analyzeSkill } = await import("@starguard/core/analyzers/skills");
     const pt = await analyzeSkill(SKILL_MALICIOSA, "pt-BR");
     const en = await analyzeSkill(SKILL_MALICIOSA, "en");
     const es = await analyzeSkill(SKILL_MALICIOSA, "es");
@@ -76,14 +76,19 @@ describe("validação de skills · texto gravado no idioma do usuário", () => {
   });
 
   it("sem idioma informado cai no português, não em chave crua", async () => {
-    const { analyzeSkill } = await import("@/lib/skills");
+    const { analyzeSkill } = await import("@starguard/core/analyzers/skills");
     const r = await analyzeSkill(SKILL_MALICIOSA);
     expect(r.checkedItems[0]!.label).toBe(PT_BR["skillCheck.scope"]);
   });
 });
 
 describe("jsonError · a chave é o que a tela traduz", () => {
-  it("deriva a chave do status quando a rota não informa uma", async () => {
+  // Timeout explícito: `@/lib/http` puxa `lib/auth` → `lib/config` →
+  // `@starguard/core`, e esse grafo cresceu quando o motor virou pacote
+  // (AUDITORIA.md#ARQ-13). O import a frio cabe em ~1,8 s isolado, mas passa
+  // dos 5 s padrão quando 35 arquivos de teste compilam em paralelo — e o
+  // sintoma era um "timeout" que parecia bug de lógica.
+  it("deriva a chave do status quando a rota não informa uma", { timeout: 20_000 }, async () => {
     const { jsonError } = await import("@/lib/http");
     const casos: [number, string][] = [
       [401, "err.unauthenticated"],

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { callAI, AIError } from "@/lib/ai";
+import { callAI, AIError } from "@starguard/core/ai";
 
 // Cobre AUDITORIA.md#BUG-12 (timeout + retry), #BUG-13 (resposta truncada) e
 // #BUG-14 (parâmetros que os modelos atuais da OpenAI exigem). Todos falham

@@ -20,7 +20,7 @@ import {
 import {
   vulnerabilityFingerprint,
   dependencyFingerprint,
-} from "@/lib/fingerprint";
+} from "@starguard/core/fingerprint";
 import type { ScanResult, Vulnerability, DependencyVuln, FixResult } from "@/types";
 
 /** Estados que significam "resolvido" — herdados por análises seguintes. */

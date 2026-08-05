@@ -8,7 +8,7 @@ import { and, desc, eq, gte, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { analyses, users, type NewAnalysis } from "@/db/schema";
 import { paged, type PageParams, type Paged } from "@/lib/pagination";
-import type { Job } from "@/types";
+import type { AnalyzerId, Job } from "@/types";
 
 export type AnalysisStatus = "pending" | "running" | "done" | "error";
 
@@ -72,6 +72,8 @@ export async function createAnalysis(input: {
   projectName: string;
   systemDescription: string;
   repoUrl?: string | null;
+  /** Analisadores escolhidos. Ausente = todos (é como as linhas antigas são lidas). */
+  selected?: AnalyzerId[];
   engineSummary?: Record<string, unknown>;
   phases: Job["phases"];
 }): Promise<string> {
@@ -82,6 +84,7 @@ export async function createAnalysis(input: {
     repoUrl: input.repoUrl ?? null,
     status: "pending",
     progress: 0,
+    selected: input.selected,
     engineSummary: input.engineSummary,
     phases: input.phases,
   };

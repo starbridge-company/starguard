@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateThreatModel } from "@/lib/tasks";
+import { generateThreatModel } from "@starguard/core/analyzers/threat";
 
 // Chamada REAL ao provedor de IA — `npm run test:live`, fora do `npm test`.
 //

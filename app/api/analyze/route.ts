@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
     locale: await getLocale(),
     projectName: v.data.projectName,
     systemDescription: v.data.systemDescription,
+    // Ausente = todos os analisadores, que é o que toda análise fez até aqui.
+    select: v.data.select,
     repoUrl: v.data.repoUrl || undefined,
     token: v.data.token || undefined,
     tokenId: v.data.tokenId || undefined,
@@ -27,6 +29,6 @@ export async function POST(req: NextRequest) {
     skills: v.data.skills || [],
   });
 
-  startJob(id);
+  await startJob(id);
   return jsonOk({ id }, 201);
 }

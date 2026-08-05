@@ -7,7 +7,7 @@ import {
   buildDependencyFixPrompt,
   dependencyFixTitle,
 } from "@/lib/deps-fix";
-import { manifestForTarget, parseTrivy } from "@/lib/parsers";
+import { manifestForTarget, parseTrivy } from "@starguard/core/parsers";
 import { translate } from "@/lib/i18n/translate";
 import { LOCALES } from "@/lib/i18n/config";
 import type { DependencyVuln } from "@/types";

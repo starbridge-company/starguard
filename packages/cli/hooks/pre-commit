@@ -1,0 +1,55 @@
+#!/bin/sh
+# ============================================================
+# StarGuard — hook de pre-commit.
+#
+# Roda SÓ o que é rápido e local: semgrep e trivy, sem IA nenhuma. Segundos,
+# não minutos.
+#
+# Essa restrição é o desenho, não uma limitação. Um hook que segura o commit
+# chamando modelo é desinstalado no primeiro dia — o `--no-verify` existe e as
+# pessoas usam. O que exige IA (a revisão de regras de negócio e o PR de
+# correções) acontece no SERVIDOR, depois do push, pelo GitHub App.
+#
+# Por padrão ele AVISA e deixa passar. Bloquear commit é decisão de time, não
+# nossa: `starguard.hookBlocks=true` no git config liga o bloqueio.
+#
+#   git config starguard.hookBlocks true      # bloqueia em achado grave
+#   git config starguard.hookSeverity high    # a partir de qual severidade
+#
+# Instale com `starguard hook install`.
+# ============================================================
+
+command -v starguard >/dev/null 2>&1 || {
+  # StarGuard não instalado não pode impedir ninguém de commitar.
+  exit 0
+}
+
+BLOQUEIA=$(git config --get starguard.hookBlocks || echo "false")
+SEVERIDADE=$(git config --get starguard.hookSeverity || echo "high")
+
+printf '\n  StarGuard · verificação rápida (sem IA)\n'
+
+# `--only sast,sca`: os dois que não custam IA.
+# `--no-ai`: cinto e suspensório — mesmo que alguém tenha feito login, este
+#            caminho não gasta a cota da conta.
+starguard scan . --only sast,sca --no-ai --fail-on "$SEVERIDADE"
+CODIGO=$?
+
+if [ $CODIGO -eq 1 ]; then
+  if [ "$BLOQUEIA" = "true" ]; then
+    printf '\n  Commit bloqueado por achado em %s ou pior.\n' "$SEVERIDADE"
+    printf '  Para commitar assim mesmo: git commit --no-verify\n\n'
+    exit 1
+  fi
+  printf '\n  Achados acima. O commit segue; a correção sai no PR do StarGuard.\n\n'
+  exit 0
+fi
+
+# Código 2 = a ferramenta falhou (binário ausente, repositório ilegível). Isso
+# é problema NOSSO e não pode virar problema de quem está commitando.
+if [ $CODIGO -eq 2 ]; then
+  printf '  StarGuard não conseguiu rodar. O commit segue.\n\n'
+  exit 0
+fi
+
+exit 0

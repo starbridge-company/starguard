@@ -1,0 +1,209 @@
+{
+  "name": "starguard-vscode",
+  "displayName": "StarGuard",
+  "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
+  "version": "0.1.0",
+  "publisher": "starbridge",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.git",
+    "workspaceContains:.starguard.json",
+    "onUri"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "starguard.runAll",
+        "title": "StarGuard: analisar tudo",
+        "icon": "$(play)"
+      },
+      {
+        "command": "starguard.runAnalyzer",
+        "title": "StarGuard: analisar…",
+        "icon": "$(play)"
+      },
+      {
+        "command": "starguard.runOne",
+        "title": "StarGuard: rodar este analisador",
+        "icon": "$(play)"
+      },
+      {
+        "command": "starguard.validateCurrentSkill",
+        "title": "StarGuard: validar a skill aberta"
+      },
+      {
+        "command": "starguard.fix",
+        "title": "StarGuard: corrigir com IA"
+      },
+      {
+        "command": "starguard.clear",
+        "title": "StarGuard: limpar os achados",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "starguard.setApiKey",
+        "title": "StarGuard: definir a chave de IA"
+      },
+      {
+        "command": "starguard.doctor",
+        "title": "StarGuard: diagnóstico"
+      },
+      {
+        "command": "starguard.signIn",
+        "title": "StarGuard: entrar na conta"
+      },
+      {
+        "command": "starguard.signOut",
+        "title": "StarGuard: sair da conta"
+      },
+      {
+        "command": "starguard.requestAccess",
+        "title": "StarGuard: solicitar acesso"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "starguard.analyzers",
+          "name": "StarGuard"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "starguard.runAll",
+          "when": "view == starguard.analyzers && starguard.signedIn",
+          "group": "navigation@1"
+        },
+        {
+          "command": "starguard.clear",
+          "when": "view == starguard.analyzers",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "starguard.runOne",
+          "when": "view == starguard.analyzers && viewItem == analyzer-ready && starguard.signedIn",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "StarGuard",
+      "properties": {
+        "starguard.analyzers.enabled": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "threat",
+              "sast",
+              "sca",
+              "business",
+              "skills"
+            ]
+          },
+          "default": [
+            "sast",
+            "sca"
+          ],
+          "markdownDescription": "Analisadores que rodam em **StarGuard: analisar tudo**. O padrão traz só os dois que não custam IA; os outros continuam disponíveis um a um pela árvore."
+        },
+        "starguard.semgrepPath": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do executável do Opengrep/Semgrep. Vazio = procura no PATH."
+        },
+        "starguard.trivyPath": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do executável do Trivy. Vazio = procura no PATH."
+        },
+        "starguard.locale": {
+          "type": "string",
+          "enum": [
+            "pt-BR",
+            "en",
+            "es"
+          ],
+          "default": "pt-BR",
+          "description": "Idioma dos achados e das explicações."
+        },
+        "starguard.systemDescription": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Descrição do sistema, usada pela modelagem de ameaças e pela revisão de **regras de negócio**. Sem ela, esses dois analisadores não têm o que verificar."
+        },
+        "starguard.server": {
+          "type": "string",
+          "default": "https://starguard-31l1.onrender.com",
+          "markdownDescription": "Servidor do StarGuard usado para autenticar. Troque apenas se sua equipe hospeda a própria instância."
+        },
+        "starguard.requestAccessUrl": {
+          "type": "string",
+          "default": "https://starguard-31l1.onrender.com/login",
+          "description": "Página para onde 'Solicitar acesso' leva quem ainda não tem conta."
+        }
+      }
+    },
+    "authentication": [
+      {
+        "id": "starguard",
+        "label": "StarGuard"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "starguard.analyzers",
+        "when": "!starguard.signedIn",
+        "contents": "Análise de segurança com a sua conta StarGuard.\n\n[Entrar](command:starguard.signIn)\n\nAinda não tem conta?\n[Solicitar acesso](command:starguard.requestAccess)"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node build.mjs --producao",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "build:dev": "node build.mjs",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies -o starguard.vsix",
+    "publish:marketplace": "vsce publish --no-dependencies",
+    "icon": "node scripts/gerar-icone.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.0",
+    "@starguard/core": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/starguard/starguard",
+    "directory": "packages/vscode"
+  },
+  "keywords": [
+    "security",
+    "sast",
+    "sca",
+    "semgrep",
+    "trivy",
+    "appsec",
+    "cwe"
+  ],
+  "galleryBanner": {
+    "color": "#141a17",
+    "theme": "dark"
+  },
+  "icon": "icon.png"
+}

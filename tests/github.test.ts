@@ -79,7 +79,7 @@ vi.mock("octokit", () => ({
   },
 }));
 
-const { openPullRequest, openPullRequestBatch } = await import("@/lib/github");
+const { openPullRequest, openPullRequestBatch } = await import("@starguard/core/git");
 
 beforeEach(() => {
   criados.length = 0;

@@ -10,11 +10,22 @@ import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { API_RATE, COOKIE, ROLES } from "@/lib/config";
 
 // Rotas públicas (não exigem sessão).
+//
+// `/api/oauth/token` é pública por DEFINIÇÃO: é onde um cliente que ainda não
+// tem credencial vem buscar a primeira. Ela se defende sozinha — cota própria,
+// mais apertada que a global, e PKCE. Ver `app/api/oauth/token/route.ts`.
+//
+// `/oauth/authorize` (a PÁGINA) também entra, mas por outro motivo: ela precisa
+// ser alcançável para poder redirecionar quem não tem sessão até o login. O
+// POST que de fato emite o código (`/api/oauth/authorize`) NÃO está aqui —
+// aquele exige sessão e CSRF.
 const PUBLIC_PATHS = new Set<string>([
   "/login",
   "/api/auth/login",
   "/api/auth/refresh",
   "/api/health",
+  "/oauth/authorize",
+  "/api/oauth/token",
 ]);
 
 function isPublic(path: string): boolean {
@@ -26,8 +37,17 @@ function isPublic(path: string): boolean {
 //  - /api/status/*    -> polling da tela de resultados (já com backoff no
 //                        cliente); o custo da UI não pode consumir a cota
 //                        anti-abuso e derrubar a própria tela.
+//  - /api/oauth/token -> tem cota PRÓPRIA e mais apertada (20/min por
+//                        cliente+IP). Deixá-la também no balde global faria a
+//                        renovação silenciosa da extensão competir com o
+//                        tráfego de navegação e derrubar o editor de quem não
+//                        fez nada de errado.
 function isRateExempt(path: string): boolean {
-  return path === "/api/auth/login" || path.startsWith("/api/status/");
+  return (
+    path === "/api/auth/login" ||
+    path === "/api/oauth/token" ||
+    path.startsWith("/api/status/")
+  );
 }
 
 function json(status: number, body: Record<string, unknown>): NextResponse {

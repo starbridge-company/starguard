@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   vulnerabilityFingerprint,
   dependencyFingerprint,
-} from "@/lib/fingerprint";
+} from "@starguard/core/fingerprint";
 import type { Vulnerability, DependencyVuln } from "@/types";
 
 const base: Vulnerability = {

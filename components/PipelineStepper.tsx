@@ -53,6 +53,7 @@ const STATUS_KEY: Record<StepStatus, MessageKey> = {
   running: "pipe.status.running",
   done: "pipe.status.done",
   error: "pipe.status.error",
+  skipped: "pipe.status.skipped",
 };
 
 export interface StepMetric {

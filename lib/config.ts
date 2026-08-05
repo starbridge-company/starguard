@@ -1,111 +1,17 @@
 // ============================================================
-// Configuração central — mapa headless step -> { provider, model, engine }.
-// Tudo trocável por env, sem tocar no código. As rotas NÃO referenciam
-// provider/engine diretamente: passam pelo config + lib/ai.
+// Configuração do APP WEB — sessão, senha, cota de requisição, papéis e banco.
+//
+// A configuração do MOTOR (provedor de IA, orçamento de tokens, engines,
+// caminho dos binários) mudou de endereço: mora em `@starguard/core/config`,
+// porque o terminal e a extensão do VS Code precisam dela e não têm servidor
+// web nenhum por perto. O `export *` abaixo mantém todos os importadores
+// antigos funcionando — `import { ENGINES } from "@/lib/config"` continua
+// certo, e continua devolvendo exatamente a mesma coisa.
+//
+// O que fica AQUI é o que só existe porque há um servidor HTTP: Argon2id, JWT,
+// cookies, rate limit, RBAC e a semente do banco.
 // ============================================================
-import type { AIProvider, PhaseKey, StepAIConfig } from "@/types";
-
-const DEFAULT_PROVIDER = (process.env.AI_PROVIDER as AIProvider) || "anthropic";
-const DEFAULT_MODEL = process.env.AI_MODEL || "claude-sonnet-5";
-
-/**
- * Teto de saída por etapa, em tokens.
- *
- * Não é um controle de usuário — é ajuste nosso, por env. Os modelos com
- * "extended thinking" (claude-sonnet-5 e afins) gastam ESTE MESMO orçamento
- * raciocinando antes de escrever: uma descrição de sistema longa aumenta o
- * pensamento e o JSON acaba cortado no meio. A Fase 1 foi a que estourou na
- * prática. Ver AUDITORIA.md#BUG-13.
- */
-const STEP_MAX_TOKENS: Record<1 | 2 | 3 | 4, number> = {
-  1: 16000, // modelagem de ameaças: thinking + JSON com ameaças e requisitos
-  2: 8000, // validação de skills
-  3: 16000, // revisão por IA do repositório
-  4: 16000, // correção de código (arquivo inteiro na resposta)
-};
-
-export function phaseMaxTokens(n: 1 | 2 | 3 | 4): number {
-  return Number(process.env[`STEP${n}_MAX_TOKENS`] || STEP_MAX_TOKENS[n]);
-}
-
-/** Teto absoluto do retry automático — freio contra custo desgovernado. */
-export const AI_MAX_OUTPUT_TOKENS = Number(
-  process.env.AI_MAX_OUTPUT_TOKENS || 32000
-);
-
-function stepAI(n: 1 | 2 | 3 | 4): StepAIConfig {
-  const provider =
-    (process.env[`STEP${n}_PROVIDER`] as AIProvider) || DEFAULT_PROVIDER;
-  const model = process.env[`STEP${n}_MODEL`] || DEFAULT_MODEL;
-  return { provider, model };
-}
-
-// Etapa -> configuração de IA (fase 3 não usa IA para escanear, mas usa para
-// contextualizar os achados — reaproveita STEP3 se definido, senão o default).
-export const AI_BY_PHASE: Record<Exclude<PhaseKey, never>, StepAIConfig> = {
-  plan: stepAI(1),
-  skills: stepAI(2),
-  software: stepAI(3),
-  refactor: stepAI(4),
-};
-
-/**
- * Parâmetros HTTP das chamadas de IA. Ver AUDITORIA.md#BUG-12.
- *
- * É função, e não constante de módulo, porque estes valores são lidos dentro
- * de laços de retry — e os testes precisam zerar o backoff sem reimportar o
- * módulo inteiro.
- */
-export function aiHttp(phase?: PhaseKey) {
-  // Teto de tempo por chamada. Sem ele, um provedor lento segura a fase até o
-  // `maxDuration` da rota e o usuário não recebe erro nenhum.
-  //
-  // Mas o teto GLOBAL de 120 s era curto demais para a correção: ela devolve o
-  // arquivo INTEIRO, e emitir mil linhas leva minutos. A rota tem
-  // `maxDuration = 300`, então abortar em 120 s desperdiçava dois terços do
-  // orçamento e devolvia "tempo esgotado" numa chamada que ia terminar.
-  const padrao = Number(process.env.AI_TIMEOUT_MS || 120_000);
-  const porFase =
-    phase === "refactor" || phase === "software"
-      ? Number(process.env.AI_TIMEOUT_LONG_MS || 280_000)
-      : padrao;
-  return {
-    timeoutMs: Math.max(padrao, porFase),
-    // Tentativas ADICIONAIS após a primeira falha reentrante (429/5xx).
-    maxRetries: Number(process.env.AI_MAX_RETRIES ?? 2),
-    // Base do backoff exponencial; o `retry-after` do provedor tem prioridade.
-    retryBaseMs: Number(process.env.AI_RETRY_BASE_MS ?? 800),
-  };
-}
-
-export const ENGINES = {
-  sast: (process.env.SAST_ENGINE || "opengrep").toLowerCase(),
-  sca: (process.env.SCA_ENGINE || "trivy").toLowerCase(),
-  dast: (process.env.DAST_ENGINE || "none").toLowerCase(),
-  // Fase 4 (Correção): "agent" (padrão) = agente autônomo (Claude Agent SDK) que
-  // lê o repo e edita os arquivos; "api" = disparo único na Claude API.
-  // O agente é a via principal; a API entra como fallback silencioso se ele falhar.
-  fix: (process.env.FIX_ENGINE || "agent").toLowerCase(),
-};
-
-// Parâmetros do engine de agente (só usados quando FIX_ENGINE=agent).
-export const FIX_AGENT = {
-  model: process.env.FIX_AGENT_MODEL || "",
-  maxTurns: Number(process.env.FIX_AGENT_MAX_TURNS || 24),
-  maxBudgetUsd: Number(process.env.FIX_AGENT_BUDGET_USD || 1),
-  timeoutMs: Number(process.env.FIX_AGENT_TIMEOUT_MS || 270_000),
-};
-
-export const BIN = {
-  semgrep: process.env.SEMGREP_BIN || "semgrep",
-  opengrep: process.env.OPENGREP_BIN || "opengrep",
-  trivy: process.env.TRIVY_BIN || "trivy",
-};
-
-// Ruleset do SAST (Opengrep/Semgrep). "auto" baixa regras do registro remoto
-// (semgrep.dev) — exige rede + CA confiável. Aponte SAST_RULES para um diretório
-// de regras local para rodar offline, sem depender de rede/SSL.
-export const SAST_CONFIG = process.env.SAST_RULES || "auto";
+export * from "@starguard/core/config";
 
 // ---- Argon2id ----
 export const ARGON = {
@@ -189,14 +95,3 @@ export const SEED_ADMIN = {
   name: "Membro",
   role: ROLES.admin,
 };
-
-// Resumo legível para exibir no header/relatório ("como está configurado agora").
-export function engineSummary() {
-  return {
-    sast: ENGINES.sast,
-    sca: ENGINES.sca,
-    dast: ENGINES.dast,
-    fix: ENGINES.fix,
-    ai: AI_BY_PHASE,
-  };
-}

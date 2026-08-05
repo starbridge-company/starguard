@@ -5,12 +5,12 @@ import type { Vulnerability, DependencyVuln } from "@/types";
 // passam a ser testáveis. Resolve AUDITORIA.md#PEND-13 (enriquecimento por IA
 // nunca exercitado) sem precisar de rede nem de crédito.
 const runAI = vi.fn();
-vi.mock("@/lib/ai", async () => {
-  const real = await vi.importActual<typeof import("@/lib/ai")>("@/lib/ai");
+vi.mock("@starguard/core/ai", async () => {
+  const real = await vi.importActual<typeof import("@starguard/core/ai")>("@starguard/core/ai");
   return { ...real, runAI: (...a: unknown[]) => runAI(...a) };
 });
 
-const { enrichFindings, enrichDependencies } = await import("@/lib/enrich");
+const { enrichFindings, enrichDependencies } = await import("@starguard/core/enrich");
 
 function vuln(over: Partial<Vulnerability> = {}): Vulnerability {
   return {

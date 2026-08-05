@@ -9,12 +9,26 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./", import.meta.url)),
-      "server-only": fileURLToPath(
-        new URL("./tests/stubs/empty.ts", import.meta.url)
-      ),
-    },
+    // Lista ordenada: `@` casaria com o começo de `@starguard/core`.
+    alias: [
+      {
+        find: /^@starguard\/core$/,
+        replacement: fileURLToPath(
+          new URL("./packages/core/src/index.ts", import.meta.url)
+        ),
+      },
+      {
+        find: /^@starguard\/core\//,
+        replacement: fileURLToPath(new URL("./packages/core/src/", import.meta.url)),
+      },
+      { find: /^@\//, replacement: fileURLToPath(new URL("./", import.meta.url)) },
+      {
+        find: "server-only",
+        replacement: fileURLToPath(
+          new URL("./tests/stubs/empty.ts", import.meta.url)
+        ),
+      },
+    ],
   },
   test: {
     environment: "node",

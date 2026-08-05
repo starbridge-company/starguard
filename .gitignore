@@ -36,3 +36,10 @@ yarn-error.log*
 
 # cobertura de testes
 /coverage/
+
+# Build dos pacotes (@starguard/core, @starguard/cli, extensão)
+packages/*/dist/
+packages/*/*.tsbuildinfo
+
+# Extensão empacotada — gerada por `npm run package:vscode`
+*.vsix

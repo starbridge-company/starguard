@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, readJson, requireSession, requireCsrf } from "@/lib/http";
 import { validate, cloneSchema } from "@/lib/validation";
-import { redact } from "@/lib/redact";
+import { redact } from "@starguard/core/redact";
 
 export const runtime = "nodejs";
 
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (!v.ok) return jsonError(400, v.message, null);
 
   try {
-    const { getRepoMeta } = await import("@/lib/github");
+    const { getRepoMeta } = await import("@starguard/core/git");
     const meta = await getRepoMeta(v.data.repoUrl, v.data.token);
     return jsonOk(meta);
   } catch (e) {

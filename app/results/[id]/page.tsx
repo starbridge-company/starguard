@@ -71,6 +71,7 @@ const PHASE_STATUS_KEY: Record<StepStatus, MessageKey> = {
   pending: "phase.pending",
   error: "phase.error",
   done: "phase.done",
+  skipped: "phase.skipped",
 };
 
 const SEV_TEXT: Record<Severity, string> = {
@@ -531,6 +532,16 @@ export default function ResultsPage() {
       );
     if (st === "pending")
       return <div className="empty-state">{t("results.waitingPrevious")}</div>;
+    // Não pedido nesta análise: a aba continua existindo (o layout não dança
+    // entre uma análise e outra) e diz o motivo. Cair no estado vazio genérico
+    // aqui mostraria "nenhuma ameaça encontrada 🎉" sobre algo que ninguém
+    // analisou — o mesmo engano que o UX-15 corrigiu no scan.
+    if (st === "skipped")
+      return (
+        <div className="empty-state">
+          {job.phases[key].error || t("select.notRunHere")}
+        </div>
+      );
     if (st === "error")
       return <div className="alert error">{job.phases[key].error || t("results.phaseFailed")}</div>;
     return null;

@@ -14,6 +14,8 @@ const config = [
       "db/migrations/**",
       "coverage/**",
       "next-env.d.ts",
+      // Saída de build dos pacotes: código gerado, não escrito.
+      "packages/*/dist/**",
     ],
   },
   // Traz React/Next + jsx-a11y, que pega boa parte do bloco de acessibilidade
@@ -48,8 +50,37 @@ const config = [
   },
   {
     // Scripts de CLI e testes imprimem no console de propósito.
-    files: ["scripts/**", "tests/**", "e2e/**"],
+    files: ["scripts/**", "tests/**", "e2e/**", "packages/*/tests/**", "packages/*/scripts/**"],
     rules: { "no-console": "off" },
+  },
+  {
+    // ---- A fronteira do núcleo (AUDITORIA.md#ARQ-13) ----
+    //
+    // `packages/core` serve TRÊS produtos: o painel web, o terminal e a
+    // extensão do VS Code. Um import do Next, do React ou do Drizzle aqui só
+    // falha quando alguém roda `starguard` no terminal — longe de quem
+    // escreveu, e depois de o pacote já ter sido publicado. É o mesmo modo de
+    // falha que o CLAUDE.md registra sobre importar `lib/i18n/index.tsx` do
+    // servidor: não quebra tipo nem build, só runtime.
+    //
+    // Há teste cobrindo isto (`packages/core/tests/boundary.test.ts`); a regra
+    // de lint existe para o erro aparecer AO ESCREVER, não ao rodar a suíte.
+    files: ["packages/core/src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: ["next", "next/*"], message: "O núcleo roda sem Next (terminal, VS Code)." },
+            { group: ["server-only"], message: "Marcador do Next; fora dele não resolve." },
+            { group: ["react", "react-dom", "react/*"], message: "O motor não desenha tela." },
+            { group: ["drizzle-orm", "drizzle-orm/*", "pg"], message: "Persistência é sink, não motor." },
+            { group: ["zod"], message: "Validação de entrada HTTP é do app." },
+            { group: ["@/*"], message: "Alias do app web; use caminho relativo dentro do núcleo." },
+          ],
+        },
+      ],
+    },
   },
 ];
 

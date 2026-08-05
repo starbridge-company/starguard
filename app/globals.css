@@ -1889,65 +1889,163 @@ img {
 }
 
 /* ============================================================
-   MINI-PIPELINE (onboarding) — 4 fases compactas
+   SELETOR DE ANALISADORES (onboarding)
+
+   Substituiu o mini-pipeline de 4 caixas fixas: aquilo ilustrava um fluxo
+   obrigatório, isto é uma escolha. O estado `is-off` mantém o cartão VISÍVEL
+   e legível — some da seleção, não da tela, porque o motivo da
+   indisponibilidade é a informação mais útil ali.
    ============================================================ */
 
-.mini-pipeline {
+.picker-head {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   flex-wrap: wrap;
-  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.mini-pipeline .infotip {
-  flex: 1 1 150px;
-}
-
-.mini-step {
+.picker-actions {
   display: flex;
-  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.analyzer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 10px;
-  width: 100%;
-  padding: 12px 14px;
+}
+
+.analyzer-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
   border-radius: var(--radius-md);
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-xs);
-  cursor: help;
+  cursor: pointer;
   transition: border-color var(--duration-normal) var(--ease),
-    transform var(--duration-normal) var(--ease),
-    box-shadow var(--duration-normal) var(--ease);
+    background var(--duration-normal) var(--ease),
+    transform var(--duration-normal) var(--ease);
 }
 
-.mini-step:hover {
-  border-color: rgba(var(--accent-rgb), 0.3);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
+.analyzer-card:hover:not(.is-off) {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  transform: translateY(-1px);
 }
 
-.mini-step > svg {
-  width: 18px;
-  height: 18px;
-  color: hsl(var(--accent));
-  flex-shrink: 0;
+.analyzer-card.is-on {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 
-.mini-step-num {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(var(--accent-rgb), 0.14);
-  color: hsl(var(--accent));
+/* Indisponível: apagado, mas legível. Esconder o cartão faria a pessoa achar
+   que a ferramenta não tem aquela análise. Ver AUDITORIA.md#UX-15. */
+.analyzer-card.is-off {
+  cursor: not-allowed;
+  opacity: 0.62;
+  background: transparent;
+}
+
+/* O checkbox nativo fica fora de vista mas continua sendo o controle: é ele
+   que o leitor de tela anuncia e o teclado alcança. */
+.analyzer-card input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.analyzer-card:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.analyzer-icon {
   display: grid;
   place-items: center;
-  font-size: 0.72rem;
-  font-weight: 800;
-  font-family: var(--font-main);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.12);
   flex-shrink: 0;
 }
 
-.mini-step-label {
+.analyzer-icon > svg {
+  width: 17px;
+  height: 17px;
+  color: hsl(var(--accent));
+}
+
+.analyzer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.analyzer-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
-  font-size: 0.86rem;
+  font-size: 0.88rem;
+}
+
+.analyzer-badge {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.analyzer-badge > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.analyzer-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.analyzer-reason {
+  font-size: 0.75rem;
+  color: hsl(var(--danger));
+  line-height: 1.4;
+}
+
+.analyzer-detail {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+}
+
+.analyzer-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: hsl(var(--accent));
+  color: #fff;
+}
+
+.analyzer-check > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.field-hint.is-warn {
+  color: hsl(var(--danger));
 }
 
 /* ============================================================
@@ -2019,6 +2117,19 @@ img {
   background: hsl(var(--danger));
 }
 
+/* Não executado: apagado, mas PRESENTE. Some da atenção, não do stepper —
+   esconder a etapa faria a análise parecer completa quando ela foi parcial
+   por escolha. Ver AUDITORIA.md#UX-15 e o tipo `StepStatus`. */
+.pipe-node.is-skipped {
+  opacity: 0.45;
+}
+
+.pipe-node.is-skipped .pipe-dot {
+  border-style: dashed;
+  color: var(--text-muted);
+  background: transparent;
+}
+
 .pipe-node:hover .pipe-dot {
   transform: translateY(-2px);
   box-shadow: var(--shadow-sm);
@@ -2042,6 +2153,7 @@ img {
 .pipe-node.is-running .pipe-state { color: hsl(var(--accent)); }
 .pipe-node.is-done .pipe-state { color: hsl(var(--success)); }
 .pipe-node.is-error .pipe-state { color: hsl(var(--danger)); }
+.pipe-node.is-skipped .pipe-state { color: var(--text-muted); }
 
 .pipe-conn {
   flex: 1 1 24px;
@@ -3521,3 +3633,84 @@ a.cell-strong:hover {
 }
 .token-prompt-head svg { width: 18px; height: 18px; flex-shrink: 0; }
 .token-prompt-head p { margin: 2px 0 0; font-size: 0.8rem; }
+
+/* ============================================================
+   CONSENTIMENTO DE OAUTH + DISPOSITIVOS CONECTADOS
+   ============================================================ */
+
+/* A lista de permissões é o conteúdo mais importante da tela: é o que
+   transforma o botão "Autorizar" em consentimento de fato. */
+.oauth-scopes {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  margin: 0;
+  border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+}
+
+.oauth-scopes li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.oauth-scopes svg {
+  width: 15px;
+  height: 15px;
+  color: hsl(var(--accent));
+  flex-shrink: 0;
+}
+
+.oauth-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.device-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.device-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.device-meta {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+/* O rótulo é o user-agent do cliente: pode ser longo e não pode empurrar o
+   botão de revogar para fora da tela. */
+.device-agent {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}

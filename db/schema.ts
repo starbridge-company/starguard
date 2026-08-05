@@ -15,7 +15,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { Job } from "@/types";
+import type { AnalyzerId, Job } from "@/types";
 
 // Namespace físico no Postgres. A migração gera `CREATE SCHEMA "starguard"`.
 export const starguard = pgSchema("starguard");
@@ -101,6 +101,18 @@ export const analyses = starguard.table(
     repoUrl: text("repo_url"),
     status: analysisStatusEnum("status").notNull().default("pending"),
     progress: integer("progress").notNull().default(0),
+    /**
+     * Analisadores escolhidos nesta execução.
+     *
+     * NULL nas linhas antigas, e é assim que fica: elas rodaram as quatro
+     * fases sempre, que é o mesmo que ter escolhido todos. `lib/jobs.ts` lê
+     * `null` como "todos" — reescrever histórico só para registrar o óbvio
+     * seria mexer em dado de produção sem ganho.
+     *
+     * Vale ficar registrado porque a tela precisa saber, meses depois, se uma
+     * aba está vazia por não ter achado nada ou por não ter sido pedida.
+     */
+    selected: jsonb("selected").$type<AnalyzerId[]>(),
     // Snapshot da config de engines/IA no momento da análise.
     engineSummary: jsonb("engine_summary").$type<Record<string, unknown>>(),
     // Mesmo shape de Job["phases"] — as telas results/report consomem direto.
@@ -271,6 +283,185 @@ export const revokedTokens = starguard.table(
   (t) => [index("revoked_expires_idx").on(t.expiresAt)]
 );
 
+// ---- oauth_codes (código de autorização, PKCE) ----
+//
+// O código vive 60 segundos e é de uso ÚNICO. Guardamos o HASH dele, nunca o
+// código: pelo mesmo motivo que senha é hasheada — um dump do banco não pode
+// render credencial utilizável.
+//
+// A linha guarda tudo a que o código está amarrado (`client_id`,
+// `redirect_uri`, `code_challenge`). Na troca, os três são reconferidos contra
+// o que o cliente apresenta; qualquer divergência recusa. Sem essa amarração, um
+// código interceptado valeria para outro cliente ou outro destino.
+export const oauthCodes = starguard.table(
+  "oauth_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    clientId: text("client_id").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    /** Desafio PKCE (S256). O `plain` é recusado antes de chegar aqui. */
+    codeChallenge: text("code_challenge").notNull(),
+    scope: text("scope"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Preenchido no resgate. Não-nulo = já usado; apresentar de novo recusa. */
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("oauth_codes_expires_idx").on(t.expiresAt)]
+);
+
+// ---- oauth_sessions (sessão de cliente público: VS Code, CLI) ----
+//
+// Uma linha por dispositivo conectado. É o que sustenta três coisas de uma vez:
+//
+//  1. ROTAÇÃO com detecção de reuso. Cada refresh emite um novo token e grava o
+//     `current_jti`. Se chegar um refresh cuja `family_id` existe mas cujo
+//     `jti` NÃO é o corrente, alguém está repetindo um token antigo — ou seja,
+//     roubado. A família inteira é revogada.
+//  2. A tela "Dispositivos conectados", com revogar por dispositivo.
+//  3. A trilha: `last_used_at` responde "esta credencial ainda é usada?".
+//
+// `family_id` é o que amarra todas as gerações de um mesmo login. Sem ela, a
+// rotação seria só troca de token e o reuso passaria despercebido.
+export const oauthSessions = starguard.table(
+  "oauth_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    clientId: text("client_id").notNull(),
+    familyId: uuid("family_id").notNull(),
+    /** `jti` do refresh VÁLIDO agora. Qualquer outro da família é reuso. */
+    currentJti: uuid("current_jti").notNull(),
+    /** "VS Code · DESKTOP-XYZ" — o que a pessoa reconhece na lista. */
+    label: text("label"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Por que foi revogada: pela pessoa, por reuso detectado, por logout. */
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    uniqueIndex("oauth_sessions_family_idx").on(t.familyId),
+    index("oauth_sessions_user_idx").on(t.userId, t.createdAt.desc()),
+    index("oauth_sessions_jti_idx").on(t.currentJti),
+  ]
+);
+
+// ---- ai_usage (consumo de IA pela conta) ----
+//
+// Uma linha por CHAMADA, e nela **nenhum código**. Ficam gravados quem pediu,
+// para quê, qual modelo, quantos tokens e quanto custou. O trecho analisado
+// existe em memória durante a chamada e some; o diff da correção vive no PR do
+// GitHub, que é onde ele já estaria.
+//
+// Essa é a decisão de retenção do produto, e ela tem consequência prática: um
+// vazamento deste banco expõe padrões de uso, não o código dos clientes. Para
+// uma ferramenta que analisa código proprietário, guardar os trechos seria
+// transformar o servidor no alvo mais valioso da cadeia.
+//
+// `month` é desnormalizado (YYYY-MM) porque a cota é mensal e a checagem roda
+// ANTES de cada chamada: somar por intervalo de data a cada requisição custaria
+// uma varredura; com o índice composto, é uma busca.
+export const aiUsage = starguard.table(
+  "ai_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    /** "2026-08" — chave da janela de cota. */
+    month: text("month").notNull(),
+    /** De onde veio a chamada: "threat", "business", "refactor"… */
+    purpose: text("purpose"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    /** Custo em MILIONÉSIMOS de dólar: inteiro evita erro de ponto flutuante
+     *  acumulado em milhares de chamadas pequenas. */
+    costMicroUsd: integer("cost_micro_usd").notNull().default(0),
+    /** Repositório, quando a chamada nasceu de uma análise. Só o nome. */
+    repo: text("repo"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    // O índice que a checagem de cota usa: soma do mês, por usuário.
+    index("ai_usage_user_month_idx").on(t.userId, t.month),
+    index("ai_usage_created_idx").on(t.createdAt.desc()),
+  ]
+);
+
+// ---- jobs (fila de execução) — AUDITORIA.md#ARQ-04 ----
+//
+// Até aqui o disparo era `fire-and-forget`: `/api/analyze` chamava `runJob` e
+// não esperava. Isso tinha um custo já registrado (BUG-11: um restart do
+// processo deixava a linha em `running` para sempre) e virou impedimento com o
+// webhook — o GitHub espera resposta em segundos e a análise leva minutos.
+//
+// A fila é no PRÓPRIO Postgres, e não em Redis/SQS, por uma razão de tamanho:
+// o banco já existe, já é transacional, e `FOR UPDATE SKIP LOCKED` resolve a
+// disputa entre instâncias sem infraestrutura nova. Trocar por uma fila
+// dedicada é decisão de escala, não de correção — e este schema não impede.
+export const jobStatusEnum = starguard.enum("job_status", [
+  "queued",
+  "running",
+  "done",
+  "error",
+  /** Excedeu as tentativas. Fica para inspeção, não é reprocessado sozinho. */
+  "dead",
+]);
+
+export const jobs = starguard.table(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** "analysis" | "webhook" — o que este job faz. */
+    kind: text("kind").notNull(),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    /** Payload do trabalho. NUNCA segredo: ver a nota em `lib/queue.ts`. */
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    userId: uuid("user_id").references(() => users.id),
+    /**
+     * Chave de deduplicação.
+     *
+     * O GitHub reenvia webhook quando não recebe 2xx a tempo, e um push
+     * seguido de outro no mesmo PR não deve gerar duas análises concorrentes
+     * do mesmo estado. Com índice único parcial (só entre os não terminados),
+     * o segundo enfileiramento é descartado em vez de duplicar o trabalho.
+     */
+    dedupeKey: text("dedupe_key"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    /** Antes disto, ninguém pega. É o que dá backoff sem cron. */
+    runAfter: timestamp("run_after", { withTimezone: true }).defaultNow().notNull(),
+    /** Quem pegou. Um worker morto é detectado por `locked_at` velho. */
+    lockedBy: text("locked_by"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    // O índice que o `pegarProximo` usa: fila por prioridade de tempo.
+    index("jobs_pending_idx").on(t.status, t.runAfter),
+    index("jobs_created_idx").on(t.createdAt.desc()),
+    index("jobs_dedupe_idx").on(t.dedupeKey),
+  ]
+);
+
 // ---- Tipos derivados ----
 export type UserRow = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -285,3 +476,7 @@ export type NewFinding = typeof findings.$inferInsert;
 export type FindingFixRow = typeof findingFixes.$inferSelect;
 export type FindingStatus = FindingRow["status"];
 export type Role = UserRow["role"];
+export type OAuthCodeRow = typeof oauthCodes.$inferSelect;
+export type NewOAuthCode = typeof oauthCodes.$inferInsert;
+export type OAuthSessionRow = typeof oauthSessions.$inferSelect;
+export type NewOAuthSession = typeof oauthSessions.$inferInsert;

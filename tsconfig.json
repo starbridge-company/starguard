@@ -26,6 +26,17 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      // O núcleo é resolvido pelo CÓDIGO-FONTE, não pelo `dist`. Sem isto,
+      // `next dev` e `vitest` só enxergariam o núcleo depois de um build — e
+      // toda alteração no motor exigiria compilar antes de ver na tela. O
+      // `dist` existe para quem consome o pacote de fora (CLI publicado,
+      // bundle da extensão), e é gerado por `packages/core/tsconfig.build.json`.
+      "@starguard/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@starguard/core/*": [
+        "./packages/core/src/*"
       ]
     }
   },
@@ -36,7 +47,14 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
+  // `packages/**` fica FORA deste programa de propósito: aqui `lib` inclui
+  // "dom" (é um app React) e o núcleo precisa ser verificado sem DOM nenhum —
+  // ele roda em Node, no terminal e no extension host. Os arquivos do núcleo
+  // que o app importa entram no programa assim mesmo, por serem dependência;
+  // a verificação COMPLETA e sem DOM é `npm run typecheck -w @starguard/core`,
+  // encadeada no script `typecheck` da raiz.
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "packages"
   ]
 }

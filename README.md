@@ -95,37 +95,71 @@ Quando um binário/lib não existe, a etapa degrada com mensagem clara em vez de
 
 > **Dogfooding:** rode as Fases 2 e 3 do próprio StarGuard sobre este repositório em CI.
 
-## Estrutura
+## Um motor, três interfaces
+
+O StarGuard é um **orquestrador central** com **analisadores independentes**.
+Cada um roda sozinho, diz por conta própria se o ambiente permite executá-lo, e
+traz o seu **corretor embutido**. Dá para pedir só uma coisa ou tudo junto — e
+o mesmo motor serve os três produtos:
+
+| Onde | O que é | Precisa de |
+|---|---|---|
+| **Painel web** | Next, com histórico, PR e governança | Postgres |
+| **Terminal** (`starguard`) | o mesmo motor, sem servidor | nada |
+| **VS Code** | achados no painel Problemas, correção na lâmpada | nada |
 
 ```
-/app
-  page.tsx                  Tela 1 · Onboarding
-  login/page.tsx            Tela 0 · Login
-  results/[id]/page.tsx     Tela 2 · Painel (polling das 4 fases)
-  report/[id]/page.tsx      Tela 3 · Relatório exportável
-  api/
-    auth/{login,refresh,logout}   Argon2id + JWT + blocklist
-    analyze  ·  status/[id]       cria job / polling
-    step1-threat · step2-skills · step3-scan · step4-fix
-    github/{clone,pr}             metadados + PR (Octokit)
-    health
-/middleware.ts              authn/authz + rate limit + headers
-/lib
-  config.ts   ai.ts   jwt.ts   auth.ts   ratelimit.ts   validation.ts
-  http.ts     client.ts   jobs.ts   tasks.ts   fixtures.ts
-  github.ts   sast.ts   sca.ts   skills.ts   parsers.ts   theme.ts   icons.ts
-/components   AppShell · StepCard · VulnerabilityCard · SkillFindingCard ·
-              SeverityBadge · RepoInput · ThreatInput · SkillInput · FixModal
-/types/index.ts
+app/  components/  lib/     painel web (Next)
+  lib/sinks/postgres.ts     eventos do orquestrador → linhas no banco
+packages/core/              @starguard/core — o motor (sem Next, React ou banco)
+  contracts.ts                Analyzer, Fixer, Workspace, Sink
+  orchestrator.ts             plano inspecionável + execução paralela
+  registry.ts                 os analisadores, num lugar só
+  workspace.ts                git (clone) ou local (disco)
+  analyzers/                  threat · sast · sca · business · skills
+  fix/                        maquinário compartilhado da correção
+  i18n/  catalog/             os três idiomas, para os três produtos
+packages/cli/               binário `starguard`
+packages/vscode/            extensão
+middleware.ts               authn/authz + rate limit + headers
+db/migrations/              geradas por `npm run db:generate`
 ```
+
+### No terminal
+
+```bash
+starguard scan .                     # tudo o que der, no diretório atual
+starguard scan . --only sca          # só as dependências (Trivy)
+starguard scan . --only sast         # só o código (Opengrep/Semgrep)
+starguard skills ./minha-skill.md    # só a skill — sem repositório nenhum
+starguard fix --all --severity high  # propõe correção (--write para gravar)
+starguard doctor                     # o que está instalado e configurado
+```
+
+Códigos de saída: `0` limpo · `1` achado acima de `--fail-on` · `2` falha de
+execução. Sem terminal interativo (CI, pipe), a saída vira linhas sequenciais,
+sem nenhum código de escape — e `--json` / `--sarif <arquivo>` entregam o
+resultado para máquina.
+
+### No VS Code
+
+Árvore lateral com um item por analisador e um ▶ em cada um; os achados vão
+para o painel **Problemas** com `source: starguard/<analisador>`; a correção é
+uma lâmpada que **mostra o diff antes de gravar**. Roda o motor localmente — o
+código não sai da máquina, e funciona em projeto que ainda não foi enviado para
+lugar nenhum.
 
 ## Scripts
 
 ```bash
-npm run dev         # dev (gera chaves antes)
-npm run build       # build de produção (inclui typecheck)
-npm run typecheck   # tsc --noEmit
-npm run gen:keys    # regenera chaves JWT + cookie secret
+npm run dev             # painel em desenvolvimento (gera chaves antes)
+npm run build           # build de produção do painel
+npm run build:packages  # núcleo → CLI → extensão, NESTA ordem
+npm run cli -- doctor   # o binário do terminal, direto do repositório
+npm test                # unidade: o painel E os pacotes, num comando só
+npm run typecheck       # tsc --noEmit no painel + typecheck de cada pacote
+npm run lint            # eslint (inclui a regra de fronteira do núcleo)
+npm run gen:keys        # regenera chaves JWT + cookie secret
 ```
 
 ## Fora do MVP (próximos passos)

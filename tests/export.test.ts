@@ -7,7 +7,7 @@ import {
   isExportFormat,
   exportFilename,
   collectCodeFindings,
-} from "@/lib/export";
+} from "@starguard/core/export";
 import type { Job, Vulnerability, DependencyVuln } from "@/types";
 
 // AUDITORIA.md#UX-10 — a única saída era window.print().

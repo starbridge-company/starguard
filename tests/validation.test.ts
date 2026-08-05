@@ -101,14 +101,133 @@ describe("findingStatusSchema · FEAT-01", () => {
 });
 
 describe("analyzeSchema e loginSchema", () => {
-  it("exige nome e descrição do projeto", () => {
-    expect(validate(analyzeSchema, { projectName: "x" }).ok).toBe(false);
-    expect(
-      validate(analyzeSchema, { projectName: "x", systemDescription: "y" }).ok
-    ).toBe(true);
+  const repo = "https://github.com/org/repo";
+
+  it("exige nome do projeto", () => {
+    expect(validate(analyzeSchema, { systemDescription: "y" }).ok).toBe(false);
   });
+
   it("recusa e-mail malformado", () => {
     expect(validate(loginSchema, { email: "sem-arroba", password: "x" }).ok).toBe(false);
+  });
+
+  // ---- Seleção AUSENTE: "rode o que der com o que eu forneci" ----
+  // É o contrato de sempre, e o que as análises já gravadas usaram. Apertá-lo
+  // agora quebraria quem só quer a modelagem de ameaças, sem repositório.
+  describe("sem seleção explícita", () => {
+    it("aceita só a descrição do sistema, sem repositório", () => {
+      expect(
+        validate(analyzeSchema, { projectName: "x", systemDescription: "y" }).ok
+      ).toBe(true);
+    });
+
+    it("aceita só o repositório, sem descrição", () => {
+      expect(validate(analyzeSchema, { projectName: "x", repoUrl: repo }).ok).toBe(true);
+    });
+
+    it("aceita só skills", () => {
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          skills: [{ name: "s", content: "conteúdo" }],
+        }).ok
+      ).toBe(true);
+    });
+
+    it("recusa quando não há entrada NENHUMA — a análise nasceria vazia", () => {
+      const r = validate(analyzeSchema, { projectName: "x" });
+      expect(r.ok).toBe(false);
+    });
+  });
+
+  // ---- Seleção EXPLÍCITA: a exigência acompanha o que foi pedido ----
+  describe("com seleção explícita (AUDITORIA.md#ARQ-13)", () => {
+    it("SÓ skills não exige descrição do sistema nem repositório", () => {
+      // É o caso que motivou a reorganização: antes, validar uma skill obrigava
+      // a descrever o sistema inteiro e a esperar a modelagem de ameaças.
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: ["skills"],
+          skills: [{ name: "s", content: "conteúdo" }],
+        }).ok
+      ).toBe(true);
+    });
+
+    it("SÓ dependências exige repositório e nada mais", () => {
+      expect(
+        validate(analyzeSchema, { projectName: "x", select: ["sca"], repoUrl: repo }).ok
+      ).toBe(true);
+      // Sem descrição do sistema — e isso está certo: o Trivy não a usa.
+      expect(
+        validate(analyzeSchema, { projectName: "x", select: ["sca"] }).ok
+      ).toBe(false);
+    });
+
+    it("SÓ modelagem de ameaças exige descrição e dispensa repositório", () => {
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: ["threat"],
+          systemDescription: "um sistema",
+        }).ok
+      ).toBe(true);
+      expect(
+        validate(analyzeSchema, { projectName: "x", select: ["threat"] }).ok
+      ).toBe(false);
+    });
+
+    it("regras de negócio exigem OS DOIS: descrição e repositório", () => {
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: ["business"],
+          systemDescription: "um sistema",
+          repoUrl: repo,
+        }).ok
+      ).toBe(true);
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: ["business"],
+          repoUrl: repo,
+        }).ok
+      ).toBe(false);
+    });
+
+    it("pedir skills sem enviar skill nenhuma é recusado", () => {
+      expect(
+        validate(analyzeSchema, { projectName: "x", select: ["skills"] }).ok
+      ).toBe(false);
+    });
+
+    it("lista vazia é recusada — não vira 'todos'", () => {
+      // Rodar tudo no lugar de uma lista vazia seria fazer (e cobrar em IA)
+      // algo que ninguém pediu.
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: [],
+          systemDescription: "y",
+        }).ok
+      ).toBe(false);
+    });
+
+    it("recusa analisador inventado", () => {
+      expect(
+        validate(analyzeSchema, {
+          projectName: "x",
+          select: ["dast"],
+          repoUrl: repo,
+        }).ok
+      ).toBe(false);
+    });
+
+    it("o erro aponta o CAMPO que falta, não 'requisição inválida'", () => {
+      const r = validate(analyzeSchema, { projectName: "x", select: ["sast"] });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.message).toMatch(/repoUrl/);
+    });
   });
 });
 

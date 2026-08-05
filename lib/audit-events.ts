@@ -47,6 +47,16 @@ export const EVENT_CATALOG: Record<string, EventMeta> = {
   "user.create": { category: "usuario" },
   "user.role.update": { category: "usuario" },
   "user.delete": { category: "usuario" },
+  // ---- OAuth de cliente público (extensão do VS Code, CLI) ----
+  "oauth.authorize": { category: "auth" },
+  "oauth.token": { category: "auth" },
+  "oauth.refresh": { category: "auth" },
+  "oauth.revoke": { category: "auth" },
+  // Os dois eventos que valem alarme, e por isso têm nome próprio em vez de
+  // sumirem dentro de um "falha de login": os dois significam que uma
+  // credencial foi apresentada por quem não deveria tê-la.
+  "oauth.code_reuse": { category: "auth" },
+  "oauth.reuse_detected": { category: "auth" },
 };
 
 export const CATEGORY_ORDER: AuditCategory[] = [

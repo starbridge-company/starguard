@@ -356,6 +356,14 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 > não foi exercitado em uso real.** As três do Sprint 8 (PEND-29 a PEND-31)
 > merecem leitura junta: o idioma está garantido por tipo e por teste, mas
 > **nada disso prova que o espanhol lê bem na tela.**
+>
+> Acréscimo de 04/08/2026 (ARQ-13): as quatro novas (PEND-33 a PEND-36) são do
+> **mesmo tipo de sempre**, e vale dizer sem rodeio. O motor foi exercitado de
+> verdade — o terminal rodou o Trivy sobre este repositório e devolveu 20
+> achados com o código de saída certo. As duas superfícies **novas** de tela,
+> não: a extensão do VS Code nunca abriu num editor e o seletor da Tela 1 nunca
+> foi aberto em navegador. Compilar e passar em teste de unidade não é o mesmo
+> que funcionar na mão de alguém, e a PEND-33 é a que mais pesa.
 
 | ID | Origem | O que falta | Por quê / o que fazer |
 |---|---|---|---|
@@ -368,6 +376,17 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-30** | Sprint 8 | O texto gerado por IA em espanhol nunca foi visto | `LOCALE_AI_NAME.es` instrui o modelo a responder em espanhol nas 4 fases (ameaças, skills, enriquecimento, correção). Isso é **instrução a modelo — pedido, não garantia**. Nenhuma chamada real foi feita em espanhol. Rodar uma análise com `sg_locale=es` e conferir que ameaças, explicações e a `explanation` da correção saem no idioma certo. |
 | **PEND-32** | BUG-23 | A suíte `e2e/modal-foco.mjs` não rodou contra a app | O comportamento **foi medido em Chromium**, mas com o `NewUserModal` montado fora do Next por um banco de provas descartável — sem rota, sem sessão e sem banco. A suíte de `e2e/` cobre o mesmo percurso *pela tela real* (login → `/admin/users` → botão → modal) e não pôde rodar: a senha do `admin@starguard.local` no banco configurado não é mais a do `scripts/seed.mjs`. Rodar `node e2e/modal-foco.mjs` com uma credencial válida, ou contra o banco descartável do `e2e/README.md`. Vai junto do PEND-24. |
 | **PEND-31** | Sprint 8 | A troca de `errorKey` não foi exercitada contra rota real | `jsonError(..., null)` para mensagem dinâmica e `useApiError()` na tela estão cobertos por unidade (7 asserções) e pelos testes de rota com repositório mockado. O percurso completo — rota real devolve 409/403, a tela mostra o texto no idioma do usuário — **não rodou**. Vai junto do PEND-24. |
+| **PEND-33** | ARQ-13 | A extensão **ativa**, mas a interface dela nunca foi usada | *Parcial em 04/08/2026:* o `.vsix` foi gerado (`vsce package --no-dependencies`, 125,4 kB, 5 arquivos), instalado com `code --install-extension` e **ativou no editor real** — `exthost.log` registra `_doActivateExtension starguard.starguard-vscode, activationEvent: 'workspaceContains:.git'` às 05:50:03, sem nenhum erro depois. Ou seja: o bundle CJS carrega no extension host e `activate()` roda até o fim. O que **continua sem verificação** é tudo o que exige mão humana: a árvore lateral desenhada, o ▶ por analisador, o sublinhado na linha certa do painel Problemas, a lâmpada, o `vscode.diff` antes de gravar e o `WorkspaceEdit` depois. Percurso a fazer: abrir este repositório → StarGuard na barra lateral → ▶ em "Dependências vulneráveis" → conferir os achados no painel → aplicar uma correção pela lâmpada. |
+| **PEND-34** | ARQ-13 | O seletor da Tela 1 não foi aberto em navegador | `AnalyzerPicker`, o `/api/analyzers`, o `ThreatInput` que só aparece quando é exigido e o `Collapsible` que se abre sozinho quando o repositório passa a ser obrigatório foram validados por tipo, lint e build. O schema condicional tem **13 asserções novas** em `tests/validation.test.ts`, mas paridade de schema não é qualidade de tela: falta ver o cartão desabilitado com o motivo, o desmarcar automático ao apagar a URL do repositório e as abas de resultado dizendo "não executado". Acrescentar `e2e/selecao-analisadores.mjs` — vai junto do PEND-24. |
+| **PEND-35** | ARQ-13 | O terminal só foi exercitado com Trivy | `--only sca` rodou de verdade (20 achados, 24,7 s, código 1). O que **não** rodou: `--only sast` (o Opengrep está instalado, mas `SAST_RULES=auto` baixa regras da rede e o ambiente da execução não tinha), `--only business` e `--only threat` (exigem chave de IA), e o comando `fix` inteiro — inclusive o `--write`, que é o único caminho que grava no disco de alguém. Rodar com chave configurada e com um ruleset local (`SAST_RULES=<dir>`). |
+| **PEND-37** | SEC-10 | **O fluxo de OAuth nunca rodou ponta a ponta** | As regras estão cobertas por 60 asserções, mas nenhuma delas subiu o servidor. O que **não** foi exercitado: `starguard login` abrindo o navegador de verdade, a tela de consentimento sendo aprovada, o código virando token, a renovação silenciosa depois de 15 min, e a extensão aparecendo no menu **Contas** do VS Code. Percurso: subir a app com Postgres, rodar `npm run cli -- login`, conferir `whoami`, e revogar em Conta → Dispositivos conectados esperando o CLI voltar a pedir login. |
+| **PEND-38** | SEC-10 | A detecção de reuso não foi provocada contra um banco real | `decideRotation` é pura e tem teste; o que fica de fora é a ATOMICIDADE — o `UPDATE … WHERE current_jti = $antigo` que impede dois refresh simultâneos de gerarem duas rotações válidas. Isso é do Postgres e não é verificável por unidade (mesma razão pela qual `lib/repos/` não tem teste de unidade). Reproduzir: copiar `credentials.json`, fazer login de novo (rotaciona), restaurar a cópia e rodar um comando — a sessão deve cair e `oauth.reuse_detected` deve aparecer na trilha. |
+| **PEND-39** | SEC-10 | As duas consultas novas nunca rodaram contra Postgres | `oauth_codes` e `oauth_sessions` são Drizzle novo, e a migração `0006` foi gerada mas **não aplicada**. Junta-se à PEND-26, que já registra o mesmo para as consultas do BUG-11/BUG-22. |
+| **PEND-40** | SEC-12 | **O GitHub App nunca existiu** | Todo o caminho do webhook — assinatura, fila, clone do SHA, análise do diff, PR do bot — está escrito e coberto por 12 asserções, mas **nenhum App foi criado no GitHub**. Não há `GITHUB_APP_ID`, chave privada nem `GITHUB_WEBHOOK_SECRET` configurados, então a rota responde 503 hoje. Criar o App exige ser owner da organização: é o passo que só você pode dar. Depois dele, o percurso a exercitar é abrir um PR num repositório de teste e ver o `starguard[bot]` responder. |
+| **PEND-41** | SEC-11 | O proxy de IA nunca foi chamado por um cliente real | A rota, a cota e o registro de consumo estão testados, mas o percurso completo — extensão logada → consentimento → chamada com Bearer → resposta do modelo → linha em `ai_usage` — **não rodou**. Depende da PEND-37 (o login ponta a ponta), e junta-se a ela. |
+| **PEND-42** | ARQ-04 | A fila nunca processou um job de verdade | `FOR UPDATE SKIP LOCKED`, o backoff e a retomada de worker morto estão escritos; o que rodou contra Postgres real foi só o OAuth. Falta subir a app, criar uma análise e ver o worker pegá-la — e, principalmente, matar o processo no meio para conferir que outro a retoma. É a promessa central do ARQ-04 e é a que continua sem prova. |
+| **PEND-43** | SEC-13 | O hook nunca segurou um commit real | Instalação, remoção, recusa de hook de terceiro e `core.hooksPath` têm teste. O que não foi visto: `git commit` de verdade com achado grave, com `starguard.hookBlocks=true`, num repositório com semgrep configurado. |
+| **PEND-36** | ARQ-13 | Nenhum pacote foi publicado nem instalado de fora | `@starguard/core` e `@starguard/cli` compilam, e o `dist` do núcleo foi carregado em Node puro — mas sempre a partir do repositório, com o link do workspace. Um `npm pack` seguido de instalação limpa em outro diretório é o que provaria que o mapa de `exports` e o passo `add-extensions.mjs` cobrem tudo o que um consumidor externo importa. O mesmo vale para `vsce package` na extensão. |
 
 ### Histórico
 
@@ -607,6 +626,91 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 - **Hoje:** `description`, `explanation` e `fixedCode` vêm da IA e são renderizados como texto no React (escapado por padrão ✅). O risco real não é XSS, é **prompt injection vindo do repositório analisado** influenciando o texto mostrado ao usuário como se fosse veredito da ferramenta.
 - **Como corrigir:** marcar visualmente na UI o que é "texto gerado a partir do repositório analisado" e truncar em tamanho máximo. O agente já está protegido (`settingSources: []`), a revisão por IA não tem essa proteção explícita.
 - **Aceite:** um repositório com `<!-- ignore previous instructions -->` em um comentário não altera a apresentação dos achados.
+
+### SEC-10 · Conta para a extensão e o terminal (OAuth PKCE) ✅
+
+**Esforço G.** Depois do ARQ-13, o motor passou a rodar em três lugares — mas
+só o painel tinha autenticação. A extensão e o CLI eram anônimos: usavam o
+binário e a chave de IA da máquina de quem os rodava. Para a IA passar a ser
+**pela conta da Starbridge**, com log central, era preciso primeiro saber
+**quem** está pedindo.
+
+O fluxo escolhido é **Authorization Code + PKCE**, e a razão é o tipo de
+cliente: o `.vsix` é um zip e o pacote do CLI é código legível. **Todo segredo
+embutido neles é público.** Daí as duas consequências que definem o desenho —
+não há `client_secret`, e o PKCE faz o papel que ele faria.
+
+> ✅ **Entregue em 04/08/2026.**
+>
+> **A senha nunca entra no editor nem no terminal.** O login acontece no
+> navegador, na tela que já existe, com o Argon2id que já existe. O cliente só
+> recebe um código que, sem o `code_verifier` que ele mesmo sorteou, não vale
+> nada.
+>
+> **As cinco decisões de segurança:**
+>
+> 1. **PKCE `S256` obrigatório; `plain` recusado.** Em `plain` o desafio É o
+>    verificador em texto — quem intercepta o pedido já tem o que precisa. É
+>    PKCE no nome e nada na prática, e não há cliente antigo a acomodar.
+> 2. **Código de autorização**: 32 bytes, guardado **hasheado** (um dump do
+>    banco não pode render credencial), válido 60 s, **uso único garantido pelo
+>    banco** (`UPDATE … WHERE used_at IS NULL` — com `SELECT` antes do `UPDATE`
+>    haveria uma janela para duas emissões), e amarrado a
+>    `client_id` + `redirect_uri` + `code_challenge`.
+> 3. **Rotação com detecção de reuso.** Cada refresh emite um novo e mata o
+>    anterior. Um refresh **já rotacionado** apresentado de novo significa
+>    token repetido — a **família inteira cai** e `oauth.reuse_detected` vai
+>    para a trilha. É a única defesa possível contra um refresh copiado do
+>    disco: não dá para impedir o roubo a partir do servidor, dá para detectar
+>    o uso.
+> 4. **Públicos separados.** Token de cliente tem `aud: starguard-web-client`;
+>    o do navegador, `starguard-web`. Um não vale pelo outro — têm tempos de
+>    vida e superfícies de exposição diferentes demais para serem
+>    intercambiáveis.
+> 5. **CSRF pela ORIGEM da credencial.** Cookie exige; Bearer não (nenhum
+>    navegador acrescenta `Authorization` sozinho). E `requireSession`
+>    **não cai para o cookie** quando o Bearer falha — cair seria autenticar
+>    por cookie sem CSRF, bastando mandar um header lixo junto.
+>
+> **`redirect_uri` é a fronteira do fluxo inteiro.** Se um destino não
+> registrado passasse, o código iria para quem controla aquele destino, e o
+> PKCE não salvaria (quem escolheu o destino escolheu o verificador). A
+> comparação é por **estrutura** — esquema, host, caminho —, nunca por prefixo.
+> O CLI aceita **qualquer porta** em `127.0.0.1` (RFC 8252 §7.3, a porta é
+> efêmera) mas **não** `localhost`, que resolve por DNS.
+>
+> **Onde ficam os tokens:** `SecretStorage` no VS Code (chaveiro do SO) e
+> `~/.starguard/credentials.json` com `0600` no terminal — só o refresh; o
+> access dura 15 min e fica em memória.
+>
+> **Contrapartida obrigatória:** Conta → **Dispositivos conectados**, com
+> revogar. Emitir credencial de 30 dias sem oferecer como cortá-la seria
+> irresponsável — e é a ação que fecha um `oauth.reuse_detected`.
+>
+> **O que isto NÃO protege**, escrito no código e não subentendido: máquina de
+> quem programa comprometida (o chaveiro é legível pelos processos daquele
+> usuário) e extensão maliciosa no mesmo editor (o VS Code pede consentimento
+> por extensão, o que reduz mas não elimina).
+
+**Como o sprint foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **471 testes** em 35 arquivos (eram 411 em 31); **+60**, quase todos de caminho negativo |
+| PKCE e clientes | `tests/oauth-pkce.test.ts` | 26 asserções: `plain` recusado, verificador errado recusado, `vscode://` de **outra extensão** recusado, `localhost` recusado, `127.0.0.1@malicioso.com` recusado |
+| Rotação | `tests/oauth-rotation.test.ts` | 10 asserções sobre a máquina de estados pura: reuso derruba a família, revogada tem precedência, famílias são independentes |
+| Bearer e CSRF | `tests/http-bearer.test.ts` | 14 asserções, incluindo a principal: **Bearer inválido + cookie válido = 401**, e `getSession` do cookie **nem é chamada** |
+| Credencial em disco | `packages/cli/tests/credentials.test.ts` | 10 asserções (2 puladas em Windows): `0600` na criação **e no reaperto** de arquivo preexistente; access token não é gravado |
+| Migração | `npx drizzle-kit generate` | `0006`: `oauth_codes` + `oauth_sessions`, ambas novas — nenhuma tabela existente alterada |
+| Build | `npm run build` + `build:packages` | Painel compila com as 4 rotas novas; extensão 434 kB |
+| Terminal | `starguard whoami` / `logout` sem credencial | Mensagem acionável e **código de saída 2**; logout avisa que a sessão no servidor continua até ser revogada |
+| Tipo cobrou tradução | `tsc` na extensão | `fix.apply`/`fix.applied` **não compilaram** até serem traduzidas nos três idiomas — a garantia do FEAT-04 funcionando |
+
+**Uma intermitência que a mudança causou e vale registrar:** o import de
+`@/lib/http` num teste passou a estourar os 5 s padrão do vitest sob carga
+paralela, porque o grafo cresceu (`lib/auth` → `lib/config` →
+`@starguard/core`). Isolado, custa 1,8 s. O teto foi ampliado no teste, com a
+razão escrita — o sintoma parecia bug de lógica e não era.
 
 ---
 
@@ -1161,6 +1265,264 @@ medição** — a linha da tabela existe para travar isso.
 **Esforço M** — a frase-guia de correção está duplicada **literalmente** em [parsers.ts:80](lib/parsers.ts#L80) e [FixModal.tsx:20](components/FixModal.tsx#L20), com uma terceira variante no prompt do agente ([agent-fix.ts:24](lib/agent-fix.ts#L24)). Causa direta de `UX-09`. Centralizar em `lib/constants.ts` — e é pré-requisito do `FEAT-04`.
 
 > ✅ **Entregue em 27/07/2026.** `lib/constants.ts` centraliza a frase-guia de correção e o reconhecimento de sugestão genérica, que estavam duplicados em `parsers.ts`, `FixModal.tsx` e `agent-fix.ts`. É também a base do i18n do FEAT-04.
+
+### ARQ-13 · Orquestrador central e analisadores independentes ✅
+
+**Esforço G.** O fluxo era um **pipeline linear de quatro fases fixas**:
+`lib/jobs.ts` rodava `plan → skills → software → refactor` em sequência, sempre
+as quatro, sempre na mesma ordem, e `runScan` amarrava SAST, SCA e revisão por
+IA dentro de uma fase só — que ainda clonava o repositório para si.
+
+Três consequências, todas medidas no código:
+
+1. **Custo e tempo desnecessários.** Validar uma skill exigia descrever o
+   sistema inteiro e esperar a modelagem de ameaças, que é uma chamada de IA.
+2. **Quem acha e quem corrige viviam separados.** `generateFix` era uma função
+   genérica em `lib/tasks.ts`; `lib/deps-fix.ts` era outro caminho para
+   dependência. Acrescentar um analisador significava mexer em três lugares.
+3. **Um único consumidor.** Todo o motor tinha `import "server-only"` e vivia
+   dentro do app Next. Não havia como rodar aquilo num terminal nem no editor.
+
+> ✅ **Entregue em 04/08/2026.**
+>
+> **O motor virou pacote.** `packages/core` (`@starguard/core`) — sem Next, sem
+> React, sem Drizzle, sem Zod. A fronteira é verificada de duas formas, porque
+> esse erro só aparece em runtime: `packages/core/tests/boundary.test.ts` varre
+> os imports de todos os arquivos, e `no-restricted-imports` no ESLint reclama
+> na hora de escrever.
+>
+> **Cinco analisadores independentes**, cada um com `probe` (o ambiente
+> permite?), `run` e o **corretor embutido** (`Fixer`): `threat`, `sast`, `sca`,
+> `business`, `skills`. `threat` e `skills` declaram a ausência de corretor com
+> o motivo, em vez de deixá-la implícita.
+>
+> **O orquestrador** (`packages/core/src/orchestrator.ts`) monta um plano
+> **inspecionável antes de rodar** — é a mesma resposta que alimenta o seletor
+> da tela, o `starguard doctor` e a árvore do VS Code. Três decisões que valem
+> registro:
+>
+> - **Dependência é enriquecimento, não pré-requisito.** `business` declara
+>   `uses: ["threat","sast","sca"]`; se eles não estiverem no plano, ele roda
+>   assim mesmo e a degradação é **registrada e dita em voz alta**. Fosse
+>   pré-requisito, `--only business` arrastaria o Trivy junto e o pipeline
+>   linear voltaria com outro nome.
+> - **Paralelo por padrão**, com o workspace aberto **uma vez** e compartilhado
+>   (antes o scan clonava para si e a correção clonava outra vez).
+> - **Falha de um não derruba os outros** — o isolamento do UX-15 virou regra do
+>   orquestrador.
+>
+> **`propose` separado de `apply`.** `propose` não escreve nada; `apply` é o
+> único ponto que grava. É isso que permite o modal do painel, o `--dry-run` do
+> terminal e o `vscode.diff` do editor usarem o mesmo código sem risco.
+>
+> **Três interfaces sobre o mesmo motor**, ligadas por *sinks*:
+> `lib/sinks/postgres.ts` (painel), `packages/cli/src/render.ts` (terminal),
+> `packages/vscode/src/extension.ts` (diagnósticos). Nenhuma delas sabe
+> analisar coisa nenhuma.
+>
+> **Compatibilidade sem migrar dado.** O painel continua lendo e escrevendo
+> `phases: {plan,skills,software,refactor}`; a tradução mora em
+> `packages/core/src/compat.ts`. `StepStatus` ganhou `"skipped"` — "não pedi
+> isto" não é `pending` nem `error`, e apresentá-lo como qualquer um dos dois
+> seria mentir na tela. A coluna `analyses.selected` (migração `0005`) é
+> aditiva: linha antiga com `NULL` é lida como "todos", que é o que ela rodou.
+>
+> **O que ficou de fora, e por quê:** a correção continua **sem gerar nada
+> sozinha** (BUG-16) e o `refactor` nasce `skipped`.
+
+**Como o sprint foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Paridade do painel | `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` | 411 testes em 31 arquivos (eram 269 em 22); typecheck limpo nos 4 pacotes; lint com **0 erros** e os mesmos 10 avisos preexistentes; build de produção compila |
+| Motor fora do Next | `node -e "import('./packages/core/dist/index.js')"` | Carrega em Node puro e lista os 5 analisadores |
+| Terminal, execução real | `node packages/cli/bin/starguard.mjs scan . --only sca --fail-on high` | Trivy real, **20 achados** (9 high, 11 medium) em 24,7 s, **código de saída 1**; com `--fail-on critical`, código 0 |
+| Seleção de fato isolada | `starguard scan . --only sca,skills,business` | Só o SCA rodou; os outros quatro saíram **com o motivo** ("Não selecionado", "Precisa de uma chave de IA", "Faltou a entrada") |
+| Diagnóstico do ambiente | `starguard doctor` | opengrep 1.25.0 ✔, trivy 0.72.0 ✔, IA ✖ com o motivo; **código de saída 2** |
+| Saída sem terminal (CI) | tudo acima rodou com stdout redirecionado | Nenhum código de escape ANSI; só os estados finais, um por analisador |
+| Bundle da extensão | `packages/vscode/tests/findings.test.ts` | 423 kB CJS; carrega sob `require` com o módulo `vscode` dublado e expõe `activate`/`deactivate` |
+| Extensão empacotada | `vsce package --no-dependencies` | `starguard.vsix` — **125,4 kB, 5 arquivos**: manifesto, README e o bundle. Sem `node_modules`, sem código-fonte |
+| Extensão instalada e ATIVADA | `code --install-extension` + `exthost.log` | `starguard.starguard-vscode@0.1.0` instalada; ativação registrada às 05:50:03 por `workspaceContains:.git`, **sem erro subsequente** |
+| Migração | `npx drizzle-kit generate` | `0005`: `ALTER TABLE … ADD COLUMN "selected" jsonb` — aditiva, sem reescrever histórico |
+
+**Um bug que só a execução revelou** — e vale registrar porque é exatamente o
+padrão que o `CLAUDE.md` descreve.
+
+`starguard skills ./skill.md` mostrava, com um arquivo contendo prompt
+injection e exfiltração declaradas:
+
+```
+  ✔ Skills e prompts             2  0.0s
+
+  Nenhum achado. 🎉
+```
+
+Dois achados reais na linha de cima, "repositório limpo" na de baixo. A causa
+era simples: `achadosDe` em `packages/cli/src/render.ts` lia `sast`, `business`
+e `sca`, e nunca `skills`. Não quebrava tipo, não quebrava build, não quebrava
+teste nenhum — o analisador *rodava* e *contava* certo; só a tabela não o
+enxergava. Foi preciso executar o comando.
+
+Corrigido, com `packages/cli/tests/achados.test.ts` (7 asserções) travando as
+quatro origens. A execução depois da correção:
+
+```
+  ● critical  skill-teste.md:6  prompt-injection   Instrução de sobreposição de política
+  ● high      skill-teste.md:6  data-exfiltration  Possível exfiltração de dados/segredos
+```
+
+No VS Code a decisão é a **oposta** e está documentada em
+`packages/vscode/src/findings.ts`: achado de skill não vai para o painel
+Problemas, porque a posição é dentro do texto analisado e pode não corresponder
+ao arquivo aberto — fingir uma localização que não se tem é pior que não
+mostrar. No terminal a tabela é a única saída, e omitir é esconder.
+
+---
+
+### SEC-11 · IA pela conta, com cota e log de metadado ✅
+
+**Esforço M.** Depois do SEC-10 havia identidade, mas o login não entregava
+nada: a extensão e o terminal continuavam exigindo `ANTHROPIC_API_KEY` na
+máquina de cada pessoa.
+
+> ✅ **Entregue em 04/08/2026.**
+>
+> **Dois transportes, escolha explícita.** `local` (chave da máquina, o padrão)
+> e `remote` (a chamada vai ao servidor com o token da conta). O remoto **nunca
+> liga sozinho**: no terminal exige login, no VS Code exige login **e um
+> consentimento modal**. Login é "quem sou eu"; mandar código para fora é outra
+> coisa, e merece outra pergunta.
+>
+> **`/api/ai/complete`** é o único ponto em que o código sai da máquina, e está
+> concentrado num arquivo só. A ordem das defesas tem razão: autenticação →
+> **cota antes da chamada** (depois seria tarde: a chamada que estoura o teto já
+> foi paga) → limite de tamanho → só então o modelo.
+>
+> **Retenção: metadado, nunca o código.** `ai_usage` guarda quem, para quê, qual
+> modelo, quantos tokens e quanto custou. O trecho vive em memória durante a
+> chamada e some. Um vazamento deste banco expõe padrão de uso, não o código dos
+> clientes — para uma ferramenta que analisa código proprietário, guardar os
+> trechos transformaria o servidor no alvo mais valioso da cadeia.
+>
+> **Teto de US$ 50/conta/mês** (`AI_MONTHLY_BUDGET_USD`). Número escolhido por
+> mim na ausência de definição sua: cobre com folga uma pessoa analisando diffs
+> em vários repositórios por dia, e corta antes de uma fatura surpreendente.
+> **Revise-o** — é a decisão desta entrega que mais depende do seu negócio.
+>
+> **Custo em milionésimos de dólar, como inteiro.** Somar `0,000042` mil vezes
+> em ponto flutuante desvia, e um relatório de cobrança que não fecha é pior que
+> não ter relatório.
+>
+> **402 e não 429** quando a cota acaba: não é "vá mais devagar", é "acabou até o
+> mês virar". Repetir não resolve, e o cliente precisa saber para não insistir.
+
+### ARQ-04 · Jobs em memória, sem fila ✅ *(aberto desde a auditoria original)*
+
+**Esforço M.** O disparo era `fire-and-forget`: `/api/analyze` chamava `runJob` e
+não esperava. Custo já registrado no BUG-11 (restart deixava a linha em
+`running` para sempre) e impedimento absoluto para o webhook — o GitHub espera
+resposta em segundos, a análise leva minutos.
+
+> ✅ **Entregue em 04/08/2026.** Fila no **próprio Postgres**, com
+> `FOR UPDATE SKIP LOCKED`: várias instâncias pegam jobs diferentes sem
+> coordenação externa. Trocar por fila dedicada é decisão de escala, não de
+> correção.
+>
+> - **Deduplicação por consulta**, não por índice único: a regra é "não duplicar
+>   entre os NÃO TERMINADOS". Um índice único proibiria para sempre repetir um
+>   trabalho igual feito semana passada.
+> - **`locked_at` velho volta à fila** — worker morto (deploy no meio do job)
+>   não trava a fila. É a doença do BUG-11 resolvida na origem.
+> - **`dead` separado de `error`**: job que esgotou tentativas não é
+>   reprocessado sozinho, mas também não some. Alguém precisa olhar.
+> - **Backoff exponencial** de 1→30 min. Repetir na hora contra serviço fora do
+>   ar só gasta tentativa.
+>
+> **O que a fila NÃO resolve, e continua aberto no ARQ-06:** os segredos do job
+> (token do GitHub decifrado, conteúdo das skills) seguem em memória. Job
+> retomado por outro processo termina como órfão, com a mensagem explicando.
+> Guardá-los em lugar nenhum foi escolha de segurança, não esquecimento.
+
+### SEC-12 · GitHub App: gatilhos automáticos e PR de correções ✅
+
+**Esforço G.** Os dois gatilhos pedidos — PR aberto/atualizado e commit na main
+— são eventos que o GitHub **empurra**, e só um App os recebe.
+
+> ✅ **Entregue em 04/08/2026.**
+>
+> **Por que App, e não token pessoal:** é o único que recebe webhook; o token é
+> de instalação, vale **uma hora** e é gerado na hora (nada de token de 30 dias
+> no nosso banco); a permissão é por repositório e revogável de lá; e os PRs
+> saem como `starguard[bot]`, não no nome de alguém que um dia sai da empresa e
+> leva a automação junto.
+>
+> **A assinatura HMAC é a ÚNICA barreira** da rota (o GitHub não faz login), e
+> por isso é a primeira coisa que acontece — antes de parsear, antes de olhar o
+> evento. Sobre o **corpo cru**: reserializar o JSON muda espaço e ordem de chave
+> e o HMAC deixa de bater. Comparação em **tempo constante**: com `===`, o tempo
+> de resposta vaza quantos bytes o atacante acertou.
+>
+> **Responder rápido, trabalhar depois.** A rota só enfileira e devolve **202**.
+> Sem a fila do ARQ-04, este endpoint não poderia existir.
+>
+> **O que controla a conta do mês:** semgrep e trivy rodam no repositório inteiro
+> (rápidos, sem IA); **a correção olha só o que mudou**. Mais um teto de 5
+> correções por execução (`WEBHOOK_MAX_FIXES`) e severidade mínima `high` — um PR
+> com quarenta correções de IA não é revisado, é aprovado no escuro ou ignorado.
+>
+> **Decisões de economia que valem registro:** PR em rascunho não é analisado (é
+> trabalho inacabado); `push` só na branch padrão (o gatilho de PR já cobre o
+> resto); dedupe pelo **SHA** e não pelo número do PR, senão um push novo — que É
+> trabalho novo — seria descartado como duplicata.
+>
+> **As correções são geradas em SEQUÊNCIA**, com `baseCode` encadeado: duas no
+> mesmo arquivo partiriam do mesmo original e a última apagaria a primeira, que é
+> exatamente o BUG-06.
+>
+> **O corpo do PR diz que foi gerado por IA e precisa de revisão**, e avisa que o
+> lockfile não foi regerado. Um PR automático que se apresenta como veredito
+> seria pior que nenhum.
+
+### SEC-13 · Hook de pre-commit ✅
+
+**Esforço P.** O terceiro gatilho.
+
+> ✅ **Entregue em 04/08/2026.** `starguard hook install`.
+>
+> **Roda só o rápido e local: `--only sast,sca --no-ai`.** Segundos, não minutos.
+> Isso é o desenho, não limitação: um hook que segura o commit chamando modelo é
+> desinstalado no primeiro dia — o `--no-verify` existe e as pessoas usam. O que
+> exige IA acontece no servidor, depois do push.
+>
+> **Por padrão AVISA e deixa passar.** Bloquear commit é decisão de time:
+> `git config starguard.hookBlocks true`.
+>
+> Duas recusas deliberadas: **não sobrescreve hook de terceiro** (husky,
+> lint-staged — apagá-lo em silêncio quebraria o time e o sintoma não apontaria
+> para cá) e **respeita `core.hooksPath`** (escrever no lugar errado instala um
+> hook que nunca roda: o pior desfecho, porque parece que funcionou).
+
+**Como o sprint foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **506 testes** em 38 arquivos (eram 411 em 31 antes do SEC-10) |
+| OAuth contra Postgres REAL | `npm run test:live` | **13 testes**, incluindo os dois de atomicidade: 10 resgates simultâneos do mesmo código → **1 vence**; 10 rotações simultâneas do mesmo token → **1 vence** |
+| Migrações | `npm run db:migrate` | `0005`–`0008` aplicadas ao banco remoto; **12 tabelas** no schema `starguard`, verificadas por consulta |
+| Cota | `tests/ai-quota.test.ts` | 12 asserções: saída custa 5× a entrada, casamento por prefixo (o provedor versiona o id), modelo desconhecido usa fallback **caro** — cobrar a mais é recuperável, deixar de cobrar não |
+| Webhook | `tests/github-webhook.test.ts` | 12 asserções, quase todas negativas: segredo errado, corpo alterado num byte, `sha1=` legado, assinatura truncada, e o teste que trava o uso do **corpo cru** |
+| Hook | `packages/cli/tests/hook.test.ts` | 11 asserções: **não sobrescreve** hook de terceiro, respeita `core.hooksPath`, e o conteúdo tem mesmo `--only sast,sca --no-ai` |
+| Fronteira do núcleo | `boundary.test.ts` | **Pegou um erro real**: `ai-transport.ts` foi escrito com `./types.js` e o teste barrou antes de quebrar o build do painel |
+| Build | `npm run build` + `build:packages` | Painel compila com `/api/ai/complete` e `/api/github/webhook`; extensão 439 kB |
+| Hook, execução real | `starguard hook install` / `uninstall` | Instalou em `.git/hooks/pre-commit`, executável, e foi **removido depois** — instalar hook é escolha de cada pessoa |
+
+**Três decisões que tomei na sua ausência**, e que você deve revisar:
+
+| Decisão | Valor | Onde mudar |
+|---|---|---|
+| Teto de IA por conta | **US$ 50/mês** | `AI_MONTHLY_BUDGET_USD` |
+| Correções por execução do webhook | **5**, severidade ≥ `high` | `WEBHOOK_MAX_FIXES`, `WEBHOOK_MIN_SEVERITY` |
+| Servidor padrão dos clientes | `https://app.starguard.dev` | **inventado por mim** — `STARGUARD_SERVER` / `starguard.server` |
 
 ---
 

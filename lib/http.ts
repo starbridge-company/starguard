@@ -85,19 +85,89 @@ async function accountStillValid(userId: string, iat?: number): Promise<boolean>
   return ok;
 }
 
+/**
+ * De onde veio a credencial desta requisição.
+ *
+ * Esta distinção é o que decide se CSRF se aplica, e por isso ela é derivada
+ * do REQUEST, nunca informada pelo cliente. Ver `requireCsrf` abaixo.
+ */
+export type CredentialSource = "cookie" | "bearer";
+
+const BEARER_RE = /^Bearer\s+(.+)$/i;
+
+/** O token Bearer do header, se houver. */
+function bearerToken(req: NextRequest): string | undefined {
+  const raw = req.headers.get("authorization");
+  const m = raw?.match(BEARER_RE);
+  return m?.[1]?.trim() || undefined;
+}
+
+/**
+ * Lê a sessão a partir do Bearer (extensão do VS Code, CLI).
+ *
+ * Público `client`: um cookie de navegador roubado NÃO vale aqui, e vice-versa
+ * — ver `TokenAudience` em `lib/jwt.ts`.
+ */
+async function sessionFromBearer(token: string): Promise<SessionClaims | null> {
+  const { verifyToken } = await import("@/lib/jwt");
+  const claims = await verifyToken(token, "client");
+  if (!claims || claims.type !== "access") return null;
+
+  // O access dura 15 min, então revogar um dispositivo não o invalida na hora.
+  // Conferir a família fecha essa janela — e é barato: uma consulta por
+  // requisição autenticada de cliente, que é tráfego de ferramenta, não de
+  // navegação humana.
+  if (claims.fam) {
+    const { familyIsActive } = await import("@/lib/oauth/sessions");
+    if (!(await familyIsActive(claims.fam).catch(() => false))) return null;
+  }
+  return claims;
+}
+
 /** Lê a sessão; retorna claims ou null. Middleware já barra, isto é defesa extra. */
 export async function requireSession(
   req: NextRequest
 ): Promise<SessionClaims | null> {
-  const s = await getSession(req);
+  // O header tem precedência sobre o cookie, e **não há queda para o cookie**
+  // se ele falhar. Isso não é detalhe: `requireCsrf` dispensa a checagem
+  // quando existe um header `Authorization`, então cair no cookie depois de um
+  // Bearer inválido seria autenticar por cookie SEM CSRF — bastaria acrescentar
+  // um `Authorization: Bearer qualquer-coisa` para pular a proteção.
+  //
+  // (Um site de terceiro não consegue acrescentar esse header numa requisição
+  // com cookie: o header dispara preflight de CORS e o servidor não o
+  // autoriza. Mas depender só disso seria apostar a defesa numa camada que não
+  // é nossa. Aqui a queda simplesmente não existe.)
+  const bearer = bearerToken(req);
+  const s = bearer ? await sessionFromBearer(bearer) : await getSession(req);
   if (!s) return null;
   const iat = (s as SessionClaims & { iat?: number }).iat;
   return (await accountStillValid(s.sub, iat)) ? s : null;
 }
 
-/** Valida CSRF (double-submit) para métodos que mudam estado. */
+/**
+ * Valida CSRF para métodos que mudam estado — quando ela se aplica.
+ *
+ * CSRF existe porque o NAVEGADOR envia o cookie sozinho: o site do atacante
+ * dispara uma requisição para o nosso domínio e o cookie vai junto sem que
+ * ninguém tenha pedido. Um `Authorization: Bearer` não tem esse
+ * comportamento — nenhum navegador o acrescenta espontaneamente, e quem o
+ * envia teve de possuir o token e escrevê-lo no header.
+ *
+ * Então a regra é: **credencial de cookie exige CSRF; credencial de header,
+ * não.** E quem decide qual é qual é a ORIGEM DA CREDENCIAL, medida do
+ * request — nunca uma flag que o cliente manda. Deixar o cliente escolher
+ * seria transformar a proteção em opcional: bastaria mandar um header dizendo
+ * "sou Bearer" para pular a checagem, com o cookie viajando do mesmo jeito.
+ */
 export function requireCsrf(req: NextRequest): boolean {
+  if (bearerToken(req)) return true;
   return checkCsrf(req);
+}
+
+/** Como esta requisição se autenticou. Exposto para as rotas auditarem. */
+export function credentialSource(req: NextRequest): CredentialSource {
+  return bearerToken(req) ? "bearer" : "cookie";
 }
 
 /**
