@@ -1,0 +1,11 @@
+<!-- Ícone da barra de atividades.
+     Monocromático de propósito: o VS Code aplica máscara e o pinta com a cor
+     do tema. Qualquer cor aqui seria descartada, e um ícone colorido ficaria
+     destoando dos vizinhos. Traço grosso porque isto é renderizado a 24px. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <path d="M12 2.5 C 9.6 4.6, 6.9 5.2, 4.9 5.2 C 4.5 6.6, 4.3 8, 4.3 9.4 c 0 5.2, 3.1 9, 7.7 10.6 c 4.6 -1.6, 7.7 -5.4, 7.7 -10.6 c 0 -1.4, -0.2 -2.8, -0.6 -4.2 c -2 0, -4.7 -0.6, -7.1 -2.7 z"
+        fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M9 11.8 l 2.3 2.3 l 4.2 -4.6"
+        fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,52 +1,82 @@
 # StarGuard para VS Code
 
-Análise de segurança dentro do editor. A extensão roda `@starguard/core` **no
-extension host** — mesmo processo, sem servidor e sem banco. O código não sai da
-máquina, e por isso funciona em projeto que ainda não foi enviado para lugar
-nenhum.
+Análise de segurança dentro do editor, com a sua conta StarGuard.
+
+> **Requer conta da Starbridge.** A extensão não funciona sem autenticação —
+> isso é característica do produto, não defeito. Se você ainda não tem conta,
+> use **StarGuard: solicitar acesso** depois de instalar.
 
 ## O que ela faz
 
-- **Árvore lateral** com um item por analisador, o estado de cada um e um ▶ para
-  rodar só aquele. Indisponível aparece com o motivo no tooltip, não some.
-- **Painel Problemas**: cada achado vira um diagnóstico com `source:
-  starguard/<analisador>` — dá para filtrar e ver só as dependências, por
-  exemplo. O código da regra leva ao CWE quando há um.
-- **Lâmpada (Quick Fix)**: `StarGuard: corrigir com IA` abre o **diff antes de
-  gravar**. Nada é escrito até você confirmar — é a separação `propose`/`apply`
-  do motor chegando à interface.
+Cinco analisadores independentes. Você roda o que precisa, quando precisa —
+não há sequência obrigatória.
 
-Uma coleção de diagnósticos **por analisador**: rodar só o Trivy não apaga os
-achados do Semgrep da execução anterior.
+| Analisador | O que examina | Custa IA |
+|---|---|---|
+| **Vulnerabilidades de código** | padrões inseguros no fonte (Opengrep/Semgrep) | não |
+| **Dependências vulneráveis** | CVE conhecido nos pacotes declarados (Trivy) | não |
+| **Regras de negócio** | o que scanners não pegam: regra violada, IDOR, autorização | sim |
+| **Modelagem de ameaças** | ameaças e requisitos, a partir da descrição do sistema | sim |
+| **Skills e prompts** | prompt injection, exfiltração, backdoor | não |
 
-## Conta
+Os achados vão para o painel **Problemas**, com `source: starguard/<analisador>`
+— dá para filtrar e ver só as dependências, por exemplo.
 
-A conta aparece no **menu Contas** do VS Code, ao lado do GitHub — e sai de lá
-também. Quem já sabe desconectar o GitHub sabe desconectar o StarGuard.
+**A correção é uma lâmpada.** `Ctrl+.` num achado abre **StarGuard: corrigir com
+IA**, que mostra o **diff antes de gravar**. Nada é escrito até você confirmar.
 
-O login é **OAuth 2.0 Authorization Code + PKCE**: abre o navegador, você entra
-na tela do StarGuard, e o editor recebe de volta um código que só vale junto do
-verificador que ele mesmo sorteou. **A senha nunca é digitada dentro do
-editor.** O token fica no `SecretStorage` (chaveiro do sistema operacional),
-nunca em `settings.json` — aquele arquivo é versionado em muitos projetos.
+Analisador que não pode rodar **não some da lista**: fica desabilitado com o
+motivo no tooltip. Nunca confundir "não encontrou nada" com "não procurou".
 
-Funciona em **Remote SSH e Codespaces**: o retorno passa por
-`vscode.env.asExternalUri`, então não depende de um servidor local alcançável.
+## Comece aqui
 
-Para encerrar a sessão no servidor (e não só neste editor), revogue o
-dispositivo em **Conta → Dispositivos conectados** no painel.
+1. Instale e abra o painel **StarGuard** na barra lateral
+2. **Entrar** → o login acontece no navegador, na tela do StarGuard
+3. ▶ em qualquer analisador
+
+Os analisadores de código e dependências usam o **Opengrep/Semgrep** e o
+**Trivy** instalados na sua máquina. Rode **StarGuard: diagnóstico** para ver o
+que está disponível e o que falta.
+
+## Privacidade — o que sai da sua máquina
+
+**Código e dependências:** os scanners rodam **localmente**, com binários seus.
+Nada sai daqui.
+
+**Regras de negócio, ameaças e correções:** usam IA. Trechos do código
+analisado são enviados ao servidor da Starbridge e, dele, ao provedor de
+modelo. **A extensão pede consentimento explícito antes da primeira vez.**
+
+**O que o servidor guarda:** metadado — quem pediu, qual repositório, qual
+regra, arquivo e linha, tokens e custo. **O código não é persistido**: existe em
+memória durante a análise e é descartado.
+
+**O que você controla:** configure uma chave de IA própria e nada sai da
+máquina; revogue o dispositivo em *Conta → Dispositivos conectados*; desinstale.
+
+## Segurança da sua conta
+
+O login é **OAuth 2.0 com PKCE**. **A senha nunca é digitada dentro do editor**
+— ela vai no navegador, na tela do StarGuard. O token fica no `SecretStorage`
+(chaveiro do sistema operacional), nunca em `settings.json`.
+
+A credencial **rotaciona a cada uso**. Se uma cópia antiga for apresentada, a
+sessão inteira cai e o evento vai para a trilha de auditoria — é o que torna um
+token roubado detectável.
+
+Funciona em **Remote SSH** e **Codespaces**.
 
 ## Comandos
 
 | Comando | O que faz |
 |---|---|
-| `StarGuard: analisar tudo` | roda os de `starguard.analyzers.enabled` |
+| `StarGuard: analisar tudo` | roda os analisadores habilitados |
 | `StarGuard: analisar…` | escolhe um da lista |
 | `StarGuard: validar a skill aberta` | o arquivo do editor é a skill |
+| `StarGuard: corrigir com IA` | lâmpada no achado; mostra o diff antes |
 | `StarGuard: diagnóstico` | o que está instalado e configurado |
-| `StarGuard: definir a chave de IA` | guarda no **SecretStorage** |
-| `StarGuard: entrar na conta` | login pelo navegador (OAuth PKCE) |
-| `StarGuard: sair da conta` | remove a credencial deste editor |
+| `StarGuard: entrar na conta` / `sair da conta` | sessão |
+| `StarGuard: solicitar acesso` | para quem ainda não tem conta |
 
 ## Configuração
 
@@ -54,67 +84,24 @@ dispositivo em **Conta → Dispositivos conectados** no painel.
 |---|---|---|
 | `starguard.analyzers.enabled` | `["sast","sca"]` | o que "analisar tudo" roda |
 | `starguard.semgrepPath` · `starguard.trivyPath` | PATH | caminho dos executáveis |
-| `starguard.locale` | `pt-BR` | idioma dos achados |
-| `starguard.server` | app.starguard.dev | servidor de autenticação |
-| `starguard.systemDescription` | — | usada por **regras de negócio** e modelagem |
+| `starguard.locale` | `pt-BR` | idioma dos achados (pt-BR, en, es) |
+| `starguard.systemDescription` | — | usada por **regras de negócio** e ameaças |
+| `starguard.server` | — | troque apenas se a sua equipe hospeda a própria instância |
 
 O padrão traz só os dois analisadores que **não custam IA**; os outros continuam
-disponíveis um a um pela árvore. A chave de IA vive no `SecretStorage`, nunca em
-`settings.json` — aquele arquivo é versionado em muitos projetos.
+disponíveis um a um pela árvore.
 
-## Instalar
+## Limitações — leia antes de confiar
 
-### A partir do repositório (é o que existe hoje)
+**Nenhuma ferramenta encontra tudo.** Os achados vêm de scanners de padrão e de
+modelos de linguagem, e **exigem revisão humana**. As correções propostas não
+foram testadas contra a sua suíte, e o StarGuard não executa os seus testes.
+Nada disto substitui revisão de segurança.
 
-```bash
-npm run build:packages                  # núcleo → CLI → extensão
-npm run package -w starguard-vscode     # gera packages/vscode/starguard.vsix
-code --install-extension packages/vscode/starguard.vsix
-```
+Se uma correção mexer num manifesto de dependência, o **lockfile não é
+regerado** — rode o instalador do seu ecossistema antes de mesclar.
 
-Depois, **Recarregar janela** (`Ctrl+Shift+P` → *Developer: Reload Window*).
+---
 
-O `.vsix` é um arquivo só, de ~125 kB: dá para anexar num release do GitHub, num
-canal interno ou mandar por e-mail. Quem recebe instala pelo comando acima ou
-pela paleta: `Extensions: Install from VSIX…`.
-
-### Pela Marketplace da Microsoft
-
-Só falta a conta — o pacote já está pronto:
-
-1. Criar uma organização no [Azure DevOps](https://dev.azure.com) e um **PAT**
-   com escopo *Marketplace → Manage*.
-2. Criar o publisher em <https://marketplace.visualstudio.com/manage> e trocar
-   `"publisher": "starguard"` no `package.json` pelo id real.
-3. `npx vsce login <publisher>` e `npm run publish:marketplace -w starguard-vscode`.
-
-Antes de publicar: um `LICENSE` no diretório (o `vsce` avisa que falta) e um
-`icon.png` de 128×128, que é o que aparece na listagem.
-
-### Pela Open VSX (VSCodium, Cursor, Gitpod)
-
-A Marketplace da Microsoft só serve o VS Code oficial. Para os outros:
-`npx ovsx publish starguard.vsix -p <token>`.
-
-## Desenvolvimento
-
-```bash
-npm run build:dev -w starguard-vscode   # bundle com sourcemap
-```
-
-`F5` abre o Extension Development Host.
-
-O empacotamento é CommonJS: o extension host carrega a extensão via `require` e
-`@starguard/core` é ESM puro — a conversão é o que permite os dois se falarem.
-`esbuild` e o próprio `@starguard/core` são dependências de **desenvolvimento**:
-o motor é embutido no bundle, então o `.vsix` não leva `node_modules` nenhum.
-
-## Estado
-
-> ⚠️ **A interface ainda não foi usada** — ver `AUDITORIA.md#PEND-33`.
->
-> O que está verificado: o `.vsix` é gerado, instala, e a extensão **ativa no
-> editor real** (`exthost.log` registra a ativação por `workspaceContains:.git`,
-> sem erro). O que não está: a árvore desenhada, o ▶ por analisador, o
-> sublinhado no painel Problemas, a lâmpada e o diff. Instalar e ativar não é o
-> mesmo que funcionar na mão de alguém.
+**Suporte:** <https://github.com/starbridge-org/starguard/issues>
+**Licença:** proprietária — veja `LICENSE.md`

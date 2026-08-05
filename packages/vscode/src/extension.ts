@@ -40,6 +40,13 @@ import { cfg, servidor, urlDeAcesso } from "./config.js";
 let saida: vscode.OutputChannel;
 let colecoes: Map<AnalyzerId, vscode.DiagnosticCollection>;
 let arvore: ArvoreDeAnalisadores;
+/**
+ * A `TreeView`, e não só o provider: é o objeto que carrega a `description`
+ * (a conta, ao lado do título) e o `badge` (o selo numérico sobre o ícone da
+ * barra lateral). `registerTreeDataProvider` não devolve nada e por isso não
+ * dá acesso a nenhum dos dois.
+ */
+let painel: vscode.TreeView<No> | undefined;
 /** O contexto da ativação, para o consentimento chegar onde é decidido. */
 let ctxGlobal: vscode.ExtensionContext;
 /** Último achado por chave de diagnóstico — a lâmpada precisa reencontrá-lo. */
@@ -106,7 +113,10 @@ async function configurarIa(ctx: vscode.ExtensionContext): Promise<void> {
   const sessao = await sessaoAtual();
   if (!sessao) return;
   if (!(await consentiuIaRemota(ctx))) return;
+  ligarTransporteRemoto();
+}
 
+function ligarTransporteRemoto(): void {
   setAiTransport({
     kind: "remote",
     baseUrl: servidor(),
@@ -114,6 +124,21 @@ async function configurarIa(ctx: vscode.ExtensionContext): Promise<void> {
     // `getSession` renova (e rotaciona o refresh) sob demanda.
     getToken: async () => (await sessaoAtual())?.accessToken ?? null,
   });
+}
+
+/**
+ * A mesma decisão, mas SEM perguntar nada.
+ *
+ * A árvore precisa saber se a IA pela conta está valendo para pintar os
+ * analisadores certos como disponíveis — e desenhar um painel não é hora de
+ * abrir um modal pedindo autorização para mandar código para fora. Aqui só se
+ * lê um consentimento que já foi dado; quem ainda não deu continua vendo o
+ * analisador bloqueado, com o convite explícito no filho clicável.
+ */
+async function ligarIaSeJaConsentiu(): Promise<void> {
+  if (!ctxGlobal?.globalState.get<boolean>(CONSENTIU)) return;
+  if (!(await sessaoAtual())) return;
+  ligarTransporteRemoto();
 }
 
 /**
@@ -134,7 +159,23 @@ async function configurarIa(ctx: vscode.ExtensionContext): Promise<void> {
 async function exigirConta(pedirSeNaoTiver = false): Promise<vscode.AuthenticationSession | undefined> {
   const sessao = pedirSeNaoTiver ? await pedirLogin() : await sessaoAtual();
   await vscode.commands.executeCommand("setContext", "starguard.signedIn", !!sessao);
+  // O `setContext` governa os BOTÕES (o ▶, o "analisar tudo"); quem esvazia a
+  // árvore é o provider. São dois mecanismos porque o VS Code decide a tela de
+  // boas-vindas pelo número de filhos, não por contexto.
+  arvore?.definirSessao(!!sessao);
+  if (painel) {
+    painel.description = sessao ? sessao.account.label : undefined;
+  }
   return sessao;
+}
+
+/** O selo numérico sobre o ícone da barra lateral. */
+function atualizarSelo(): void {
+  if (!painel) return;
+  const n = arvore.total;
+  painel.badge = n
+    ? { value: n, tooltip: n === 1 ? t("tree.total.one") : t("tree.total.many", { n }) }
+    : undefined;
 }
 
 function raiz(): string | undefined {
@@ -301,6 +342,7 @@ function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]):
   }
 
   arvore.atualizarResultado(run, achados);
+  atualizarSelo();
 
   for (const o of Object.values(run.outcomes)) {
     if (o.status === "error") {
@@ -477,16 +519,62 @@ class ProvedorDeDiff implements vscode.TextDocumentContentProvider {
 interface EstadoDoItem {
   id: AnalyzerId;
   disponivel: boolean;
+  /** A `UnavailableReason` crua — é ela que decide qual saída oferecer. */
+  razao?: PlanEntry["reason"];
   motivo?: string;
   detalhe?: string;
   estado: "ocioso" | "rodando" | "pronto" | "erro";
-  achados?: number;
+  achados?: Achado[];
 }
 
-class ArvoreDeAnalisadores implements vscode.TreeDataProvider<EstadoDoItem> {
+/**
+ * Um nó da árvore. Três formas, e a terceira é a que muda o caráter do painel.
+ *
+ * `acao` é a SAÍDA de um analisador bloqueado. Dizer "falta a descrição do
+ * sistema" e parar aí transfere para a pessoa o trabalho de descobrir onde se
+ * configura isso; um filho clicável que abre exatamente aquele campo fecha o
+ * ciclo no lugar onde o problema apareceu.
+ */
+type No =
+  | { tipo: "analisador"; item: EstadoDoItem }
+  | { tipo: "achado"; achado: Achado }
+  | { tipo: "acao"; rotulo: string; icone: string; comando: vscode.Command };
+
+const ORDEM_SEV: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+};
+
+/** Cor do ponto de severidade. Usa a paleta do TEMA, não hex fixo. */
+const COR_SEV: Record<string, string> = {
+  critical: "charts.red",
+  high: "charts.red",
+  medium: "charts.orange",
+  low: "charts.yellow",
+  info: "charts.blue",
+};
+
+/** Onde se aprende a instalar cada binário que falta. */
+const COMO_INSTALAR: Record<string, string> = {
+  trivy: "https://trivy.dev/latest/getting-started/installation/",
+  opengrep: "https://github.com/opengrep/opengrep#installation",
+  semgrep: "https://semgrep.dev/docs/getting-started/quickstart",
+};
+
+class ArvoreDeAnalisadores implements vscode.TreeDataProvider<No> {
   private itens = new Map<AnalyzerId, EstadoDoItem>();
-  private readonly emissor = new vscode.EventEmitter<void>();
+  private readonly emissor = new vscode.EventEmitter<No | undefined>();
   readonly onDidChangeTreeData = this.emissor.event;
+  /**
+   * Sem conta a árvore fica VAZIA — e é isso que faz o `viewsWelcome`
+   * aparecer. O VS Code só mostra a tela de boas-vindas quando o provider não
+   * devolve nenhum filho da raiz; devolver os cinco analisadores desabilitados
+   * escondia o botão "Entrar" e deixava o painel sem saída visível.
+   */
+  private logado = false;
 
   constructor() {
     for (const id of ANALYZER_IDS) {
@@ -494,9 +582,26 @@ class ArvoreDeAnalisadores implements vscode.TreeDataProvider<EstadoDoItem> {
     }
   }
 
+  definirSessao(entrou: boolean): void {
+    this.logado = entrou;
+    this.emissor.fire(undefined);
+  }
+
+  /** Quanto há no total — alimenta o selo numérico do ícone lateral. */
+  get total(): number {
+    let n = 0;
+    for (const i of this.itens.values()) n += i.achados?.length ?? 0;
+    return n;
+  }
+
   async recarregar(): Promise<void> {
     const root = raiz();
     aplicarConfiguracao();
+    // A IA pela conta muda a DISPONIBILIDADE: com o transporte remoto ligado,
+    // regras de negócio e ameaças rodam sem chave local. Sem esta linha a
+    // árvore anunciava "precisa de uma chave de IA" justamente para quem fez
+    // login para não precisar de uma.
+    await ligarIaSeJaConsentiu();
     const execPlan = await montarPlano({
       source: root ? { type: "local", path: root } : { type: "none" },
       locale: locale(),
@@ -514,31 +619,41 @@ class ArvoreDeAnalisadores implements vscode.TreeDataProvider<EstadoDoItem> {
       // `not_selected` aqui não significa indisponível: a árvore mostra o que
       // PODE rodar, e cada item roda sozinho pelo botão ▶.
       item.disponivel = e.willRun || e.reason === "not_selected";
+      item.razao = item.disponivel ? undefined : e.reason;
       item.motivo = descreverMotivo(e);
       item.detalhe = e.detail;
     }
-    this.emissor.fire();
+    this.emissor.fire(undefined);
   }
 
   marcarRodando(id: AnalyzerId): void {
     const i = this.itens.get(id);
     if (i) i.estado = "rodando";
-    this.emissor.fire();
+    this.emissor.fire(undefined);
   }
 
   marcarFim(id: AnalyzerId, ok: boolean): void {
     const i = this.itens.get(id);
     if (i) i.estado = ok ? "pronto" : "erro";
-    this.emissor.fire();
+    this.emissor.fire(undefined);
   }
 
   atualizarResultado(run: AnalysisRun, achados: Achado[]): void {
     for (const [id, item] of this.itens) {
       const o = run.outcomes[id];
+      // `skipped` é "não pedi este agora": os achados da execução anterior
+      // continuam valendo e não podem ser zerados por baixo.
       if (!o || o.status === "skipped") continue;
-      item.achados = achados.filter((a) => a.analyzer === id).length;
+      item.achados = achados
+        .filter((a) => a.analyzer === id)
+        .sort(
+          (x, y) =>
+            (ORDEM_SEV[x.severity] ?? 9) - (ORDEM_SEV[y.severity] ?? 9) ||
+            x.file.localeCompare(y.file) ||
+            (x.line ?? 0) - (y.line ?? 0)
+        );
     }
-    this.emissor.fire();
+    this.emissor.fire(undefined);
   }
 
   limpar(): void {
@@ -546,43 +661,202 @@ class ArvoreDeAnalisadores implements vscode.TreeDataProvider<EstadoDoItem> {
       item.estado = "ocioso";
       item.achados = undefined;
     }
-    this.emissor.fire();
+    this.emissor.fire(undefined);
   }
 
-  getChildren(): EstadoDoItem[] {
-    return [...this.itens.values()];
+  getChildren(no?: No): No[] {
+    if (!no) {
+      if (!this.logado) return [];
+      return [...this.itens.values()].map((item) => ({ tipo: "analisador", item }));
+    }
+    if (no.tipo !== "analisador") return [];
+
+    const { item } = no;
+    if (item.achados?.length) {
+      return item.achados.map((achado) => ({ tipo: "achado", achado }));
+    }
+    const saida = this.saidaPara(item);
+    return saida ? [saida] : [];
   }
 
-  getTreeItem(e: EstadoDoItem): vscode.TreeItem {
-    const item = new vscode.TreeItem(t(`analyzer.${e.id}.name` as MessageKey));
+  /** A ação que destrava este analisador, quando existe uma. */
+  private saidaPara(e: EstadoDoItem): No | undefined {
+    const abrirConfig = (chave: string): vscode.Command => ({
+      command: "workbench.action.openSettings",
+      title: "",
+      arguments: [chave],
+    });
+
+    switch (e.razao) {
+      case "binary_missing": {
+        const bin = e.detalhe ?? "";
+        const url = COMO_INSTALAR[bin.toLowerCase()];
+        if (!url) return undefined;
+        return {
+          tipo: "acao",
+          rotulo: t("tree.action.installBinary", { bin }),
+          icone: "cloud-download",
+          comando: {
+            command: "vscode.open",
+            title: "",
+            arguments: [vscode.Uri.parse(url)],
+          },
+        };
+      }
+      case "no_workspace":
+        return {
+          tipo: "acao",
+          rotulo: t("tree.action.openFolder"),
+          icone: "folder-opened",
+          comando: { command: "vscode.openFolder", title: "" },
+        };
+      case "no_ai_key":
+        return {
+          tipo: "acao",
+          rotulo: t("tree.action.useAccountAi"),
+          icone: "sparkle",
+          comando: { command: "starguard.enableAccountAi", title: "" },
+        };
+      case "engine_off":
+        return {
+          tipo: "acao",
+          rotulo: t("tree.action.enable"),
+          icone: "gear",
+          comando: abrirConfig("starguard.analyzers.enabled"),
+        };
+      case "no_input":
+        // A entrada que falta depende de quem pede: a skill é o arquivo
+        // aberto; a modelagem de ameaças e as regras de negócio querem a
+        // descrição do sistema.
+        return e.id === "skills"
+          ? {
+              tipo: "acao",
+              rotulo: t("tree.action.openSkill"),
+              icone: "go-to-file",
+              comando: { command: "workbench.action.files.openFile", title: "" },
+            }
+          : {
+              tipo: "acao",
+              rotulo: t("tree.action.describeSystem"),
+              icone: "edit",
+              comando: abrirConfig("starguard.systemDescription"),
+            };
+      default:
+        return undefined;
+    }
+  }
+
+  getTreeItem(no: No): vscode.TreeItem {
+    if (no.tipo === "acao") return this.itemDeAcao(no);
+    if (no.tipo === "achado") return this.itemDeAchado(no.achado);
+    return this.itemDeAnalisador(no.item);
+  }
+
+  private itemDeAnalisador(e: EstadoDoItem): vscode.TreeItem {
+    const nome = t(`analyzer.${e.id}.name` as MessageKey);
+    const n = e.achados?.length;
+
+    // Um analisador só abre se tiver o que mostrar dentro — nem achado nem
+    // saída significa seta de expansão que abre no vazio.
+    const temFilhos = !!n || !!this.saidaPara(e);
+    const item = new vscode.TreeItem(
+      nome,
+      temFilhos
+        ? n
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None
+    );
+
+    // CURTO: o VS Code trunca a descrição, e "Faltou a entr…" não informa
+    // nada. O motivo inteiro fica no tooltip, que não trunca.
     item.description =
       e.estado === "rodando"
-        ? "…"
-        : e.achados !== undefined
-          ? String(e.achados)
-          : e.disponivel
-            ? e.detalhe
-            : e.motivo;
-    item.tooltip = new vscode.MarkdownString(
-      `**${t(`analyzer.${e.id}.name` as MessageKey)}**\n\n${t(
-        `analyzer.${e.id}.desc` as MessageKey
-      )}${e.motivo ? `\n\n_${e.motivo}_` : ""}`
-    );
-    item.iconPath = new vscode.ThemeIcon(
-      e.estado === "rodando"
-        ? "loading~spin"
+        ? t("tree.state.running")
         : e.estado === "erro"
-          ? "error"
-          : !e.disponivel
-            ? "circle-slash"
-            : e.achados
-              ? "warning"
-              : e.achados === 0
-                ? "pass"
-                : "circle-outline"
+          ? t("tree.state.failed")
+          : n
+            ? n === 1
+              ? t("tree.findings.one")
+              : t("tree.findings.many", { n })
+            : n === 0
+              ? t("tree.state.clean")
+              : e.disponivel
+                ? undefined
+                : t("tree.state.unavailable");
+
+    const md = new vscode.MarkdownString(
+      `**${nome}**\n\n${t(`analyzer.${e.id}.desc` as MessageKey)}`
     );
+    if (e.motivo) md.appendMarkdown(`\n\n$(circle-slash) ${e.motivo}`);
+    md.supportThemeIcons = true;
+    item.tooltip = md;
+
+    item.iconPath = this.iconeDoAnalisador(e, n);
     // O `contextValue` é o que habilita o ▶ inline só em quem pode rodar.
     item.contextValue = e.disponivel ? "analyzer-ready" : "analyzer-blocked";
+    return item;
+  }
+
+  private iconeDoAnalisador(e: EstadoDoItem, n: number | undefined): vscode.ThemeIcon {
+    if (e.estado === "rodando") return new vscode.ThemeIcon("loading~spin");
+    if (e.estado === "erro") {
+      return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+    }
+    if (!e.disponivel) return new vscode.ThemeIcon("circle-slash");
+    if (n) {
+      // A cor vem do achado MAIS GRAVE: a lista já está ordenada por
+      // severidade, então o primeiro é o pior.
+      const pior = e.achados![0]!.severity;
+      return new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor(COR_SEV[pior] ?? "charts.orange")
+      );
+    }
+    if (n === 0) {
+      return new vscode.ThemeIcon("pass-filled", new vscode.ThemeColor("charts.green"));
+    }
+    return new vscode.ThemeIcon("circle-large-outline");
+  }
+
+  private itemDeAchado(a: Achado): vscode.TreeItem {
+    const item = new vscode.TreeItem(a.title, vscode.TreeItemCollapsibleState.None);
+    item.description = a.line ? `${a.file}:${a.line}` : a.file;
+
+    const md = new vscode.MarkdownString(
+      `**${a.title}**\n\n${a.description || ""}`
+    );
+    md.appendMarkdown(
+      `\n\n\`${a.ruleId ?? "—"}\` · ${t(`severity.${a.severity}` as MessageKey)}`
+    );
+    item.tooltip = md;
+
+    item.iconPath = new vscode.ThemeIcon(
+      "circle-filled",
+      new vscode.ThemeColor(COR_SEV[a.severity] ?? "charts.blue")
+    );
+
+    // Clicar no achado abre o arquivo NA LINHA. Sem isto o item é decorativo
+    // e obriga a passar pelo painel Problemas para chegar ao código.
+    const root = raiz();
+    if (root && a.file) {
+      const uri = vscode.Uri.joinPath(vscode.Uri.file(root), a.file);
+      const linha = Math.max(0, (a.line ?? 1) - 1);
+      item.command = {
+        command: "vscode.open",
+        title: "",
+        arguments: [uri, { selection: new vscode.Range(linha, 0, linha, 0) }],
+      };
+    }
+    item.contextValue = "finding";
+    return item;
+  }
+
+  private itemDeAcao(no: Extract<No, { tipo: "acao" }>): vscode.TreeItem {
+    const item = new vscode.TreeItem(no.rotulo, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon(no.icone);
+    item.command = no.comando;
+    item.contextValue = "action";
     return item;
   }
 }
@@ -621,10 +895,15 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const chave = await ctx.secrets.get("starguard.apiKey");
   if (chave) process.env.ANTHROPIC_API_KEY = chave;
 
+  painel = vscode.window.createTreeView("starguard.analyzers", {
+    treeDataProvider: arvore,
+    showCollapseAll: true,
+  });
+
   ctx.subscriptions.push(
     saida,
     ...colecoes.values(),
-    vscode.window.registerTreeDataProvider("starguard.analyzers", arvore),
+    painel,
     vscode.workspace.registerTextDocumentContentProvider(
       "starguard-diff",
       new ProvedorDeDiff()
@@ -653,9 +932,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       if (escolha) await analisar([escolha.id]);
     }),
 
-    vscode.commands.registerCommand("starguard.runOne", (item: EstadoDoItem) =>
-      analisar([item.id])
-    ),
+    // O ▶ inline entrega o NÓ da árvore, não o estado cru: desde que os
+    // achados viraram filhos, nem todo nó é um analisador.
+    vscode.commands.registerCommand("starguard.runOne", async (no: No) => {
+      if (no?.tipo === "analisador") await analisar([no.item.id]);
+    }),
 
     vscode.commands.registerCommand("starguard.validateCurrentSkill", () =>
       analisar(["skills"])
@@ -669,6 +950,16 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       for (const c of colecoes.values()) c.clear();
       achadosPorChave.clear();
       arvore.limpar();
+      atualizarSelo();
+    }),
+
+    // A saída oferecida no analisador bloqueado por falta de IA. É o mesmo
+    // consentimento de sempre — só que pedido no momento em que a pessoa
+    // demonstrou querer aquele analisador, e não no meio de uma análise.
+    vscode.commands.registerCommand("starguard.enableAccountAi", async () => {
+      if (!(await exigirConta(true))) return;
+      await configurarIa(ctxGlobal);
+      await arvore.recarregar();
     }),
 
     vscode.commands.registerCommand("starguard.requestAccess", async () => {

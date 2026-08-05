@@ -2,7 +2,7 @@
   "name": "starguard-vscode",
   "displayName": "StarGuard",
   "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "starbridge",
   "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
@@ -14,8 +14,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.git",
-    "workspaceContains:.starguard.json",
+    "onStartupFinished",
     "onUri"
   ],
   "contributes": {
@@ -67,13 +66,17 @@
       {
         "command": "starguard.requestAccess",
         "title": "StarGuard: solicitar acesso"
+      },
+      {
+        "command": "starguard.enableAccountAi",
+        "title": "StarGuard: usar a IA da minha conta"
       }
     ],
     "views": {
-      "explorer": [
+      "starguard": [
         {
           "id": "starguard.analyzers",
-          "name": "StarGuard"
+          "name": "Analisadores"
         }
       ]
     },
@@ -86,8 +89,16 @@
         },
         {
           "command": "starguard.clear",
-          "when": "view == starguard.analyzers",
+          "when": "view == starguard.analyzers && starguard.signedIn",
           "group": "navigation@2"
+        },
+        {
+          "command": "starguard.doctor",
+          "when": "view == starguard.analyzers"
+        },
+        {
+          "command": "starguard.setApiKey",
+          "when": "view == starguard.analyzers"
         }
       ],
       "view/item/context": [
@@ -166,9 +177,18 @@
       {
         "view": "starguard.analyzers",
         "when": "!starguard.signedIn",
-        "contents": "Análise de segurança com a sua conta StarGuard.\n\n[Entrar](command:starguard.signIn)\n\nAinda não tem conta?\n[Solicitar acesso](command:starguard.requestAccess)"
+        "contents": "Análise de segurança dentro do editor: vulnerabilidades de código, dependências com CVE, regras de negócio, modelagem de ameaças e skills.\n\n[Entrar na conta StarGuard](command:starguard.signIn)\n\nO login acontece no navegador — a sua senha nunca é digitada dentro do editor.\n\nAinda não tem conta?\n[Solicitar acesso](command:starguard.requestAccess)"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "starguard",
+          "title": "StarGuard",
+          "icon": "media/starguard.svg"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node build.mjs --producao",

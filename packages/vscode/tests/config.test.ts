@@ -84,6 +84,43 @@ describe("o servidor bate entre o código e o manifesto", () => {
   });
 });
 
+describe("a extensão tem lugar próprio na barra lateral", () => {
+  // Nasceu de um caso REAL: a v0.1.0 declarava `views: { explorer: [...] }`, o
+  // que põe a árvore como uma SEÇÃO dentro do Explorer, abaixo de Outline e
+  // Timeline. Não há ícone na barra de atividades, e quem instala procura ali
+  // — então a extensão simplesmente "não aparece", sem erro nenhum.
+  const c = manifesto.contributes as {
+    viewsContainers?: { activitybar?: Array<{ id: string; icon: string }> };
+    views: Record<string, Array<{ id: string }>>;
+  };
+
+  it("tem contêiner PRÓPRIO na barra de atividades", () => {
+    const cont = c.viewsContainers?.activitybar?.[0];
+    expect(cont).toBeDefined();
+    expect(cont!.id).toBe("starguard");
+  });
+
+  it("o ícone do contêiner é SVG — o VS Code aplica máscara e tema", () => {
+    // PNG aqui aparece sem tratamento de tema e destoa dos vizinhos.
+    expect(c.viewsContainers!.activitybar![0]!.icon).toMatch(/\.svg$/);
+  });
+
+  it("a árvore vive no contêiner próprio, NÃO no explorer", () => {
+    expect(c.views.explorer).toBeUndefined();
+    expect(c.views.starguard?.[0]?.id).toBe("starguard.analyzers");
+  });
+
+  it("ativa na inicialização — o painel tem de estar pronto ao primeiro clique", () => {
+    // Sem isto, quem já está logado vê a tela de "Entrar" piscar antes de o
+    // contexto `starguard.signedIn` ser resolvido.
+    const eventos = (manifesto as unknown as { activationEvents: string[] }).activationEvents;
+    expect(eventos).toContain("onStartupFinished");
+    // `onUri` é o retorno do navegador no login: sem ele o código de
+    // autorização chega e ninguém está escutando.
+    expect(eventos).toContain("onUri");
+  });
+});
+
 describe("o portão de login está declarado no manifesto", () => {
   const c = manifesto.contributes as {
     viewsWelcome?: Array<{ view: string; when?: string; contents: string }>;
@@ -113,6 +150,70 @@ describe("o portão de login está declarado no manifesto", () => {
   it("o `analisar tudo` da barra de título também", () => {
     const titulo = c.menus["view/title"]!.find((m) => m.command === "starguard.runAll");
     expect(titulo!.when).toContain("starguard.signedIn");
+  });
+});
+
+describe("a árvore fica VAZIA sem sessão — é o que revela o botão Entrar", () => {
+  // Nasceu de um caso REAL na v0.1.1: o ícone já aparecia na barra lateral,
+  // mas o painel abria com os cinco analisadores riscados e NENHUM botão de
+  // entrar. O `viewsWelcome` do VS Code só é renderizado quando o provider
+  // devolve zero filhos da raiz — devolver os analisadores desabilitados
+  // escondia a única saída que a tela tinha.
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("`getChildren` da raiz desiste quando não há sessão", () => {
+    expect(fonte).toMatch(/if\s*\(!this\.logado\)\s*return\s*\[\]/);
+  });
+
+  it("o estado de sessão chega ao provider, não só ao `setContext`", () => {
+    // `setContext` governa os BOTÕES; quem esvazia a árvore é o provider. Ter
+    // só o primeiro foi exatamente o bug.
+    expect(fonte).toContain("definirSessao");
+    expect(fonte).toMatch(/arvore\?\.definirSessao\(!!sessao\)/);
+  });
+});
+
+describe("o painel bloqueado oferece a saída, não só o diagnóstico", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("cada motivo de indisponibilidade tem uma ação correspondente", () => {
+    // Sem isto o painel diz "falta a descrição do sistema" e deixa a pessoa
+    // procurando onde se configura isso. Ver AUDITORIA.md#UX-15.
+    for (const razao of [
+      "binary_missing",
+      "no_workspace",
+      "no_ai_key",
+      "engine_off",
+      "no_input",
+    ]) {
+      expect(fonte, razao).toContain(`case "${razao}":`);
+    }
+  });
+
+  it("o comando da ação de IA está declarado no manifesto", () => {
+    // Ação que aponta para comando inexistente falha em silêncio no clique.
+    const cmds = (
+      manifesto.contributes as { commands: Array<{ command: string }> }
+    ).commands.map((c) => c.command);
+    expect(cmds).toContain("starguard.enableAccountAi");
+  });
+
+  it("a disponibilidade é recalculada com a IA da conta já ligada", () => {
+    // `hasAnyAiKey()` responde `true` no transporte remoto. Sem ligar o
+    // transporte ANTES de montar o plano, a árvore anunciava "precisa de uma
+    // chave de IA" para quem fez login justamente para não precisar de uma.
+    expect(fonte).toMatch(/await ligarIaSeJaConsentiu\(\);\s*\n\s*const execPlan/);
+  });
+
+  it("ligar a IA para a árvore NÃO abre modal de consentimento", () => {
+    // Desenhar um painel não é hora de pedir autorização para mandar código
+    // para fora: aqui só se lê um consentimento já dado.
+    const corpo = fonte.slice(
+      fonte.indexOf("async function ligarIaSeJaConsentiu"),
+      fonte.indexOf("function raiz()")
+    );
+    expect(corpo).not.toContain("showWarningMessage");
+    expect(corpo).toContain("globalState.get");
   });
 });
 

@@ -815,6 +815,30 @@ export const PT_BR = {
   "fix.cannot.noWorkspace":
     "Sem acesso ao código: informe o repositório ou abra o projeto.",
 
+  // ---- Árvore lateral do VS Code ----
+  // Rótulo de estado fica CURTO de propósito: o VS Code trunca a descrição
+  // com reticências, e meia frase cortada não informa nada. O motivo inteiro
+  // vai no tooltip, que não trunca.
+  "tree.state.unavailable": "indisponível",
+  "tree.state.running": "analisando…",
+  "tree.state.clean": "nada encontrado",
+  "tree.state.failed": "falhou",
+  "tree.findings.one": "1 achado",
+  "tree.findings.many": "{n} achados",
+  "tree.total.one": "1 achado no total",
+  "tree.total.many": "{n} achados no total",
+  "tree.signedInAs": "Conectado como {email}",
+
+  // Cada analisador bloqueado oferece a SAÍDA, não só o diagnóstico. Dizer
+  // "falta a descrição do sistema" e parar aí deixa a pessoa procurando onde
+  // se configura isso.
+  "tree.action.describeSystem": "Descrever o sistema…",
+  "tree.action.installBinary": "Como instalar o {bin}",
+  "tree.action.openFolder": "Abrir uma pasta…",
+  "tree.action.openSkill": "Abrir o arquivo da skill…",
+  "tree.action.useAccountAi": "Usar a IA da minha conta…",
+  "tree.action.enable": "Habilitar nas configurações…",
+
   // ---- Seletor de analisadores (Tela 1) ----
   "select.title": "O que analisar",
   "select.hint":
@@ -1666,6 +1690,23 @@ const EN: Record<MessageKey, string> = {
   "fix.cannot.noSnippet":
     "The finding carries neither a snippet nor a location — there is nothing that can be safely fixed.",
   "fix.cannot.noWorkspace": "No access to the code: provide the repository or open the project.",
+
+  // ---- VS Code side tree ----
+  "tree.state.unavailable": "unavailable",
+  "tree.state.running": "analyzing…",
+  "tree.state.clean": "nothing found",
+  "tree.state.failed": "failed",
+  "tree.findings.one": "1 finding",
+  "tree.findings.many": "{n} findings",
+  "tree.total.one": "1 finding in total",
+  "tree.total.many": "{n} findings in total",
+  "tree.signedInAs": "Signed in as {email}",
+  "tree.action.describeSystem": "Describe the system…",
+  "tree.action.installBinary": "How to install {bin}",
+  "tree.action.openFolder": "Open a folder…",
+  "tree.action.openSkill": "Open the skill file…",
+  "tree.action.useAccountAi": "Use the AI from my account…",
+  "tree.action.enable": "Enable in settings…",
 
   // ---- Analyzer selector (Screen 1) ----
   "select.title": "What to analyze",
@@ -2519,6 +2560,23 @@ const ES: Record<MessageKey, string> = {
   "fix.cannot.noSnippet":
     "El hallazgo no trae ni fragmento ni ubicación — no hay nada que corregir con seguridad.",
   "fix.cannot.noWorkspace": "Sin acceso al código: indica el repositorio o abre el proyecto.",
+
+  // ---- Árbol lateral de VS Code ----
+  "tree.state.unavailable": "no disponible",
+  "tree.state.running": "analizando…",
+  "tree.state.clean": "nada encontrado",
+  "tree.state.failed": "falló",
+  "tree.findings.one": "1 hallazgo",
+  "tree.findings.many": "{n} hallazgos",
+  "tree.total.one": "1 hallazgo en total",
+  "tree.total.many": "{n} hallazgos en total",
+  "tree.signedInAs": "Conectado como {email}",
+  "tree.action.describeSystem": "Describir el sistema…",
+  "tree.action.installBinary": "Cómo instalar {bin}",
+  "tree.action.openFolder": "Abrir una carpeta…",
+  "tree.action.openSkill": "Abrir el archivo de la skill…",
+  "tree.action.useAccountAi": "Usar la IA de mi cuenta…",
+  "tree.action.enable": "Habilitar en la configuración…",
 
   // ---- Selector de analizadores (Pantalla 1) ----
   "select.title": "Qué analizar",
