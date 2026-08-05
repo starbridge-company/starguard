@@ -1,0 +1,79 @@
+# ============================================================
+# Infraestrutura do StarGuard no Render, declarada em código.
+#
+# Existe por um sintoma concreto: o serviço foi criado à mão no painel e subiu
+# pelo buildpack de Node, que instala dependências npm e mais nada. O resultado
+# é um servidor sem `trivy` — e, como binário ausente NÃO derruba a análise (é
+# o UX-15 funcionando), o sintoma é silencioso: o scan de dependências roda,
+# não encontra nada, e parece um repositório limpo.
+#
+# `runtime: docker` é o ponto todo deste arquivo. O `Dockerfile` já instala o
+# git, o opengrep (com as regras) e copia o trivy da imagem oficial; o buildpack
+# não faz nada disso e não tem como fazer.
+#
+# Para adotar: no painel do Render, Blueprints → New Blueprint Instance →
+# aponte para este repositório. Um serviço já existente não passa a seguir este
+# arquivo sozinho.
+# ============================================================
+services:
+  - type: web
+    name: starguard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ---- Banco ----
+      # `sync: false` = o Render pede o valor na criação e NÃO o versiona aqui.
+      # Vale para tudo que é segredo: este arquivo vai para o git.
+      - key: DATABASE_URL
+        sync: false
+
+      # ---- Sessão (JWT + cookies) ----
+      - key: JWT_PRIVATE_KEY
+        sync: false
+      - key: JWT_PUBLIC_KEY
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: AUDIT_IP_SALT
+        sync: false
+
+      # ---- IA ----
+      # A chave do servidor: é ela que atende o proxy `/api/ai/complete`, e por
+      # isso quem usa a extensão não precisa de chave própria.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_MONTHLY_BUDGET_USD
+        value: "50"
+
+      # ---- GitHub App (gatilhos automáticos) ----
+      # Sem os três, /api/github/webhook responde 503 e os gatilhos não existem.
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: WEBHOOK_MAX_FIXES
+        value: "5"
+      - key: WEBHOOK_MIN_SEVERITY
+        value: high
+
+      # ---- Fila ----
+      # O worker sobe junto com o servidor web. Num plano com uma instância só,
+      # é o que existe; quando houver worker dedicado, ponha `off` aqui e suba
+      # um segundo serviço com o mesmo Dockerfile.
+      - key: QUEUE_WORKER
+        value: "on"
+
+      # ---- Scanners ----
+      # As regras locais vêm na imagem: sem isto o SAST tenta baixar do registro
+      # remoto a cada análise, o que precisa de rede e de CA confiável.
+      - key: SAST_RULES
+        value: /opt/opengrep-rules
