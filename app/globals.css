@@ -1528,6 +1528,12 @@ img {
   box-shadow: var(--shadow-lg);
   padding: 34px 30px;
   display: grid;
+  /* `minmax(0, 1fr)` e não o `auto` implícito: a trilha automática cresce até o
+     min-content do filho mais largo, e um filho que não quebra (o código de 43
+     caracteres, lá embaixo) esticaria a trilha para além dos 420px do card —
+     arrastando TODOS os irmãos junto, que vazariam pela borda direita. Com o
+     mínimo em 0, quem não couber rola dentro de si mesmo. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
   animation: fadeInUp 0.5s var(--ease);
 }
@@ -3692,6 +3698,8 @@ a.cell-strong:hover {
   border-radius: var(--radius-md);
   padding: 12px 14px;
   display: grid;
+  /* Mesma razão do `.auth-card`: a caixa do código não pode esticar a trilha. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -3705,6 +3713,8 @@ a.cell-strong:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Sem isto o mínimo automático da linha flex é o min-content do código. */
+  min-width: 0;
 }
 
 .oauth-code code {

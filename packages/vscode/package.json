@@ -188,6 +188,7 @@
     "build:dev": "node build.mjs",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies -o starguard.vsix",
+    "install:local": "npm run package && node scripts/instalar-local.mjs",
     "publish:marketplace": "vsce publish --no-dependencies",
     "icon": "node scripts/gerar-icone.mjs"
   },
