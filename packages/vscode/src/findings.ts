@@ -15,6 +15,7 @@ import type {
   AnalyzerId,
   DependencyVuln,
   Severity,
+  SkillValidation,
   Vulnerability,
 } from "@starguard/core/types";
 
@@ -92,10 +93,46 @@ export function achadosDe(run: AnalysisRun): Achado[] {
     });
   }
 
-  // As skills não entram no painel Problemas: o achado é sobre o TEXTO de um
-  // prompt, e as heurísticas dão a posição dentro do conteúdo analisado, que
-  // pode não ser o arquivo aberto. Sai no canal de saída, onde não finge uma
-  // precisão que não tem.
+  // As skills entram na LISTA, e não no painel Problemas — AUDITORIA.md#UX-24.
+  //
+  // A primeira versão as deixava de fora dos dois, e o efeito era o pior
+  // possível: rodar o analisador de skills sobre um prompt com injeção
+  // terminava com o painel dizendo "nada encontrado". Achado real, reportado
+  // como limpo. O terminal já tinha passado por isto (`render.ts`), e a
+  // correção lá foi a mesma.
+  //
+  // O que continua valendo é a decisão sobre os DIAGNÓSTICOS: a posição do
+  // achado é dentro do texto analisado, que pode não ser o arquivo aberto no
+  // editor. Sublinhar a linha 12 do arquivo errado é pior que não sublinhar —
+  // quem publica os diagnósticos filtra `skills` fora.
+  const skills = run.outcomes.skills?.result as SkillValidation[] | undefined;
+  for (const s of skills ?? []) {
+    for (const f of s.findings) {
+      out.push({
+        id: f.id,
+        analyzer: "skills",
+        severity: f.severity,
+        ruleId: f.type,
+        title: f.title,
+        file: s.skillName,
+        line: f.line,
+        description: f.description,
+        suggestion: f.recommendation,
+        codeSnippet: f.snippet,
+        raw: f,
+      });
+    }
+  }
 
   return out.sort((a, b) => PESO[a.severity] - PESO[b.severity]);
+}
+
+/**
+ * Vai para o painel Problemas?
+ *
+ * Só o que tem arquivo e linha de VERDADE no workspace. Ver o comentário
+ * acima: a skill é texto, não posição em arquivo do projeto.
+ */
+export function ehDiagnostico(a: Achado): boolean {
+  return a.analyzer !== "skills";
 }

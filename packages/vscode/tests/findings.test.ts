@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { achadosDe } from "../src/findings";
+import { achadosDe, ehDiagnostico } from "../src/findings";
 import type { AnalysisRun, AnalyzerOutcome } from "@starguard/core/contracts";
 import type { DependencyVuln, Vulnerability } from "@starguard/core/types";
 
@@ -141,18 +141,54 @@ describe("achadosDe", () => {
     expect(a!.raw).toBe(original);
   });
 
-  it("skills NÃO entram no painel Problemas", () => {
-    // O achado de skill é sobre o texto de um prompt, e a posição é dentro do
-    // conteúdo analisado — que pode não ser o arquivo aberto. Fingir uma
-    // localização que não se tem seria pior que não mostrar.
+  it("skills entram na LISTA — AUDITORIA.md#UX-24", () => {
+    // A primeira versão as deixava de fora de tudo, e o painel terminava
+    // dizendo "nada encontrado" sobre um prompt com injeção. Achado real,
+    // reportado como limpo. O terminal já tinha passado por isto.
     const r = achadosDe(
       corrida({
         skills: {
-          result: [{ skillName: "s", verdict: "review", findings: [{}], checkedItems: [] }],
+          result: [
+            {
+              skillName: "prompts.md",
+              verdict: "rejected",
+              findings: [
+                { id: "H-0", type: "prompt-injection", severity: "critical", title: "Injeção", description: "d", line: 3 },
+              ],
+              checkedItems: [],
+            },
+          ],
         },
       })
     );
-    expect(r).toHaveLength(0);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      analyzer: "skills",
+      title: "Injeção",
+      file: "prompts.md",
+      line: 3,
+    });
+  });
+
+  it("…mas NÃO no painel Problemas", () => {
+    // O achado de skill é sobre o texto de um prompt, e a posição é dentro do
+    // conteúdo analisado — que pode não ser o arquivo aberto. Sublinhar a
+    // linha errada de outro arquivo é pior que não sublinhar.
+    const [a] = achadosDe(
+      corrida({
+        skills: {
+          result: [
+            { skillName: "s", verdict: "review", findings: [{ severity: "low" }], checkedItems: [] },
+          ],
+        },
+      })
+    );
+    expect(ehDiagnostico(a!)).toBe(false);
+  });
+
+  it("vulnerabilidade de código continua indo para o painel Problemas", () => {
+    const [a] = achadosDe(corrida({ sca: { result: [dep({})] } }));
+    expect(ehDiagnostico(a!)).toBe(true);
   });
 });
 

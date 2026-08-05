@@ -75,7 +75,11 @@ export type UnavailableReason =
   | "no_input" // precisa de entrada própria (descrição, skills) e não veio
   | "binary_missing" // o executável configurado não está no host
   | "engine_off" // desligado por configuração (SAST_ENGINE=none)
-  | "no_ai_key"; // precisa de IA e não há credencial
+  | "no_ai_key" // precisa de IA e não há credencial
+  // Cancelado antes de começar. É motivo como os outros, e não ausência: quem
+  // cancelou precisa ver QUEM não chegou a rodar — senão o resultado parcial
+  // passa por completo, que é o mesmo erro do UX-15 com outra roupa.
+  | "cancelled";
 
 export interface Availability {
   ok: boolean;

@@ -217,6 +217,21 @@ export async function run(
     const concluidos = new Set<AnalyzerId>();
 
     while (pendentes.length) {
+      // Cancelamento entre rodadas.
+      //
+      // O `signal` já chegava a cada analisador, mas quem obedece a ele é a
+      // chamada de rede ou o processo filho — o que ainda NÃO começou começava
+      // do mesmo jeito. Cancelar uma execução de cinco analisadores parava o
+      // primeiro e deixava os outros quatro rodando por conta própria, o que é
+      // o oposto do que o botão promete.
+      if (opts.signal?.aborted) {
+        for (const id of pendentes) {
+          outcomes[id] = { id, status: "skipped", reason: "cancelled", degraded: [] };
+          await emit(sinks, { type: "analyzer:skipped", id, reason: "cancelled" });
+        }
+        break;
+      }
+
       // Pronto = todo `uses` que está no plano já terminou (com qualquer
       // desfecho: um upstream que falhou é contexto que não veio, e esperar
       // por ele para sempre seria travar a execução por causa de um opcional).

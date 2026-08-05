@@ -392,3 +392,56 @@ describe("ExecutionPlan é inspecionável antes de rodar", () => {
     expect(p.entries).toHaveLength(1);
   });
 });
+
+describe("cancelamento entre rodadas — AUDITORIA.md#UX-24", () => {
+  it("o que ainda não começou NÃO começa depois do abort", async () => {
+    // O `signal` já chegava a cada analisador, mas quem obedece a ele é a
+    // chamada de rede. O que estava na fila arrancava do mesmo jeito: clicar
+    // em "cancelar" parava um e deixava os outros rodando.
+    const controle = new AbortController();
+    const segundo = vi.fn(async () => ({}));
+    registro.analyzers = [
+      fake("sast", {
+        run: async () => {
+          controle.abort();
+          return [];
+        },
+      }),
+      // `uses` obriga a segunda rodada — é lá que o abort é conferido.
+      fake("business", { uses: ["sast"], run: segundo }),
+    ];
+
+    const p = await plan({ select: ["sast", "business"], source: { type: "local", path: "." } });
+    const r = await run(p, { signal: controle.signal });
+
+    expect(segundo).not.toHaveBeenCalled();
+    expect(r.outcomes.business!.status).toBe("skipped");
+    expect(r.outcomes.business!.reason).toBe("cancelled");
+  });
+
+  it("cancelado NÃO é erro: a execução não vira falha por causa do botão", async () => {
+    const controle = new AbortController();
+    registro.analyzers = [
+      fake("sast", { run: async () => { controle.abort(); return []; } }),
+      fake("business", { uses: ["sast"] }),
+    ];
+
+    const p = await plan({ select: ["sast", "business"], source: { type: "local", path: "." } });
+    const r = await run(p, { signal: controle.signal });
+
+    expect(r.ok).toBe(true);
+  });
+
+  it("quem já terminou continua no resultado", async () => {
+    const controle = new AbortController();
+    registro.analyzers = [
+      fake("sast", { run: async () => { controle.abort(); return [{ id: "V-1" }]; } }),
+      fake("business", { uses: ["sast"] }),
+    ];
+
+    const p = await plan({ select: ["sast", "business"], source: { type: "local", path: "." } });
+    const r = await run(p, { signal: controle.signal });
+
+    expect(r.outcomes.sast!.result).toEqual([{ id: "V-1" }]);
+  });
+});

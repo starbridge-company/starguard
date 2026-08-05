@@ -31,7 +31,7 @@
       },
       {
         "command": "starguard.validateCurrentSkill",
-        "title": "StarGuard: validar a skill aberta"
+        "title": "StarGuard: validar skills e prompts"
       },
       {
         "command": "starguard.fix",

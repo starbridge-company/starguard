@@ -31,6 +31,40 @@ export interface TextosDoPainel {
   descreverSistema: string;
   descricaoAjuda: string;
   descricaoVazia: string;
+  skills: string;
+  skillsAjuda: string;
+  skillsVazio: string;
+  skillsAdicionar: string;
+  skillsRemover: string;
+  skillsDoEditor: string;
+  // Seleção e correção em lote. Os que trazem `{n}` chegam CRUS: o número só
+  // existe no navegador, e a frase montada aqui seria remontada lá de todo
+  // jeito. A substituição é do `fmt()` da página.
+  marcarTudo: string;
+  desmarcar: string;
+  corrigirSelecionados: string;
+  correcoes: string;
+  correcoesAjuda: string;
+  gerandoCorrecoes: string;
+  estadoGerando: string;
+  estadoPronta: string;
+  estadoAplicada: string;
+  estadoSemMudanca: string;
+  estadoErro: string;
+  estadoCancelada: string;
+  verDiff: string;
+  aplicar: string;
+  aplicarTudo: string;
+  descartar: string;
+  umAchado: string;
+  nAchados: string;
+  maisArquivos: string;
+  nadaMarcado: string;
+  filtrarTudo: string;
+  filtrarAjuda: string;
+  degradado: string;
+  requisitos: string;
+  requisitosAjuda: string;
   resultado: string;
   semAchados: string;
   aindaNaoRodou: string;
@@ -212,6 +246,22 @@ export function htmlDoPainel(opts: {
   }
   textarea:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
 
+  /* ---- Arquivos de skill ---- */
+  .arquivos { display: grid; gap: 4px; margin-top: 8px; }
+  .arquivo {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 7px; border-radius: 4px; font-size: 12px;
+    background: var(--vscode-editorWidget-background, transparent);
+    border: 1px solid var(--borda);
+  }
+  .arquivo .nome-arq {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* O que veio do editor não tem ✕: não foi escolhido, foi herdado — some
+     sozinho quando a pessoa troca de aba ou escolhe um arquivo. */
+  .arquivo.herdado { border-style: dashed; opacity: .8; }
+
   /* ---- Botões ---- */
   button {
     font-family: inherit; font-size: 13px;
@@ -250,7 +300,7 @@ export function htmlDoPainel(opts: {
     font-size: 12px; font-weight: 500; margin-bottom: 4px;
   }
   .achado {
-    display: grid; grid-template-columns: auto 1fr auto; gap: 8px;
+    display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px;
     align-items: start;
     padding: 6px 8px; border-radius: 4px; cursor: pointer;
   }
@@ -263,6 +313,74 @@ export function htmlDoPainel(opts: {
   .achado .bolinha { margin-top: 5px; }
   .achado .fix { opacity: 0; }
   .achado:hover .fix { opacity: 1; }
+  .achado.marcado { background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
+
+  /* ---- Seleção para correção em lote ----
+     Caixa de verdade e não ícone: numa barra lateral estreita o alvo de clique
+     precisa ser óbvio, e o estado marcado precisa sobreviver ao redesenho. */
+  .caixa {
+    width: 14px; height: 14px; margin-top: 3px;
+    border: 1.5px solid var(--vscode-descriptionForeground);
+    border-radius: 3px;
+    display: grid; place-items: center;
+    font-size: 10px; line-height: 1;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .caixa.on {
+    background: var(--vscode-button-background);
+    border-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+  }
+  /* Sem correção possível: o lugar da caixa NÃO fica vazio — o motivo vai no
+     title, senão a ausência parece defeito da ferramenta (UX-15). */
+  .caixa.off { opacity: .35; cursor: not-allowed; border-style: dashed; }
+
+  .barra-lote {
+    position: sticky; bottom: 0; z-index: 2;
+    margin-top: 10px; padding-top: 8px;
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+    border-top: 1px solid var(--borda);
+  }
+  .barra-lote button { width: 100%; }
+
+  /* ---- Filtro por gravidade ---- */
+  .chip.filtro { cursor: pointer; user-select: none; }
+  .chip.filtro:hover { border-color: var(--vscode-focusBorder); }
+  .chip.filtro.on {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-activeSelectionBackground, transparent);
+  }
+
+  /* ---- Correções propostas ---- */
+  .correcao {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 8px;
+    align-items: center;
+    padding: 7px 9px; margin-top: 6px;
+    border: 1px solid var(--borda); border-radius: var(--raio);
+  }
+  .correcao .arq {
+    font-size: 12px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .correcao .meta { grid-column: 1; font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .correcao .acoes { grid-row: 1 / span 2; display: flex; gap: 4px; }
+  .correcao.erro { border-color: var(--vscode-charts-red, #f85149); }
+  .correcao.aplicada { opacity: .6; }
+
+  /* ---- Avisos de degradação ---- */
+  .nota {
+    margin-top: 8px; padding: 7px 9px; border-radius: 4px;
+    font-size: 11px; line-height: 1.5;
+    color: var(--vscode-descriptionForeground);
+    border-left: 2px solid var(--vscode-charts-yellow, #d29922);
+    background: var(--vscode-editorWidget-background, transparent);
+  }
+  .cartao .aviso-usa {
+    grid-column: 2; font-size: 11px; line-height: 1.4; margin-top: 3px;
+    color: var(--vscode-charts-yellow, #d29922);
+  }
+  .req { font-size: 12px; padding: 4px 0; display: flex; gap: 6px; }
+  .req .rid { color: var(--vscode-descriptionForeground); flex-shrink: 0; }
 
   .vazio {
     text-align: center; padding: 20px 10px;
@@ -294,13 +412,30 @@ export function htmlDoPainel(opts: {
 (function () {
   const vscode = acquireVsCodeApi();
   const T = ${jsonSeguroEmScript(opts.textos)};
-  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", rodando: false, resultado: null, erro: null };
+  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, resultado: null, correcoes: [], erro: null };
 
   const h = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+  // Interpolação do lado da página: as frases com {n} chegam cruas do
+  // dicionário porque o número só existe aqui. Escapar DEPOIS de montar.
+  const fmt = (s, v) => String(s == null ? "" : s)
+    .replace(/\\{(\\w+)\\}/g, (_, k) => (v && v[k] != null ? String(v[k]) : ""));
+
   const SEV = ["critical", "high", "medium", "low", "info"];
+
+  // Estado só da tela — sobrevive ao redesenho porque mora aqui e não no
+  // estado que a extensão manda.
+  let marcados = new Set();
+  let filtro = null;
+
+  const achadosVisiveis = () => {
+    const r = estado.resultado;
+    if (!r) return [];
+    return r.grupos.flatMap((g) => g.achados)
+      .filter((a) => !filtro || a.severidade === filtro);
+  };
 
   function porta() {
     return '<div class="porta">' +
@@ -320,42 +455,191 @@ export function htmlDoPainel(opts: {
       (a.remoto ? '<span class="selo serv">' + h(T.noServidor) + '</span>' : '');
     // O motivo da indisponibilidade OCUPA a linha de subtítulo: some da
     // execução, nunca da tela. Ver UX-15.
-    const sub = off ? h(a.motivo || T.indisponivel) : h(a.desc);
+    const sub = off ? h(a.motivo || T.indisponivel)
+      : a.estado === 'rodando' && a.detalhe ? h(a.detalhe)
+      : h(a.desc);
     const estadoTxt = a.estado === "rodando"
       ? '<span class="girando">◐</span>'
       : a.estado === "erro" ? '⚠'
       : typeof a.achados === "number" ? String(a.achados)
       : '';
+
+    // O que este analisador perde sem os vizinhos que ele USA.
+    //
+    // Aparece só quando ele está marcado e o vizinho não: é a resposta, na
+    // tela, para "regras de negócio depende da modelagem?". Não depende — roda
+    // do mesmo jeito —, e a frase diz exatamente o que fica de fora. Um aviso
+    // que só existisse no canal de saída não seria lido por ninguém.
+    const faltando = on && !off
+      ? (a.usa || []).filter((u) => !estado.selecionados.includes(u.id))
+      : [];
+    const avisoUsa = faltando
+      .map((u) => '<div class="aviso-usa">' + h(u.aviso) + '</div>')
+      .join('');
+
     return '<div class="cartao ' + (on ? 'on ' : '') + (off ? 'off' : '') + '" data-id="' + h(a.id) + '">' +
       '<div class="marca">' + (on ? '✓' : '') + '</div>' +
       '<div class="linha entre"><span class="nome">' + h(a.nome) + '</span><span class="estado">' + estadoTxt + '</span></div>' +
       '<div><div class="sub">' + sub + '</div>' + (selos ? '<div class="selos">' + selos + '</div>' : '') + '</div>' +
+      avisoUsa +
     '</div>';
   }
 
+  // Os chips do placar são o FILTRO. Dois usos numa peça só: numa barra
+  // lateral estreita, uma fileira de chips e outra de botões de filtro seria
+  // metade da tela gasta dizendo a mesma coisa duas vezes.
   function placar(r) {
     const partes = SEV.filter((s) => r.contagem[s]).map((s) =>
-      '<span class="chip"><span class="bolinha ' + s + '"></span>' + r.contagem[s] + ' ' + h(r.rotulos[s]) + '</span>'
+      '<span class="chip filtro ' + (filtro === s ? 'on' : '') + '" data-sev="' + s + '" role="button" tabindex="0" title="' + h(T.filtrarAjuda) + '">' +
+        '<span class="bolinha ' + s + '"></span>' + r.contagem[s] + ' ' + h(r.rotulos[s]) +
+      '</span>'
     );
-    return partes.length ? '<div class="placar">' + partes.join('') + '</div>' : '';
+    if (!partes.length) return '';
+    if (filtro) {
+      partes.push('<span class="chip filtro" data-sev="" role="button" tabindex="0">' + h(T.filtrarTudo) + '</span>');
+    }
+    return '<div class="placar">' + partes.join('') + '</div>';
   }
 
   function grupos(r) {
     return r.grupos.map((g) => {
+      const visiveis = g.achados.filter((a) => !filtro || a.severidade === filtro);
       if (!g.achados.length) {
         return '<div class="grupo"><div class="cab">' + h(g.nome) +
           ' <span class="muted">— ' + h(T.semAchados) + '</span></div></div>';
       }
-      const itens = g.achados.map((f) =>
-        '<div class="achado" data-chave="' + h(f.chave) + '">' +
-          '<span class="bolinha ' + h(f.severidade) + '"></span>' +
+      if (!visiveis.length) return '';
+
+      const itens = visiveis.map((f) => {
+        // A caixa some para quem não tem correção — mas o LUGAR dela não, e o
+        // motivo vai no title. Ver UX-15.
+        const caixa = f.corrigivel
+          ? '<span class="caixa ' + (marcados.has(f.chave) ? 'on' : '') + '" data-marca="' + h(f.chave) + '" role="checkbox" aria-checked="' + (marcados.has(f.chave) ? 'true' : 'false') + '">' +
+              (marcados.has(f.chave) ? '✓' : '') + '</span>'
+          : '<span class="caixa off" title="' + h(f.motivo || '') + '" aria-hidden="true"></span>';
+        return '<div class="achado ' + (marcados.has(f.chave) ? 'marcado' : '') + '" data-chave="' + h(f.chave) + '">' +
+          caixa +
+          // A bolinha de gravidade fica MESMO com a caixa ao lado: é o único
+          // sinal de cor da linha, e trocá-la pela caixa deixaria a lista
+          // ordenada por severidade sem mostrar severidade nenhuma.
+          '<span class="bolinha ' + h(f.severidade) + '" title="' + h(f.severidade) + '"></span>' +
           '<div><div class="tit">' + h(f.titulo) + '</div><div class="loc">' + h(f.local) + '</div></div>' +
-          '<button class="fantasma fix" data-fix="' + h(f.chave) + '">' + h(T.corrigir) + '</button>' +
-        '</div>'
-      ).join('');
+          (f.corrigivel
+            ? '<button class="fantasma fix" data-fix="' + h(f.chave) + '">' + h(T.corrigir) + '</button>'
+            : '<span></span>') +
+        '</div>';
+      }).join('');
+
       return '<div class="grupo"><div class="cab">' + h(g.nome) +
-        ' <span class="muted">' + g.achados.length + '</span></div>' + itens + '</div>';
+        ' <span class="muted">' + visiveis.length + '</span></div>' + itens + '</div>';
     }).join('');
+  }
+
+  /** O que rodou com menos contexto, e os requisitos que a modelagem extraiu. */
+  function contexto(r) {
+    let html = (r.avisos || [])
+      .map((a) => '<div class="nota">' + h(a) + '</div>')
+      .join('');
+
+    if ((r.requisitos || []).length) {
+      html += '<details class="bloco">' +
+        '<summary>' + h(T.requisitos) + ' <span class="muted">' + r.requisitos.length + '</span></summary>' +
+        '<p class="muted" style="margin:8px 0 0">' + h(T.requisitosAjuda) + '</p>' +
+        r.requisitos.map((q) =>
+          '<div class="req"><span class="rid">' + h(q.id) + '</span><span>' + h(q.texto) + '</span></div>'
+        ).join('') +
+      '</details>';
+    }
+    return html;
+  }
+
+  /** A barra de correção em lote. Só existe quando há o que corrigir. */
+  function barraDeLote() {
+    const podem = achadosVisiveis().filter((a) => a.corrigivel);
+    if (!podem.length) return '';
+    const marcadosVisiveis = podem.filter((a) => marcados.has(a.chave)).length;
+    const todos = marcadosVisiveis === podem.length;
+
+    return '<div class="barra-lote">' +
+      '<div class="linha entre" style="margin-bottom:6px">' +
+        '<span class="muted">' + h(fmt(T.nAchados, { n: podem.length })) + '</span>' +
+        '<button class="fantasma" data-acao="' + (todos ? 'desmarcarTudo' : 'marcarTudo') + '">' +
+          h(todos ? T.desmarcar : T.marcarTudo) + '</button>' +
+      '</div>' +
+      '<button data-acao="corrigirLote"' + (marcadosVisiveis ? '' : ' disabled') + '>' +
+        h(marcadosVisiveis ? fmt(T.corrigirSelecionados, { n: marcadosVisiveis }) : T.nadaMarcado) +
+      '</button>' +
+    '</div>';
+  }
+
+  /** As propostas geradas — uma por ARQUIVO, nunca uma por achado. */
+  function blocoDeCorrecoes() {
+    const lista = estado.correcoes || [];
+    if (!lista.length) return '';
+
+    const rotulo = {
+      gerando: T.estadoGerando, pronta: T.estadoPronta, aplicada: T.estadoAplicada,
+      semMudanca: T.estadoSemMudanca, erro: T.estadoErro, cancelada: T.estadoCancelada,
+    };
+    const prontas = lista.filter((c) => c.estado === 'pronta');
+    const gerando = lista.filter((c) => c.estado === 'gerando').length;
+
+    const itens = lista.map((c) => {
+      const acoes = c.estado === 'pronta'
+        ? '<button class="fantasma" data-ver="' + h(c.chave) + '">' + h(T.verDiff) + '</button>' +
+          '<button class="fantasma" data-aplicar="' + h(c.chave) + '">' + h(T.aplicar) + '</button>'
+        : '';
+      const meta = [
+        c.achados === 1 ? T.umAchado : fmt(T.nAchados, { n: c.achados }),
+        c.extras ? fmt(T.maisArquivos, { n: c.extras }) : '',
+        rotulo[c.estado] || c.estado,
+      ].filter(Boolean).join(' · ');
+      return '<div class="correcao ' + h(c.estado) + '">' +
+        '<div class="arq" title="' + h(c.arquivo) + '">' + h(c.arquivo) + '</div>' +
+        '<div class="acoes">' + acoes + '</div>' +
+        '<div class="meta">' + h(meta) + (c.erro ? ' — ' + h(c.erro) : '') + '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div style="margin-top:16px">' +
+      '<div class="linha entre"><h2>' + h(T.correcoes) + '</h2>' +
+        '<button class="fantasma" data-acao="descartarCorrecoes">' + h(T.descartar) + '</button>' +
+      '</div>' +
+      (gerando
+        ? '<p class="muted">' + h(fmt(T.gerandoCorrecoes, { done: lista.length - gerando, total: lista.length })) + '</p>'
+        : '<p class="muted">' + h(T.correcoesAjuda) + '</p>') +
+      itens +
+      (prontas.length
+        ? '<button style="width:100%;margin-top:8px" data-acao="aplicarTudo">' +
+            h(fmt(T.aplicarTudo, { n: prontas.length })) + '</button>'
+        : '') +
+    '</div>';
+  }
+
+  // O bloco existe SEMPRE, e não só quando o cartão de skills está marcado:
+  // era justamente a ausência de um lugar visível que fazia a skill parecer
+  // impossível de analisar — o cartão apagava com "sem entrada" e a tela não
+  // oferecia saída nenhuma. Abre sozinho quando o analisador está selecionado.
+  function blocoDeSkills() {
+    const lista = estado.skills || [];
+    const itens = lista.map((s) =>
+      '<div class="arquivo' + (s.doEditor ? ' herdado' : '') + '" title="' + h(s.caminho) + '">' +
+        '<span class="nome-arq">' + h(s.nome) + '</span>' +
+        (s.doEditor
+          ? '<span class="muted" style="font-size:11px">' + h(T.skillsDoEditor) + '</span>'
+          : '<button class="fantasma" data-tira-skill="' + h(s.caminho) +
+            '" title="' + h(T.skillsRemover) + '" aria-label="' + h(T.skillsRemover) + '">✕</button>') +
+      '</div>'
+    ).join('');
+    return '<details class="bloco"' + (estado.selecionados.includes('skills') ? ' open' : '') + '>' +
+      '<summary>' + h(T.skills) +
+        (lista.length ? '' : ' <span class="muted">— ' + h(T.skillsVazio) + '</span>') +
+      '</summary>' +
+      '<p class="muted" style="margin:8px 0 0">' + h(T.skillsAjuda) + '</p>' +
+      (itens ? '<div class="arquivos">' + itens + '</div>' : '') +
+      '<div style="margin-top:8px"><button class="fantasma" data-acao="escolherSkills">' +
+        h(T.skillsAdicionar) + '</button></div>' +
+    '</details>';
   }
 
   function painel() {
@@ -389,6 +673,8 @@ export function htmlDoPainel(opts: {
       '<textarea id="desc" spellcheck="false">' + h(estado.descricao || '') + '</textarea>' +
     '</details>';
 
+    html += blocoDeSkills();
+
     html += '<button id="rodar"' + (podeRodar ? '' : ' disabled') + ' data-acao="' +
       (estado.rodando ? 'cancelar' : 'rodar') + '">' +
       (estado.rodando ? h(T.analisando) : nSel ? h(T.analisar) + ' (' + nSel + ')' : h(T.nenhumSelecionado)) +
@@ -398,11 +684,16 @@ export function htmlDoPainel(opts: {
 
     html += '<div style="margin-top:16px"><h2>' + h(T.resultado) + '</h2>';
     if (estado.resultado) {
-      html += placar(estado.resultado) + grupos(estado.resultado);
+      html += placar(estado.resultado) +
+        contexto(estado.resultado) +
+        grupos(estado.resultado) +
+        barraDeLote();
     } else {
       html += '<div class="vazio">' + h(T.aindaNaoRodou) + '</div>';
     }
     html += '</div>';
+
+    html += blocoDeCorrecoes();
 
     html += '<p class="muted" style="margin-top:16px;font-size:11px;line-height:1.5">' + h(T.privacidade) + '</p>';
     return html;
@@ -429,10 +720,46 @@ export function htmlDoPainel(opts: {
   }
 
   document.addEventListener('click', (e) => {
+    // A CAIXA vem antes do resto: clicar nela é marcar, não abrir o arquivo.
+    const caixa = e.target.closest('[data-marca]');
+    if (caixa) {
+      e.stopPropagation();
+      const k = caixa.dataset.marca;
+      if (marcados.has(k)) marcados.delete(k);
+      else marcados.add(k);
+      desenhar();
+      return;
+    }
+    const ver = e.target.closest('[data-ver]');
+    if (ver) {
+      e.stopPropagation();
+      vscode.postMessage({ tipo: 'verCorrecao', chave: ver.dataset.ver });
+      return;
+    }
+    const aplicar = e.target.closest('[data-aplicar]');
+    if (aplicar) {
+      e.stopPropagation();
+      vscode.postMessage({ tipo: 'aplicarCorrecao', chave: aplicar.dataset.aplicar });
+      return;
+    }
+    const sev = e.target.closest('[data-sev]');
+    if (sev) {
+      e.stopPropagation();
+      const v = sev.dataset.sev;
+      filtro = !v || filtro === v ? null : v;
+      desenhar();
+      return;
+    }
     const fix = e.target.closest('[data-fix]');
     if (fix) {
       e.stopPropagation();
       vscode.postMessage({ tipo: 'corrigir', chave: fix.dataset.fix });
+      return;
+    }
+    const tira = e.target.closest('[data-tira-skill]');
+    if (tira) {
+      e.stopPropagation();
+      vscode.postMessage({ tipo: 'removerSkill', caminho: tira.dataset.tiraSkill });
       return;
     }
     const achado = e.target.closest('.achado');
@@ -465,6 +792,19 @@ export function htmlDoPainel(opts: {
     } else if (acao === 'rodar') {
       const t = document.getElementById('desc');
       vscode.postMessage({ tipo: 'analisar', ids: estado.selecionados, descricao: t ? t.value : '' });
+    } else if (acao === 'marcarTudo') {
+      for (const a of achadosVisiveis()) if (a.corrigivel) marcados.add(a.chave);
+      desenhar();
+    } else if (acao === 'desmarcarTudo') {
+      for (const a of achadosVisiveis()) marcados.delete(a.chave);
+      desenhar();
+    } else if (acao === 'corrigirLote') {
+      // A ordem da TELA é a que vai: é a que a pessoa está vendo, e o
+      // agrupamento por arquivo acontece do outro lado.
+      const chaves = achadosVisiveis()
+        .filter((a) => a.corrigivel && marcados.has(a.chave))
+        .map((a) => a.chave);
+      vscode.postMessage({ tipo: 'corrigirLote', chaves: chaves });
     } else {
       vscode.postMessage({ tipo: acao });
     }
@@ -482,11 +822,28 @@ export function htmlDoPainel(opts: {
 
   window.addEventListener('message', (ev) => {
     const m = ev.data;
-    if (m.tipo === 'estado') { estado = Object.assign(estado, m.estado); desenhar(); }
-    else if (m.tipo === 'progresso') {
+    if (m.tipo === 'estado') {
+      estado = Object.assign(estado, m.estado);
+      // Resultado novo, marcação velha: uma chave que não existe mais faria o
+      // contador do botão prometer correções que ninguém consegue pedir.
+      if (estado.resultado) {
+        const vivas = new Set(estado.resultado.grupos.flatMap((g) => g.achados.map((a) => a.chave)));
+        marcados = new Set([...marcados].filter((k) => vivas.has(k)));
+      } else {
+        marcados = new Set();
+      }
+      desenhar();
+    } else if (m.tipo === 'progresso') {
       const a = estado.analisadores.find((x) => x.id === m.id);
-      if (a) { a.estado = m.estado; if (typeof m.achados === 'number') a.achados = m.achados; }
-      estado.rodando = m.rodando;
+      if (a) {
+        a.estado = m.estado;
+        if (typeof m.achados === 'number') a.achados = m.achados;
+        a.detalhe = m.detalhe;
+      }
+      // O estado "rodando" NÃO vem daqui: o último evento de uma execução
+      // sempre dizia que estava rodando, e era isso que deixava o botão
+      // girando para sempre depois de tudo pronto. Quem sabe se acabou é a
+      // extensão. Ver UX-24.
       desenhar();
     }
   });

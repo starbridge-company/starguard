@@ -19,7 +19,14 @@ const TEXTOS = Object.fromEntries(
     "limpar", "analisar", "analisando", "cancelar", "descreverSistema",
     "descricaoAjuda", "descricaoVazia", "resultado", "semAchados", "aindaNaoRodou",
     "usaIa", "noServidor", "indisponivel", "corrigir", "diagnostico", "sair",
-    "nenhumSelecionado", "privacidade",
+    "nenhumSelecionado", "privacidade", "skills", "skillsAjuda", "skillsVazio",
+    "skillsAdicionar", "skillsRemover", "skillsDoEditor", "marcarTudo",
+    "desmarcar", "corrigirSelecionados", "correcoes", "correcoesAjuda",
+    "gerandoCorrecoes", "estadoGerando", "estadoPronta", "estadoAplicada",
+    "estadoSemMudanca", "estadoErro", "estadoCancelada", "verDiff", "aplicar",
+    "aplicarTudo", "descartar", "umAchado", "nAchados", "maisArquivos",
+    "nadaMarcado", "filtrarTudo", "filtrarAjuda", "degradado", "requisitos",
+    "requisitosAjuda",
   ].map((k) => [k, k])
 ) as unknown as TextosDoPainel;
 
@@ -81,6 +88,68 @@ describe("a página pertence ao tema do editor", () => {
   it("respeita quem pediu menos animação", () => {
     // Um spinner girando sem parar é o caso clássico de gatilho vestibular.
     expect(pagina()).toContain("prefers-reduced-motion");
+  });
+});
+
+describe("há ONDE colocar a skill (UX-23)", () => {
+  it("a página traz o botão de escolher arquivo", () => {
+    // O furo: a única entrada era o editor ativo, e o painel não tinha campo
+    // nenhum — quem quisesse analisar um `prompts.md` fechado não tinha onde
+    // clicar. O botão é a entrada que faltava.
+    expect(pagina()).toContain('data-acao="escolherSkills"');
+  });
+
+  it("o rótulo do bloco sai do dicionário, não do código", () => {
+    const html = htmlDoPainel({
+      nonce: "n",
+      cspSource: "x",
+      textos: { ...TEXTOS, skills: "Skills y prompts" },
+    });
+    expect(html).toContain("Skills y prompts");
+  });
+
+  it("cada arquivo escolhido pode ser removido", () => {
+    expect(pagina()).toContain("data-tira-skill");
+  });
+});
+
+describe("correção em lote (UX-24)", () => {
+  it("cada achado corrigível tem caixa de seleção", () => {
+    expect(pagina()).toContain("data-marca");
+  });
+
+  it("existe o botão que corrige o que está marcado", () => {
+    expect(pagina()).toContain('data-acao="corrigirLote"');
+  });
+
+  it("a proposta pronta tem ver-diff e aplicar, e o lote tem aplicar-tudo", () => {
+    const html = pagina();
+    expect(html).toContain("data-ver=");
+    expect(html).toContain("data-aplicar=");
+    expect(html).toContain('data-acao="aplicarTudo"');
+  });
+
+  it("dá para descartar sem gravar nada", () => {
+    expect(pagina()).toContain("descartarCorrecoes");
+  });
+
+  it("o placar filtra por gravidade", () => {
+    expect(pagina()).toContain("data-sev");
+  });
+});
+
+describe("o botão de analisar não fica preso (UX-24)", () => {
+  it("o evento de PROGRESSO não decide mais se a execução acabou", () => {
+    // Teste por texto porque é o formato do arquivo — a página é uma string.
+    // O que ele trava é o bug exato: `estado.rodando = m.rodando` fazia o
+    // último evento de progresso (que sempre dizia "rodando") congelar o
+    // botão em "Analisando…" para sempre. Quem sabe se acabou é a extensão,
+    // que manda o estado inteiro no fim.
+    expect(pagina()).not.toContain("estado.rodando = m.rodando");
+  });
+
+  it("o estado de execução chega pelo estado completo", () => {
+    expect(pagina()).toContain("rodando: false");
   });
 });
 

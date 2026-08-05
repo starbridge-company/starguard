@@ -774,7 +774,7 @@ export const PT_BR = {
   // árvore do editor.
   "analyzer.threat.name": "Modelagem de ameaças",
   "analyzer.threat.desc":
-    "Lê a descrição do sistema e levanta ameaças e requisitos de segurança. Não precisa de código.",
+    "Lê a descrição do sistema e levanta ameaças e requisitos de segurança. Não precisa de código — e são esses requisitos que as Regras de negócio conferem.",
   "analyzer.sast.name": "Vulnerabilidades de código",
   "analyzer.sast.desc":
     "Procura padrões inseguros no código-fonte com o Opengrep/Semgrep.",
@@ -783,7 +783,7 @@ export const PT_BR = {
     "Procura CVE conhecido nos pacotes declarados, com o Trivy.",
   "analyzer.business.name": "Regras de negócio",
   "analyzer.business.desc":
-    "Revisão por IA do que o scanner não pega: regra de negócio violada, IDOR e autorização.",
+    "Revisão por IA do que o scanner não pega: regra de negócio violada, IDOR e autorização. Roda sozinha; com a Modelagem de ameaças junto, confere os requisitos um a um.",
   "analyzer.skills.name": "Skills e prompts",
   "analyzer.skills.desc":
     "Analisa skills em busca de prompt injection, exfiltração e backdoor.",
@@ -799,6 +799,7 @@ export const PT_BR = {
   "analyzer.reason.engine_off": "Desligado por configuração.",
   "analyzer.reason.no_ai_key":
     "Precisa de uma chave de IA e nenhuma foi configurada.",
+  "analyzer.reason.cancelled": "Cancelado antes de rodar.",
 
   // Rodou, mas com menos contexto do que teria em conjunto. É dito em voz
   // alta: um resultado degradado silencioso passa por resultado completo.
@@ -834,6 +835,15 @@ export const PT_BR = {
   "panel.describeHelp":
     "O que o sistema faz, quem usa, e as regras que valem — «só o dono da conta apaga um pedido», «pagamento acima de mil exige aprovação». É isto que as regras de negócio e a modelagem de ameaças verificam contra o código.",
   "panel.describeEmpty": "vazia",
+  "panel.skills": "Skills e prompts",
+  "panel.skillsHelp":
+    "Os arquivos que o analisador de skills vai ler — SKILL.md, prompts.md, o system prompt de um agente. Sem nenhum escolhido, ele lê o arquivo aberto no editor.",
+  "panel.skillsEmpty": "nenhum arquivo",
+  "panel.skillsAdd": "Escolher arquivo…",
+  "panel.skillsRemove": "Remover",
+  "panel.skillsFromEditor": "aberto no editor",
+  "panel.skillsPick": "Analisar como skill",
+  "panel.skillsUnreadable": "Não foi possível ler {file}.",
   "panel.result": "Resultado",
   "panel.noFindings": "nada encontrado",
   "panel.notRunYet": "Escolha os analisadores e clique em Analisar.",
@@ -846,6 +856,43 @@ export const PT_BR = {
   "panel.privacy":
     "Dependências: só os manifestos saem daqui. Código, regras, ameaças e correções enviam o código-fonte ao nosso servidor, que o descarta ao terminar.",
   "panel.analyzing": "Analisando {n} de {total}…",
+
+  // Seleção e correção em lote — AUDITORIA.md#UX-24.
+  "panel.selectFindings": "Marcar tudo",
+  "panel.clearFindings": "Desmarcar",
+  "panel.fixSelected": "Corrigir selecionados ({n})",
+  "panel.fixes": "Correções propostas",
+  "panel.fixGenerating": "Gerando correções… {done} de {total}",
+  "panel.fixState.generating": "gerando…",
+  "panel.fixState.ready": "pronta",
+  "panel.fixState.applied": "aplicada",
+  "panel.fixState.noChange": "sem alteração",
+  "panel.fixState.error": "falhou",
+  "panel.fixState.cancelled": "cancelada",
+  "panel.fixView": "Ver diff",
+  "panel.fixApply": "Aplicar",
+  "panel.fixApplyAll": "Aplicar tudo ({n})",
+  "panel.fixDiscard": "Descartar",
+  "panel.fixFindings.one": "1 achado",
+  "panel.fixFindings.many": "{n} achados",
+  "panel.fixAlsoFiles": "e mais {n} arquivo(s)",
+  "panel.fixNothingSelected": "Marque os achados que quer corrigir.",
+  "panel.fixApplied": "{n} arquivo(s) gravado(s). Analise de novo para conferir.",
+  "panel.fixNoneFixable":
+    "Nenhum dos achados marcados tem correção automática.",
+  "panel.fixNoAutoFix": "Este analisador não propõe correção automática.",
+  "panel.fixGroupHint":
+    "Achados do mesmo arquivo viram UMA correção — é o que evita uma sobrescrever a outra.",
+
+  // O resultado.
+  "panel.filterAll": "Tudo",
+  "panel.filterHint": "Filtrar por gravidade",
+  "panel.degraded": "Rodou com menos contexto",
+  "panel.requirements": "Requisitos extraídos",
+  "panel.requirementsHelp":
+    "É o que as Regras de negócio conferem no código, um a um. Sem a Modelagem de ameaças nesta execução não há lista declarada, e a revisão trabalha só com a descrição do sistema — ela roda do mesmo jeito, com menos contexto.",
+  "panel.uses": "Fica melhor junto de: {list}",
+  "panel.cancelled": "Análise cancelada.",
 
   "tree.state.unavailable": "indisponível",
   "tree.state.running": "analisando…",
@@ -1715,14 +1762,14 @@ const EN: Record<MessageKey, string> = {
   // ---- Analyzers ----
   "analyzer.threat.name": "Threat modeling",
   "analyzer.threat.desc":
-    "Reads the system description and raises threats and security requirements. Needs no code.",
+    "Reads the system description and raises threats and security requirements. Needs no code — and those requirements are what Business rules checks.",
   "analyzer.sast.name": "Code vulnerabilities",
   "analyzer.sast.desc": "Looks for insecure patterns in source code with Opengrep/Semgrep.",
   "analyzer.sca.name": "Vulnerable dependencies",
   "analyzer.sca.desc": "Looks for known CVEs in declared packages, with Trivy.",
   "analyzer.business.name": "Business rules",
   "analyzer.business.desc":
-    "AI review of what scanners miss: violated business rules, IDOR and authorization.",
+    "AI review of what scanners miss: violated business rules, IDOR and authorization. Runs on its own; with Threat modeling alongside, it checks the requirements one by one.",
   "analyzer.skills.name": "Skills and prompts",
   "analyzer.skills.desc":
     "Analyzes skills for prompt injection, data exfiltration and backdoors.",
@@ -1733,6 +1780,7 @@ const EN: Record<MessageKey, string> = {
   "analyzer.reason.binary_missing": "The {bin} executable was not found on this machine.",
   "analyzer.reason.engine_off": "Turned off by configuration.",
   "analyzer.reason.no_ai_key": "Needs an AI key and none is configured.",
+  "analyzer.reason.cancelled": "Cancelled before it ran.",
 
   "analyzer.degraded.threat":
     "Threat modeling was not part of this run: there were no declared requirements to check.",
@@ -1761,6 +1809,15 @@ const EN: Record<MessageKey, string> = {
   "panel.describeHelp":
     "What the system does, who uses it, and the rules that hold — \"only the account owner deletes an order\", \"payments above one thousand need approval\". This is what business rules and threat modelling check against the code.",
   "panel.describeEmpty": "empty",
+  "panel.skills": "Skills and prompts",
+  "panel.skillsHelp":
+    "The files the skills analyzer will read — SKILL.md, prompts.md, an agent's system prompt. With none picked, it reads the file open in the editor.",
+  "panel.skillsEmpty": "no file",
+  "panel.skillsAdd": "Pick a file…",
+  "panel.skillsRemove": "Remove",
+  "panel.skillsFromEditor": "open in the editor",
+  "panel.skillsPick": "Analyze as a skill",
+  "panel.skillsUnreadable": "Could not read {file}.",
   "panel.result": "Result",
   "panel.noFindings": "nothing found",
   "panel.notRunYet": "Pick the analyzers and click Analyze.",
@@ -1773,6 +1830,40 @@ const EN: Record<MessageKey, string> = {
   "panel.privacy":
     "Dependencies: only manifests leave this machine. Code, rules, threats and fixes send the source to our server, which discards it when done.",
   "panel.analyzing": "Analyzing {n} of {total}…",
+
+  "panel.selectFindings": "Select all",
+  "panel.clearFindings": "Clear",
+  "panel.fixSelected": "Fix selected ({n})",
+  "panel.fixes": "Proposed fixes",
+  "panel.fixGenerating": "Generating fixes… {done} of {total}",
+  "panel.fixState.generating": "generating…",
+  "panel.fixState.ready": "ready",
+  "panel.fixState.applied": "applied",
+  "panel.fixState.noChange": "no change",
+  "panel.fixState.error": "failed",
+  "panel.fixState.cancelled": "cancelled",
+  "panel.fixView": "View diff",
+  "panel.fixApply": "Apply",
+  "panel.fixApplyAll": "Apply all ({n})",
+  "panel.fixDiscard": "Discard",
+  "panel.fixFindings.one": "1 finding",
+  "panel.fixFindings.many": "{n} findings",
+  "panel.fixAlsoFiles": "and {n} more file(s)",
+  "panel.fixNothingSelected": "Tick the findings you want fixed.",
+  "panel.fixApplied": "{n} file(s) written. Run the analysis again to check.",
+  "panel.fixNoneFixable": "None of the ticked findings can be fixed automatically.",
+  "panel.fixNoAutoFix": "This analyzer does not propose automatic fixes.",
+  "panel.fixGroupHint":
+    "Findings in the same file become ONE fix — that is what keeps one from overwriting another.",
+
+  "panel.filterAll": "All",
+  "panel.filterHint": "Filter by severity",
+  "panel.degraded": "Ran with less context",
+  "panel.requirements": "Extracted requirements",
+  "panel.requirementsHelp":
+    "This is what Business rules checks against the code, one by one. Without Threat modeling in this run there is no declared list, and the review works from the system description alone — it still runs, with less context.",
+  "panel.uses": "Better together with: {list}",
+  "panel.cancelled": "Analysis cancelled.",
 
   "tree.state.unavailable": "unavailable",
   "tree.state.running": "analyzing…",
@@ -2636,14 +2727,14 @@ const ES: Record<MessageKey, string> = {
   // ---- Analizadores ----
   "analyzer.threat.name": "Modelado de amenazas",
   "analyzer.threat.desc":
-    "Lee la descripción del sistema y plantea amenazas y requisitos de seguridad. No necesita código.",
+    "Lee la descripción del sistema y plantea amenazas y requisitos de seguridad. No necesita código — y son esos requisitos los que verifican las Reglas de negocio.",
   "analyzer.sast.name": "Vulnerabilidades de código",
   "analyzer.sast.desc": "Busca patrones inseguros en el código fuente con Opengrep/Semgrep.",
   "analyzer.sca.name": "Dependencias vulnerables",
   "analyzer.sca.desc": "Busca CVE conocidos en los paquetes declarados, con Trivy.",
   "analyzer.business.name": "Reglas de negocio",
   "analyzer.business.desc":
-    "Revisión por IA de lo que los escáneres no detectan: regla de negocio violada, IDOR y autorización.",
+    "Revisión por IA de lo que los escáneres no detectan: regla de negocio violada, IDOR y autorización. Se ejecuta sola; junto al Modelado de amenazas, verifica los requisitos uno a uno.",
   "analyzer.skills.name": "Skills y prompts",
   "analyzer.skills.desc":
     "Analiza skills en busca de prompt injection, exfiltración y backdoors.",
@@ -2654,6 +2745,7 @@ const ES: Record<MessageKey, string> = {
   "analyzer.reason.binary_missing": "No se encontró el ejecutable {bin} en este equipo.",
   "analyzer.reason.engine_off": "Desactivado por configuración.",
   "analyzer.reason.no_ai_key": "Necesita una clave de IA y no hay ninguna configurada.",
+  "analyzer.reason.cancelled": "Cancelado antes de ejecutarse.",
 
   "analyzer.degraded.threat":
     "El modelado de amenazas no formó parte de esta ejecución: no había requisitos declarados que verificar.",
@@ -2682,6 +2774,15 @@ const ES: Record<MessageKey, string> = {
   "panel.describeHelp":
     "Qué hace el sistema, quién lo usa y las reglas que rigen — «solo el dueño de la cuenta borra un pedido», «un pago superior a mil exige aprobación». Esto es lo que las reglas de negocio y el modelado de amenazas contrastan con el código.",
   "panel.describeEmpty": "vacía",
+  "panel.skills": "Skills y prompts",
+  "panel.skillsHelp":
+    "Los archivos que leerá el analizador de skills — SKILL.md, prompts.md, el system prompt de un agente. Si no eliges ninguno, lee el archivo abierto en el editor.",
+  "panel.skillsEmpty": "ningún archivo",
+  "panel.skillsAdd": "Elegir archivo…",
+  "panel.skillsRemove": "Quitar",
+  "panel.skillsFromEditor": "abierto en el editor",
+  "panel.skillsPick": "Analizar como skill",
+  "panel.skillsUnreadable": "No se pudo leer {file}.",
   "panel.result": "Resultado",
   "panel.noFindings": "nada encontrado",
   "panel.notRunYet": "Elige los analizadores y pulsa Analizar.",
@@ -2694,6 +2795,40 @@ const ES: Record<MessageKey, string> = {
   "panel.privacy":
     "Dependencias: solo salen los manifiestos. Código, reglas, amenazas y correcciones envían el código fuente a nuestro servidor, que lo descarta al terminar.",
   "panel.analyzing": "Analizando {n} de {total}…",
+
+  "panel.selectFindings": "Marcar todo",
+  "panel.clearFindings": "Desmarcar",
+  "panel.fixSelected": "Corregir seleccionados ({n})",
+  "panel.fixes": "Correcciones propuestas",
+  "panel.fixGenerating": "Generando correcciones… {done} de {total}",
+  "panel.fixState.generating": "generando…",
+  "panel.fixState.ready": "lista",
+  "panel.fixState.applied": "aplicada",
+  "panel.fixState.noChange": "sin cambios",
+  "panel.fixState.error": "falló",
+  "panel.fixState.cancelled": "cancelada",
+  "panel.fixView": "Ver diff",
+  "panel.fixApply": "Aplicar",
+  "panel.fixApplyAll": "Aplicar todo ({n})",
+  "panel.fixDiscard": "Descartar",
+  "panel.fixFindings.one": "1 hallazgo",
+  "panel.fixFindings.many": "{n} hallazgos",
+  "panel.fixAlsoFiles": "y {n} archivo(s) más",
+  "panel.fixNothingSelected": "Marca los hallazgos que quieres corregir.",
+  "panel.fixApplied": "{n} archivo(s) escrito(s). Analiza de nuevo para comprobar.",
+  "panel.fixNoneFixable": "Ninguno de los hallazgos marcados tiene corrección automática.",
+  "panel.fixNoAutoFix": "Este analizador no propone correcciones automáticas.",
+  "panel.fixGroupHint":
+    "Los hallazgos del mismo archivo se convierten en UNA corrección — así ninguna sobrescribe a otra.",
+
+  "panel.filterAll": "Todo",
+  "panel.filterHint": "Filtrar por gravedad",
+  "panel.degraded": "Se ejecutó con menos contexto",
+  "panel.requirements": "Requisitos extraídos",
+  "panel.requirementsHelp":
+    "Es lo que las Reglas de negocio verifican en el código, uno a uno. Sin el Modelado de amenazas en esta ejecución no hay lista declarada y la revisión trabaja solo con la descripción del sistema — se ejecuta igual, con menos contexto.",
+  "panel.uses": "Funciona mejor junto a: {list}",
+  "panel.cancelled": "Análisis cancelado.",
 
   "tree.state.unavailable": "no disponible",
   "tree.state.running": "analizando…",

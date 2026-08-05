@@ -36,6 +36,8 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **7 — Backlog P1/P2/P3** | SEC-06 · BUG-11 a BUG-22 · ARQ-10 · UX-03 · UX-04 (resto) · UX-07 · UX-08 · UX-10 · UX-11 · UX-12 · UX-13 · UX-19 · PEND-23 | ✅ **entregue** em 27/07/2026 |
 | **8 — Vistoria de idioma** | FEAT-04 (fechamento) · UX-22 · PEND-29 | ✅ **entregue** em 27/07/2026 |
 | **Correção pontual** | BUG-23 | ✅ **corrigido e medido em Chromium** em 28/07/2026 — a suíte de `e2e/` pela tela real segue pendente, ver PEND-32 |
+| **Correção pontual** | UX-23 | ✅ **entregue** em 05/08/2026 — relatado pelo uso real da extensão; validado por unidade, percurso no editor segue em PEND-33 |
+| **Polimento da extensão** | UX-24 · UX-25 | ✅ **entregue** em 05/08/2026 — botão preso, cancelamento que não cancelava, correção em lote, skills invisíveis e a relação entre analisadores explicada na tela |
 | Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-32 | ⬜ a fazer |
 
 <details>
@@ -95,6 +97,147 @@ contrato do `jsonError` e idioma da exportação.
 - **Aceite:** abrir a aba e entender, sem ler o código, que aquilo é o que será
   conferido — e não o que foi encontrado. ⚠️ **Não verificado em navegador** —
   ver PEND-29.
+
+### UX-23 · Não havia onde entregar a skill ao analisador ✅
+**P1 · Esforço P**
+
+> ✅ **Corrigido em 05/08/2026.** O painel da extensão ganhou o bloco **Skills e
+> prompts**: escolher arquivo, ver a lista, remover. O arquivo aberto no editor
+> continua valendo — agora como atalho declarado na tela, e não como única
+> entrada possível.
+
+- **Relatado pelo uso**, não por leitura: *"faltou a entrada para skills ou
+  prompts.md, não tem onde colocar para analisar"*. É a diferença entre auditar
+  código e usar o produto — nenhuma das 597 asserções da suíte pegava isto,
+  porque todas partiam de uma entrada já existente.
+- **Hoje era:** a única fonte da skill era `vscode.window.activeTextEditor`
+  ([extension.ts:315-322](packages/vscode/src/extension.ts#L315-L322)). Um
+  `prompts.md` que não estivesse aberto não tinha por onde entrar: o cartão
+  apagava com "sem entrada" e a tela **não oferecia saída nenhuma** — o oposto
+  do que o `UX-15` exige (indisponível aparece COM o motivo *e* com o caminho).
+  O painel de UX-20 tinha campo para a descrição do sistema e nada para a
+  skill, embora o analisador de skills seja o caso que motivou o ARQ-13.
+- **Bug que veio junto:** o filtro do editor era `!doc.isUntitled`, e isso
+  aceita **qualquer** documento de texto. O canal de saída da própria extensão
+  (`output:`), o diff virtual da correção (`starguard-diff:`) e a tela de
+  configurações (`vscode-userdata:`) eram analisados como se fossem a skill —
+  em silêncio, com o resultado saindo com cara de análise legítima. Agora só
+  `file`, `vscode-vfs` e `vscode-remote` contam
+  ([skills.ts](packages/vscode/src/skills.ts)).
+- **Decisões:** o escolhido **ganha** do editor aberto (trocar de aba no meio do
+  caminho não pode mudar o que vai ser analisado); a lista vive no
+  `workspaceState`, não na configuração, porque é do projeto e não da máquina; o
+  conteúdo do editor sai de `getText()` (o que está na tela, ainda não salvo, é
+  justamente o que se quer validar) e os escolhidos saem do disco; o diálogo vai
+  **sem filtro de extensão**, porque prompt mora em arquivo de todo tipo de nome
+  e o filtro esconderia o arquivo que a pessoa veio buscar.
+- **Aceite:** abrir o painel sem nenhum arquivo aberto, clicar em *Escolher
+  arquivo…*, apontar um `prompts.md` e ver o cartão de skills acender. ⚠️ **Não
+  verificado no editor real** — ver PEND-33.
+
+### UX-24 · O botão "Analisando" nunca parava, e cada correção era um clique ✅
+**P1 · Esforço M**
+
+> ✅ **Corrigido em 05/08/2026.** Três coisas que só o uso real revelou: o botão
+> preso, a correção um-a-um e o achado de skill que sumia da tela.
+
+- **O botão preso.** O estado "analisando" chegava ao painel APENAS por evento
+  de progresso, e o último evento de qualquer execução mandava `rodando: true`
+  — não existia nenhum evento dizendo o contrário. Terminada a análise, o botão
+  girava para sempre; com erro fora dos analisadores (o clone, o workspace), o
+  mesmo, e sem mensagem. Agora quem responde "está rodando?" é a extensão, num
+  `finally` que roda em toda saída, e o evento de progresso perdeu esse poder —
+  travado em `painel-html.test.ts`.
+- **Cancelar não cancelava.** O `aoCancelar` do painel chamava um
+  `CancellationTokenSource` que **nunca era atribuído**: o botão não fazia nada.
+  Pior, o `signal` do orquestrador só chegava a cada analisador — quem obedece
+  a ele é a chamada de rede, então o que ainda não tinha começado começava do
+  mesmo jeito. Agora o `run()` confere o abort **entre rodadas** e marca o
+  resto como `cancelled`, que virou `UnavailableReason` de primeira classe: o
+  motivo aparece, o resultado parcial não passa por completo. 3 asserções novas
+  em `orchestrator.test.ts`.
+- **Correção em lote.** Marcar os achados e corrigir de uma vez, com o mesmo
+  agrupamento do painel web: **achados do mesmo arquivo viram UMA correção**.
+  Não é conveniência — é o `BUG-06`: uma correção por achado faz cada uma
+  partir do arquivo original, e a última gravada apaga as anteriores com a tela
+  dizendo que todas foram aplicadas. A aritmética (agrupar, fatiar, encadear
+  por `baseCode`) foi para o **núcleo**, em `fix/batch.ts`, com 15 asserções —
+  é a mesma que o navegador faz, e o terminal vai querer no dia em que
+  `starguard fix` receber mais de um id.
+- **Duas melhorias que o lote pediu:** o `originalCode` guardado é o da
+  PRIMEIRA fatia (o painel web usa o da última, e por isso o diff da segunda
+  fatia esconde metade da mudança), e o `noChange` é do LOTE, não da última
+  fatia. As duas têm teste.
+- **A skill sumia.** `achadosDe` da extensão não incluía os achados de skill, e
+  o painel terminava dizendo "nada encontrado" sobre um prompt com injeção —
+  achado real, reportado como limpo. É o mesmo bug que o terminal já tinha
+  pago. Agora entram na LISTA; a decisão de **não** virarem diagnóstico
+  continua valendo (a posição é dentro do texto analisado, não do arquivo
+  aberto) e virou a função `ehDiagnostico`, com teste dos dois lados.
+- **Polimento junto:** filtro por gravidade nos próprios chips do placar, o
+  estado dos cartões sobrevivendo ao redesenho (antes qualquer atualização
+  apagava o ✔ e a contagem), a mensagem do analisador em execução ("baixando
+  regras") no lugar da descrição fixa, e o clique num achado de skill abrindo o
+  arquivo escolhido em vez de tentar `<raiz>/<nome>` e falhar calado.
+- **Aceite:** analisar, ver o botão voltar a "Analisar", marcar cinco achados
+  em três arquivos, corrigir, revisar três diffs, aplicar tudo. ⚠️ **Não
+  verificado no editor real** — ver PEND-33.
+
+### UX-25 · Não dava para saber que a Modelagem alimenta as Regras de negócio ✅
+**P2 · Esforço P**
+
+> ✅ **Esclarecido em 05/08/2026.** A pergunta veio de quem estava usando: "a
+> parte de Regras de negócio depende da Modelagem de Ameaças?".
+
+- **A resposta é não** — e o produto não dizia isso em lugar nenhum. `business`
+  declara `uses: ["threat", "sast", "sca"]`, que é **enriquecimento, não
+  pré-requisito**: o orquestrador nunca arrasta um analisador para dentro do
+  plano por causa de outro, e `--only business` é comando legítimo. O que muda
+  sem a modelagem é que **não há lista de requisitos declarados para conferir
+  um a um**; a revisão roda com a descrição do sistema e mais nada.
+- **Onde isso estava escrito:** no comentário do `businessAnalyzer` e na chave
+  `analyzer.degraded.threat` — que só aparecia no canal de saída do editor,
+  depois da execução. Quem escolhe os analisadores **antes** de rodar não via
+  nada.
+- **Entregue:** o cartão marcado mostra, ali mesmo, o que se perde sem cada
+  vizinho que ele usa — em tempo real, enquanto se marca e desmarca. As
+  descrições dos dois analisadores passaram a nomear a relação nos três
+  idiomas. E o resultado ganhou o bloco **Requisitos extraídos**, sem contador
+  e fora da lista de achados: eles são o contrato que as regras conferem, não
+  problemas encontrados. Confundir as duas coisas é exatamente o `UX-22`.
+- **O que NÃO foi feito, e por quê:** renomear os analisadores. "Modelagem de
+  ameaças" e "Regras de negócio" descrevem corretamente o que cada um faz, e os
+  nomes são os mesmos no painel, no terminal e na documentação — trocá-los para
+  explicar uma relação sairia mais caro que explicá-la onde a dúvida aparece.
+
+**Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **647 testes** em 46 arquivos, todos passando (eram 597 em 44 antes do UX-23) |
+| Correção em lote | `packages/core/tests/fix-batch.test.ts` | **15 asserções**: agrupamento por caminho normalizado, encadeamento por `baseCode`, `originalCode` da primeira fatia, arquivo extra que não some, `noChange` do lote, cancelamento entre fatias |
+| Cancelamento | `packages/core/tests/orchestrator.test.ts` | 3 asserções: o que está na fila **não** começa, `cancelled` não vira erro, quem terminou continua no resultado |
+| Skills no painel | `packages/vscode/tests/findings.test.ts` | 3 asserções: entra na lista, **não** vira diagnóstico, e o de código continua virando |
+| Botão preso | `packages/vscode/tests/painel-html.test.ts` | 2 asserções sobre o mecanismo exato do bug (`estado.rodando = m.rodando` proibido) + 5 do lote |
+| Idioma | tipo + `tests/i18n.test.ts` | 35 chaves novas nos **três** idiomas; 2 descrições reescritas |
+| `npm run typecheck` | tsc do app + dos três pacotes | limpo |
+| `npm run lint` | eslint | 0 erros; 12 avisos, todos **pré-existentes** em `lib/` |
+| Build | `npm run build:packages` | `dist/extension.js` **504,0 kB** (era 480,1) |
+
+<details>
+<summary><strong>Como o UX-23 foi validado</strong></summary>
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **619 testes** em 45 arquivos, todos passando (eram 597 em 44) |
+| Testes novos | `packages/vscode/tests/skills.test.ts` | **19 asserções**, quase todas negativas: canal de saída, diff virtual, tela de configurações e buffer sem título **não** são skill |
+| Painel | `packages/vscode/tests/painel-html.test.ts` | 3 asserções novas: existe o botão de escolher, existe o de remover, e o rótulo sai do dicionário |
+| Idioma | tipo + `tests/i18n.test.ts` | 8 chaves novas nos **três** idiomas (`panel.skills*`) |
+| `npm run typecheck` | tsc do app + dos três pacotes | limpo |
+| `npm run lint` | eslint | 0 erros; 12 avisos, todos **pré-existentes** em `lib/` |
+| Build | `npm run build:packages` | núcleo → CLI → extensão; `dist/extension.js` **480,1 kB** |
+
+</details>
 
 <details>
 <summary><strong>Como o Sprint 7 foi validado</strong></summary>
@@ -376,7 +519,7 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-30** | Sprint 8 | O texto gerado por IA em espanhol nunca foi visto | `LOCALE_AI_NAME.es` instrui o modelo a responder em espanhol nas 4 fases (ameaças, skills, enriquecimento, correção). Isso é **instrução a modelo — pedido, não garantia**. Nenhuma chamada real foi feita em espanhol. Rodar uma análise com `sg_locale=es` e conferir que ameaças, explicações e a `explanation` da correção saem no idioma certo. |
 | **PEND-32** | BUG-23 | A suíte `e2e/modal-foco.mjs` não rodou contra a app | O comportamento **foi medido em Chromium**, mas com o `NewUserModal` montado fora do Next por um banco de provas descartável — sem rota, sem sessão e sem banco. A suíte de `e2e/` cobre o mesmo percurso *pela tela real* (login → `/admin/users` → botão → modal) e não pôde rodar: a senha do `admin@starguard.local` no banco configurado não é mais a do `scripts/seed.mjs`. Rodar `node e2e/modal-foco.mjs` com uma credencial válida, ou contra o banco descartável do `e2e/README.md`. Vai junto do PEND-24. |
 | **PEND-31** | Sprint 8 | A troca de `errorKey` não foi exercitada contra rota real | `jsonError(..., null)` para mensagem dinâmica e `useApiError()` na tela estão cobertos por unidade (7 asserções) e pelos testes de rota com repositório mockado. O percurso completo — rota real devolve 409/403, a tela mostra o texto no idioma do usuário — **não rodou**. Vai junto do PEND-24. |
-| **PEND-33** | ARQ-13 | A extensão **ativa**, mas a interface dela nunca foi usada | *Avanço em 05/08/2026 — a interface FOI aberta, e pagou dois bugs que nenhuma suíte pegaria.* **(1)** A v0.1.0 declarava `views: { explorer: [...] }` sem `viewsContainers`: a árvore virava uma seção dentro do Explorer, sem ícone na barra de atividades. Sintoma relatado: "instalei mas não aparece nada no menu lateral". Corrigido na 0.1.1 com contêiner próprio e `media/starguard.svg`. **(2)** Com o ícone no lugar, o painel abria com os cinco analisadores riscados e **nenhum botão de entrar** — o `viewsWelcome` do VS Code só é renderizado quando o provider devolve **zero** filhos da raiz, e o nosso devolvia os cinco desabilitados. O portão de login existia no `setContext` (que governa botões) e não no provider (que governa a tela). Corrigido na 0.1.2: `getChildren` da raiz devolve `[]` sem sessão. Ambos travados por asserção em `packages/vscode/tests/config.test.ts`. Continua **sem verificação humana**: o ▶ por analisador, o sublinhado na linha certa do painel Problemas, a lâmpada, o `vscode.diff` antes de gravar e o `WorkspaceEdit` depois. *Registro anterior, 04/08/2026:* o `.vsix` foi gerado (`vsce package --no-dependencies`, 125,4 kB, 5 arquivos), instalado com `code --install-extension` e **ativou no editor real** — `exthost.log` registra `_doActivateExtension starguard.starguard-vscode, activationEvent: 'workspaceContains:.git'` às 05:50:03, sem nenhum erro depois. Ou seja: o bundle CJS carrega no extension host e `activate()` roda até o fim. O que **continua sem verificação** é tudo o que exige mão humana: a árvore lateral desenhada, o ▶ por analisador, o sublinhado na linha certa do painel Problemas, a lâmpada, o `vscode.diff` antes de gravar e o `WorkspaceEdit` depois. Percurso a fazer: abrir este repositório → StarGuard na barra lateral → ▶ em "Dependências vulneráveis" → conferir os achados no painel → aplicar uma correção pela lâmpada. |
+| **PEND-33** | ARQ-13 | A extensão **ativa**, mas a interface dela nunca foi usada | *Avanço em 05/08/2026 — a interface FOI aberta, e pagou dois bugs que nenhuma suíte pegaria.* **(1)** A v0.1.0 declarava `views: { explorer: [...] }` sem `viewsContainers`: a árvore virava uma seção dentro do Explorer, sem ícone na barra de atividades. Sintoma relatado: "instalei mas não aparece nada no menu lateral". Corrigido na 0.1.1 com contêiner próprio e `media/starguard.svg`. **(2)** Com o ícone no lugar, o painel abria com os cinco analisadores riscados e **nenhum botão de entrar** — o `viewsWelcome` do VS Code só é renderizado quando o provider devolve **zero** filhos da raiz, e o nosso devolvia os cinco desabilitados. O portão de login existia no `setContext` (que governa botões) e não no provider (que governa a tela). Corrigido na 0.1.2: `getChildren` da raiz devolve `[]` sem sessão. Ambos travados por asserção em `packages/vscode/tests/config.test.ts`. Continua **sem verificação humana**: o ▶ por analisador, o sublinhado na linha certa do painel Problemas, a lâmpada, o `vscode.diff` antes de gravar e o `WorkspaceEdit` depois. *Registro anterior, 04/08/2026:* o `.vsix` foi gerado (`vsce package --no-dependencies`, 125,4 kB, 5 arquivos), instalado com `code --install-extension` e **ativou no editor real** — `exthost.log` registra `_doActivateExtension starguard.starguard-vscode, activationEvent: 'workspaceContains:.git'` às 05:50:03, sem nenhum erro depois. Ou seja: o bundle CJS carrega no extension host e `activate()` roda até o fim. O que **continua sem verificação** é tudo o que exige mão humana: a árvore lateral desenhada, o ▶ por analisador, o sublinhado na linha certa do painel Problemas, a lâmpada, o `vscode.diff` antes de gravar e o `WorkspaceEdit` depois. Percurso a fazer: abrir este repositório → StarGuard na barra lateral → ▶ em "Dependências vulneráveis" → conferir os achados no painel → aplicar uma correção pela lâmpada. *Acréscimo de 05/08/2026 (UX-23): o painel foi aberto à mão de novo e pagou um terceiro achado — **não havia onde entregar a skill**, e o editor ativo aceitava o próprio canal de saída da extensão como se fosse uma. Corrigido. Percurso novo a fazer: painel → Skills e prompts → Escolher arquivo… → analisar sem nenhum arquivo aberto no editor.* *Acréscimo de 05/08/2026 (UX-24): o mesmo uso pagou mais três — o botão "Analisando" que nunca voltava, o cancelar que não cancelava (o `CancellationTokenSource` nunca era atribuído) e os achados de skill que não apareciam em lugar nenhum. Corrigidos e cobertos por unidade. **O que continua sem mão humana** é o percurso da correção em lote: marcar N achados em M arquivos, gerar, revisar os diffs e aplicar tudo — é o caminho que ESCREVE no disco de alguém e o que mais merece ser exercitado antes de publicar.* |
 | **PEND-34** | ARQ-13 | O seletor da Tela 1 não foi aberto em navegador | `AnalyzerPicker`, o `/api/analyzers`, o `ThreatInput` que só aparece quando é exigido e o `Collapsible` que se abre sozinho quando o repositório passa a ser obrigatório foram validados por tipo, lint e build. O schema condicional tem **13 asserções novas** em `tests/validation.test.ts`, mas paridade de schema não é qualidade de tela: falta ver o cartão desabilitado com o motivo, o desmarcar automático ao apagar a URL do repositório e as abas de resultado dizendo "não executado". Acrescentar `e2e/selecao-analisadores.mjs` — vai junto do PEND-24. |
 | **PEND-35** | ARQ-13 | O terminal só foi exercitado com Trivy | `--only sca` rodou de verdade (20 achados, 24,7 s, código 1). O que **não** rodou: `--only sast` (o Opengrep está instalado, mas `SAST_RULES=auto` baixa regras da rede e o ambiente da execução não tinha), `--only business` e `--only threat` (exigem chave de IA), e o comando `fix` inteiro — inclusive o `--write`, que é o único caminho que grava no disco de alguém. Rodar com chave configurada e com um ruleset local (`SAST_RULES=<dir>`). |
 | **SEC-15** | 05/08/2026 | **O middleware recusava todo Bearer na borda** — a extensão e o CLI nunca funcionaram | ✅ **Corrigido.** `middleware.ts` é *default-deny* e lia **apenas o cookie**: `req.cookies.get(COOKIE.access)`. Toda requisição com `Authorization: Bearer` levava 401 antes de chegar à rota, então o suporte a Bearer do `requireSession` (`lib/http.ts`) era **código morto** — `/api/me`, `/api/ai/complete`, tudo. O que tornou isto difícil de ver foi a cobertura: `tests/http-bearer.test.ts` passava, verde, testando uma camada que nenhuma requisição alcançava. **Testar a camada errada é pior que não testar**, porque a suíte afirma que está coberto. Sintoma na ponta: o login concluía (código trocado por token, tudo certo) e morria ao ler a conta — parecia problema do `/api/me`, e o 401 tinha a cara de "requisição sem credencial". Só o log passo a passo do `[auth]` mostrou onde parava. Correção: a decisão de acesso saiu para `lib/auth-edge.ts` como **função pura**, com 16 asserções em `tests/auth-edge.test.ts`; o middleware agora aceita Bearer com público `client` e cookie com público `web`, **sem queda de um para o outro**. Regra nova junto: **credencial de ferramenta nunca entra em `/admin` nem `/api/admin`**, mesmo pertencendo a um superadmin — o papel diz o que a pessoa pode, o público do token diz o que aquele cliente foi autorizado a fazer em nome dela. |

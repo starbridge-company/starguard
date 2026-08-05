@@ -24,15 +24,19 @@ import { translate } from "@starguard/core/i18n/translate";
 import { normalizeLocale, type Locale } from "@starguard/core/i18n/config";
 import type { MessageKey } from "@starguard/core/i18n/messages";
 import { reasonKey } from "@starguard/core/compat";
-import { ANALYZER_IDS, type AnalyzerId } from "@starguard/core/types";
+import { ANALYZER_IDS, type AnalyzerId, type ThreatModel } from "@starguard/core/types";
 import type {
   AnalysisRun,
   ExecutionPlan,
+  FileChange,
+  FixProposal,
   FixableFinding,
   PlanEntry,
   Workspace,
 } from "@starguard/core/contracts";
-import { achadosDe, type Achado } from "./findings.js";
+import { achadosDe, ehDiagnostico, type Achado } from "./findings.js";
+import { groupByFile, proposeForFile } from "@starguard/core/fix/batch";
+import { normPath } from "@starguard/core/dedup";
 import { StarGuardAuthProvider, definirLog, pedirLogin, sessaoAtual } from "./auth.js";
 import { setAiTransport } from "@starguard/core/ai-transport";
 import { setScanTransport } from "@starguard/core/scan-transport";
@@ -40,17 +44,23 @@ import { cfg, servidor, urlDeAcesso } from "./config.js";
 import { usingRemoteScan } from "@starguard/core/scan-transport";
 import {
   PainelStarGuard,
+  type ArquivoDeSkill,
   type CartaoDeAnalisador,
+  type CorrecaoNaTela,
   type GanchosDoPainel,
   type ResultadoNaTela,
 } from "./painel.js";
+import {
+  acrescentar,
+  fonteDeSkills,
+  nomeDe,
+  type DocumentoAberto,
+} from "./skills.js";
 import type { TextosDoPainel } from "./painel-html.js";
 
 let saida: vscode.OutputChannel;
 let colecoes: Map<AnalyzerId, vscode.DiagnosticCollection>;
 let painel: PainelStarGuard;
-/** Cancela a análise em curso — o botão do painel vira isto. */
-let cancelamento: vscode.CancellationTokenSource | undefined;
 /** O contexto da ativação, para o consentimento chegar onde é decidido. */
 let ctxGlobal: vscode.ExtensionContext;
 /** Último achado por chave de diagnóstico — a lâmpada precisa reencontrá-lo. */
@@ -237,6 +247,9 @@ function cweUri(cwe: string): vscode.Uri {
 // ------------------------------------------------------------
 
 async function analisar(select: AnalyzerId[]): Promise<void> {
+  // Clique duplo no botão não dispara duas execuções sobre o mesmo diretório.
+  if (rodando) return;
+
   // `true`: quem clicou em analisar está pedindo para usar a ferramenta, então
   // abrir o login é a resposta esperada — não uma interrupção.
   if (!(await exigirConta(true))) {
@@ -255,7 +268,7 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
   await configurarIa(ctxGlobal);
 
   const descricao = cfg().get<string>("systemDescription")?.trim() || undefined;
-  const skills = await skillsAbertas(select);
+  const skills = await entradaDeSkills(select);
 
   const execPlan = await montarPlano({
     select,
@@ -266,59 +279,173 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
   });
 
   ultimoPlano = execPlan;
+  estadoDosCartoes.clear();
+  for (const e of execPlan.entries) {
+    if (!e.willRun && e.reason !== "not_selected") {
+      estadoDosCartoes.set(e.id, { estado: "pulado" });
+    }
+  }
+  rodando = true;
+  abortarAnalise = new AbortController();
   await painel.atualizar({ erro: null });
   relatarPulados(execPlan);
 
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: "StarGuard" },
-    async (progresso) => {
-      // O workspace é aberto AQUI e passado ao orquestrador: entre uma
-      // execução e outra o diretório é o mesmo, e reabri-lo a cada clique na
-      // árvore seria desperdício.
-      const ws = await openWorkspace({ type: "local", path: root });
-      try {
-        const run = await executar(execPlan, {
-          workspace: ws,
-          systemDescription: descricao,
-          skills,
-          sinks: [
-            {
-              on: (e) => {
-                if (e.type === "analyzer:start") {
-                  progresso.report({
-                    message: t(`analyzer.${e.id}.name` as MessageKey),
-                  });
-                  painel.progresso(e.id, "rodando", true);
-                }
-                if (e.type === "analyzer:done" || e.type === "analyzer:error") {
-                  painel.progresso(e.id, e.type === "analyzer:done" ? "pronto" : "erro", true);
-                }
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "StarGuard",
+        // Cancelar precisa existir nos dois lugares: quem está com o painel
+        // fechado só vê a notificação. Ambos puxam o mesmo controlador.
+        cancellable: true,
+      },
+      async (progresso, token) => {
+        token.onCancellationRequested(() => abortarAnalise?.abort());
+
+        // O workspace é aberto AQUI e passado ao orquestrador: entre uma
+        // execução e outra o diretório é o mesmo, e reabri-lo a cada clique
+        // seria desperdício.
+        const ws = await openWorkspace({ type: "local", path: root });
+        try {
+          const run = await executar(execPlan, {
+            workspace: ws,
+            systemDescription: descricao,
+            skills,
+            signal: abortarAnalise!.signal,
+            sinks: [
+              {
+                on: (e) => {
+                  if (e.type === "analyzer:start") {
+                    progresso.report({
+                      message: t(`analyzer.${e.id}.name` as MessageKey),
+                    });
+                    estadoDosCartoes.set(e.id, { estado: "rodando" });
+                    painel.progresso(e.id, "rodando");
+                  }
+                  // O analisador conta o que está fazendo ("baixando regras",
+                  // o modelo escolhido). Ficava só no objeto de evento; agora
+                  // vira o subtítulo do cartão, no lugar da descrição fixa.
+                  if (e.type === "analyzer:progress") {
+                    const atual = estadoDosCartoes.get(e.id) ?? { estado: "rodando" as const };
+                    estadoDosCartoes.set(e.id, { ...atual, detalhe: e.message });
+                    painel.progresso(e.id, "rodando", { detalhe: e.message });
+                  }
+                  if (e.type === "analyzer:done" || e.type === "analyzer:error") {
+                    const estado = e.type === "analyzer:done" ? "pronto" : "erro";
+                    estadoDosCartoes.set(e.id, { estado });
+                    painel.progresso(e.id, estado);
+                  }
+                  // `not_selected` não é "pulado": ninguém pediu. Marcar o
+                  // cartão faria a tela dizer que algo deu errado com um
+                  // analisador que a pessoa deliberadamente deixou de fora.
+                  if (e.type === "analyzer:skipped" && e.reason !== "not_selected") {
+                    estadoDosCartoes.set(e.id, { estado: "pulado" });
+                    painel.progresso(e.id, "pulado");
+                  }
+                },
               },
-            },
-          ],
-        });
-        aplicarResultado(run, root, select);
-      } finally {
-        await ws?.dispose();
+            ],
+          });
+          aplicarResultado(run, root, select);
+          if (abortarAnalise?.signal.aborted) {
+            void vscode.window.showInformationMessage(t("panel.cancelled"));
+          }
+        } finally {
+          await ws?.dispose();
+        }
       }
-    }
-  );
+    );
+  } catch (e) {
+    // Falha ANTES ou FORA dos analisadores (o clone, o workspace): o
+    // orquestrador já isola o erro de cada um, então o que chega aqui não tem
+    // dono e sumia em silêncio, com o botão girando.
+    const msg = e instanceof Error ? e.message : String(e);
+    saida.appendLine(`[run] ${msg}`);
+    await painel.atualizar({ erro: msg });
+    void vscode.window.showErrorMessage(`StarGuard · ${msg.split("\n")[0]}`);
+  } finally {
+    // O ÚNICO lugar que desliga o botão, e ele roda em toda saída — inclusive
+    // na que lança. Ver AUDITORIA.md#UX-24.
+    rodando = false;
+    abortarAnalise = undefined;
+    await painel.atualizar();
+  }
+}
+
+// ------------------------------------------------------------
+// A entrada do analisador de skills — AUDITORIA.md#UX-23
+// ------------------------------------------------------------
+
+/** Chave dos arquivos escolhidos, no estado do WORKSPACE. */
+const SKILLS_ESCOLHIDAS = "starguard.skillsEscolhidas";
+
+/**
+ * Arquivos apontados a dedo no painel. Ficam no estado do workspace porque são
+ * do projeto, não da máquina: quem abre outro repositório não herda a escolha
+ * feita no anterior.
+ */
+let skillsEscolhidas: string[] = [];
+
+function documentoAtivo(): DocumentoAberto | undefined {
+  const doc = vscode.window.activeTextEditor?.document;
+  if (!doc) return undefined;
+  return { esquema: doc.uri.scheme, caminho: doc.uri.fsPath, semTitulo: doc.isUntitled };
+}
+
+/** O que a lista do painel mostra — e o sinal de que HÁ entrada para o plano. */
+function arquivosDeSkill(): ArquivoDeSkill[] {
+  const fonte = fonteDeSkills({ escolhidos: skillsEscolhidas, aberto: documentoAtivo() });
+  if (fonte.tipo === "escolhidos") {
+    return fonte.caminhos.map((c) => ({ caminho: c, nome: nomeDe(c), doEditor: false }));
+  }
+  if (fonte.tipo === "editor") {
+    return [{ caminho: fonte.caminho, nome: nomeDe(fonte.caminho), doEditor: true }];
+  }
+  return [];
 }
 
 /**
- * Quando `skills` está no plano, o arquivo ABERTO é a skill a validar.
+ * Quando `skills` está no plano, o que vale é o que a pessoa escolheu no
+ * painel — e, se ela não escolheu nada, o arquivo aberto no editor.
  *
- * É o caminho natural no editor: quem está escrevendo um prompt quer validar
- * aquele prompt, não procurar um seletor de arquivos. Sem editor aberto, o
- * analisador simplesmente sai do plano por falta de entrada — com motivo.
+ * O atalho do editor continua sendo o caminho natural de quem está escrevendo
+ * um prompt e quer validar aquele prompt. O que ele não podia continuar sendo
+ * é a ÚNICA entrada: um `prompts.md` que não estivesse aberto não tinha por
+ * onde entrar, e o cartão apagava com "sem entrada" sem oferecer saída.
+ *
+ * O conteúdo do editor sai de `getText()`, não do disco: o que está na tela,
+ * ainda não salvo, é justamente o que se quer validar. Os escolhidos vêm do
+ * disco, que é a versão que os outros vão ler.
  */
-async function skillsAbertas(
+async function entradaDeSkills(
   select: AnalyzerId[]
 ): Promise<{ name: string; content: string }[] | undefined> {
   if (!select.includes("skills")) return undefined;
+
   const doc = vscode.window.activeTextEditor?.document;
-  if (!doc || doc.isUntitled) return undefined;
-  return [{ name: doc.fileName.split(/[\\/]/).pop()!, content: doc.getText() }];
+  const fonte = fonteDeSkills({ escolhidos: skillsEscolhidas, aberto: documentoAtivo() });
+
+  if (fonte.tipo === "nenhuma") return undefined;
+  if (fonte.tipo === "editor") {
+    return doc ? [{ name: nomeDe(doc.uri.fsPath), content: doc.getText() }] : undefined;
+  }
+
+  const lidos: { name: string; content: string }[] = [];
+  for (const caminho of fonte.caminhos) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(caminho));
+      lidos.push({ name: nomeDe(caminho), content: new TextDecoder().decode(bytes) });
+    } catch {
+      // Arquivo apagado ou renomeado depois de escolhido. Avisa e segue com os
+      // outros: perder a análise inteira por causa de um caminho velho seria
+      // pior que analisar o que ainda existe.
+      saida.appendLine(`[skills] ${t("panel.skillsUnreadable", { file: caminho })}`);
+      void vscode.window.showWarningMessage(
+        t("panel.skillsUnreadable", { file: nomeDe(caminho) })
+      );
+    }
+  }
+  return lidos.length ? lidos : undefined;
 }
 
 function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]): void {
@@ -329,14 +456,31 @@ function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]):
   for (const id of select) {
     const o = run.outcomes[id];
     if (!o || o.status === "skipped") continue;
-    publicar(id, achados.filter((a) => a.analyzer === id), root);
+    // `ehDiagnostico` filtra o que não tem posição confiável no projeto — as
+    // skills entram na LISTA do painel, não no sublinhado do editor.
+    publicar(id, achados.filter((a) => a.analyzer === id && ehDiagnostico(a)), root);
   }
 
   const rodaram = select.filter((id) => {
     const o = run.outcomes[id];
     return !!o && o.status !== "skipped";
   });
-  ultimoResultado = montarResultado(achados, rodaram);
+
+  // A contagem do cartão sai do que a LISTA mostra: qualquer outra conta faria
+  // o cartão dizer 3 e o grupo abaixo dele mostrar 2.
+  for (const id of rodaram) {
+    const atual = estadoDosCartoes.get(id);
+    if (!atual || atual.estado === "erro") continue;
+    // A modelagem de ameaças não produz achado: contá-la daria peso de
+    // problema a uma lista de requisitos, que é o erro do UX-22.
+    if (id === "threat") continue;
+    estadoDosCartoes.set(id, {
+      estado: atual.estado,
+      achados: achados.filter((a) => a.analyzer === id).length,
+    });
+  }
+
+  ultimoResultado = montarResultado(run, achados, rodaram);
   void painel.atualizar({ resultado: ultimoResultado });
 
   for (const o of Object.values(run.outcomes)) {
@@ -460,22 +604,7 @@ async function corrigir(chave: string): Promise<void> {
     // desistir não deixa rastro — é o que separa "revisei e aceitei" de "a
     // ferramenta mexeu no meu código".
     const principal = proposta.changes[0]!;
-    const antes = vscode.Uri.parse(
-      `starguard-diff:${encodeURIComponent(principal.file)}?${Buffer.from(
-        principal.originalCode
-      ).toString("base64")}`
-    );
-    const depois = vscode.Uri.parse(
-      `starguard-diff:${encodeURIComponent(principal.file)} (StarGuard)?${Buffer.from(
-        principal.fixedCode
-      ).toString("base64")}`
-    );
-    await vscode.commands.executeCommand(
-      "vscode.diff",
-      antes,
-      depois,
-      `${principal.file} — StarGuard`
-    );
+    await mostrarDiff(principal);
 
     const escolha = await vscode.window.showInformationMessage(
       proposta.explanation,
@@ -507,6 +636,237 @@ class ProvedorDeDiff implements vscode.TextDocumentContentProvider {
   }
 }
 
+async function mostrarDiff(mudanca: FileChange): Promise<void> {
+  const antes = vscode.Uri.parse(
+    `starguard-diff:${encodeURIComponent(mudanca.file)}?${Buffer.from(
+      mudanca.originalCode
+    ).toString("base64")}`
+  );
+  const depois = vscode.Uri.parse(
+    `starguard-diff:${encodeURIComponent(mudanca.file)} (StarGuard)?${Buffer.from(
+      mudanca.fixedCode
+    ).toString("base64")}`
+  );
+  await vscode.commands.executeCommand(
+    "vscode.diff",
+    antes,
+    depois,
+    `${mudanca.file} — StarGuard`
+  );
+}
+
+// ------------------------------------------------------------
+// Correção em LOTE — AUDITORIA.md#UX-24
+// ------------------------------------------------------------
+
+interface PropostaGuardada {
+  chave: string;
+  arquivo: string;
+  achados: number;
+  /** De quem é o corretor. Guardado, e não deduzido do caminho na hora. */
+  analyzer: AnalyzerId;
+  estado: CorrecaoNaTela["estado"];
+  proposta?: FixProposal;
+  erro?: string;
+}
+
+/** As propostas da rodada atual, por arquivo. Nada aqui foi gravado em disco. */
+const propostas = new Map<string, PropostaGuardada>();
+let abortarCorrecao: AbortController | undefined;
+
+function correcoesNaTela(): CorrecaoNaTela[] {
+  return [...propostas.values()].map((p) => ({
+    chave: p.chave,
+    arquivo: p.arquivo,
+    achados: p.achados,
+    extras: Math.max(0, (p.proposta?.changes.length ?? 1) - 1),
+    estado: p.estado,
+    erro: p.erro,
+  }));
+}
+
+/**
+ * Gera UMA correção por arquivo para os achados marcados.
+ *
+ * O agrupamento é a razão de existir deste caminho, e ele já custou um bug ao
+ * painel (BUG-06): uma correção por achado faria cada uma partir do arquivo
+ * original e a última gravada apagaria as anteriores — com a tela dizendo que
+ * todas foram aplicadas. A aritmética mora no núcleo (`fix/batch.ts`), a mesma
+ * que o navegador usa.
+ *
+ * A chave do grupo carrega o CORRETOR junto do caminho: dependência e código
+ * têm corretores diferentes, e mandar um achado de CVE para o corretor de
+ * código produziria uma reescrita sem sentido. Na prática são arquivos
+ * distintos (manifesto x fonte); a chave é a garantia de que continuam sendo.
+ */
+async function corrigirLote(chaves: string[]): Promise<void> {
+  const root = raiz();
+  if (!root) return;
+
+  // `paraFinding` preserva o `raw`, que é o payload que o corretor de cada
+  // analisador sabe ler — e o `analyzer`, que diz de quem é o corretor.
+  const alvos = chaves
+    .map((k) => achadosPorChave.get(k))
+    .filter((a): a is Achado => !!a)
+    .map(paraFinding)
+    .filter((f) => getAnalyzer(f.analyzer)?.fix?.can(f).ok);
+
+  if (!alvos.length) {
+    void vscode.window.showWarningMessage(t("panel.fixNoneFixable"));
+    return;
+  }
+
+  // Um grupo por (corretor, arquivo). Dependência e código têm corretores
+  // diferentes: mandar um CVE para o corretor de código produziria uma
+  // reescrita sem sentido. Na prática são arquivos distintos (manifesto x
+  // fonte) — a chave é a garantia de que continuam sendo.
+  const familia = (f: FixableFinding) => (f.analyzer === "sca" ? "deps" : "code");
+  const porFamilia = new Map<string, FixableFinding[]>();
+  for (const f of alvos) {
+    const k = familia(f);
+    porFamilia.set(k, [...(porFamilia.get(k) ?? []), f]);
+  }
+
+  const grupos: { chave: string; arquivo: string; achados: FixableFinding[] }[] = [];
+  for (const [fam, lista] of porFamilia) {
+    for (const g of groupByFile(lista)) {
+      grupos.push({
+        chave: `${fam}|${normPath(g.file)}`,
+        arquivo: g.file,
+        achados: g.findings,
+      });
+    }
+  }
+
+  aplicarConfiguracao();
+  abortarCorrecao = new AbortController();
+  propostas.clear();
+  for (const g of grupos) {
+    propostas.set(g.chave, {
+      chave: g.chave,
+      arquivo: g.arquivo,
+      achados: g.achados.length,
+      analyzer: g.achados[0]!.analyzer,
+      estado: "gerando",
+    });
+  }
+  await painel.atualizar();
+
+  const ws = await openWorkspace({ type: "local", path: root });
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: t("panel.fixes"),
+        cancellable: true,
+      },
+      async (progresso, token) => {
+        token.onCancellationRequested(() => abortarCorrecao?.abort());
+        let feitas = 0;
+
+        // Sequencial, e não em paralelo: cada proposta é uma chamada de IA
+        // paga, e três gerando ao mesmo tempo tornam o cancelamento uma
+        // promessa que a extensão não cumpre. O painel web paraleliza porque
+        // lá o trabalho é do servidor; aqui é da máquina de quem clicou.
+        for (const g of grupos) {
+          if (abortarCorrecao?.signal.aborted) {
+            const p = propostas.get(g.chave)!;
+            p.estado = "cancelada";
+            continue;
+          }
+          progresso.report({
+            message: `${g.arquivo} (${++feitas}/${grupos.length})`,
+            increment: 100 / grupos.length,
+          });
+
+          const fixer = getAnalyzer(g.achados[0]!.analyzer)!.fix!;
+          const guardada = propostas.get(g.chave)!;
+          try {
+            const proposta = await proposeForFile(
+              fixer,
+              { file: g.arquivo, findings: g.achados },
+              {
+                workspace: ws,
+                locale: locale(),
+                repoUrl: ws?.origin?.url,
+                signal: abortarCorrecao?.signal,
+              }
+            );
+            guardada.proposta = proposta;
+            guardada.estado = proposta.noChange ? "semMudanca" : "pronta";
+          } catch (e) {
+            // Uma falha não derruba o lote: é a mesma regra do orquestrador.
+            guardada.estado = "erro";
+            guardada.erro = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+            saida.appendLine(`[fix] ${g.arquivo}: ${guardada.erro}`);
+          }
+          await painel.atualizar();
+        }
+      }
+    );
+  } finally {
+    abortarCorrecao = undefined;
+    await ws?.dispose();
+    await painel.atualizar();
+  }
+}
+
+/** Grava uma proposta. Devolve quantos arquivos foram escritos. */
+async function aplicarProposta(guardada: PropostaGuardada, ws: Workspace): Promise<number> {
+  const proposta = guardada.proposta;
+  if (!proposta || guardada.estado !== "pronta") return 0;
+
+  // O corretor é o do analisador que ACHOU o problema — contrato do núcleo.
+  const fixer = getAnalyzer(guardada.analyzer)?.fix;
+  if (!fixer) return 0;
+  await fixer.apply(proposta, ws);
+  guardada.estado = "aplicada";
+
+  for (const seg of proposta.followUp ?? []) {
+    // O aviso do lockfile precisa aparecer: a correção edita o manifesto e NÃO
+    // regera o lock.
+    void vscode.window.showWarningMessage(
+      t(seg.commandKey, { cmd: seg.command ?? "", manifest: guardada.arquivo, lockfile: "" })
+    );
+  }
+  return proposta.changes.filter((c: FileChange) => c.fixedCode !== c.originalCode).length;
+}
+
+async function aplicarCorrecoes(chaves: string[]): Promise<void> {
+  const root = raiz();
+  if (!root) return;
+
+  const ws = await openWorkspace({ type: "local", path: root });
+  if (!ws) return;
+  try {
+    const escritos = new Set<string>();
+    let total = 0;
+    for (const k of chaves) {
+      const g = propostas.get(k);
+      if (!g?.proposta) continue;
+
+      // Duas propostas para o MESMO arquivo (só acontece se um manifesto
+      // tiver achado de código e de dependência): a segunda partiria do
+      // conteúdo antigo e apagaria a primeira. Recusar é o certo — é o BUG-06
+      // outra vez, e gravar em silêncio seria pior que não gravar.
+      const conflito = g.proposta.changes.some((c: FileChange) =>
+        escritos.has(normPath(c.file))
+      );
+      if (conflito) {
+        g.estado = "erro";
+        g.erro = t("fix.cannot.noFile");
+        continue;
+      }
+      total += await aplicarProposta(g, ws);
+      for (const c of g.proposta.changes) escritos.add(normPath(c.file));
+    }
+    if (total) void vscode.window.showInformationMessage(t("panel.fixApplied", { n: total }));
+  } finally {
+    await ws.dispose();
+    await painel.atualizar();
+  }
+}
+
 // ------------------------------------------------------------
 // O painel (webview)
 // ------------------------------------------------------------
@@ -528,6 +888,32 @@ let selecao: AnalyzerId[] = [];
 /** Último resultado, para o painel redesenhar sem reanalisar. */
 let ultimoResultado: ResultadoNaTela | null = null;
 
+/**
+ * Estado de cada cartão durante e depois da execução.
+ *
+ * Vive AQUI e não só no webview porque o painel é reconstruído do zero a cada
+ * `atualizar()` — antes, qualquer atualização de estado apagava o ✔ e a
+ * contagem que a execução tinha acabado de escrever.
+ */
+interface EstadoDoCartao {
+  estado: "rodando" | "pronto" | "erro" | "pulado";
+  achados?: number;
+  detalhe?: string;
+}
+const estadoDosCartoes = new Map<AnalyzerId, EstadoDoCartao>();
+
+/**
+ * Há uma análise em curso?
+ *
+ * Quem responde é a extensão, e não o webview. O botão ficava girando para
+ * sempre porque o último evento de progresso de uma execução dizia
+ * `rodando: true` — e não existia evento nenhum dizendo o contrário.
+ * Ver AUDITORIA.md#UX-24.
+ */
+let rodando = false;
+/** Cancela a execução em curso — o botão do painel e a notificação. */
+let abortarAnalise: AbortController | undefined;
+
 function textosDoPainel(): TextosDoPainel {
   return {
     titulo: t("panel.signInTitle"),
@@ -543,6 +929,12 @@ function textosDoPainel(): TextosDoPainel {
     descreverSistema: t("panel.describeSystem"),
     descricaoAjuda: t("panel.describeHelp"),
     descricaoVazia: t("panel.describeEmpty"),
+    skills: t("panel.skills"),
+    skillsAjuda: t("panel.skillsHelp"),
+    skillsVazio: t("panel.skillsEmpty"),
+    skillsAdicionar: t("panel.skillsAdd"),
+    skillsRemover: t("panel.skillsRemove"),
+    skillsDoEditor: t("panel.skillsFromEditor"),
     resultado: t("panel.result"),
     semAchados: t("panel.noFindings"),
     aindaNaoRodou: t("panel.notRunYet"),
@@ -554,6 +946,31 @@ function textosDoPainel(): TextosDoPainel {
     sair: t("panel.signOut"),
     nenhumSelecionado: t("panel.nothingSelected"),
     privacidade: t("panel.privacy"),
+    marcarTudo: t("panel.selectFindings"),
+    desmarcar: t("panel.clearFindings"),
+    corrigirSelecionados: t("panel.fixSelected"),
+    correcoes: t("panel.fixes"),
+    correcoesAjuda: t("panel.fixGroupHint"),
+    gerandoCorrecoes: t("panel.fixGenerating"),
+    estadoGerando: t("panel.fixState.generating"),
+    estadoPronta: t("panel.fixState.ready"),
+    estadoAplicada: t("panel.fixState.applied"),
+    estadoSemMudanca: t("panel.fixState.noChange"),
+    estadoErro: t("panel.fixState.error"),
+    estadoCancelada: t("panel.fixState.cancelled"),
+    verDiff: t("panel.fixView"),
+    aplicar: t("panel.fixApply"),
+    aplicarTudo: t("panel.fixApplyAll"),
+    descartar: t("panel.fixDiscard"),
+    umAchado: t("panel.fixFindings.one"),
+    nAchados: t("panel.fixFindings.many"),
+    maisArquivos: t("panel.fixAlsoFiles"),
+    nadaMarcado: t("panel.fixNothingSelected"),
+    filtrarTudo: t("panel.filterAll"),
+    filtrarAjuda: t("panel.filterHint"),
+    degradado: t("panel.degraded"),
+    requisitos: t("panel.requirements"),
+    requisitosAjuda: t("panel.requirementsHelp"),
   };
 }
 
@@ -568,8 +985,10 @@ async function recarregarPlano(): Promise<void> {
     source: root ? { type: "local", path: root } : { type: "none" },
     locale: locale(),
     systemDescription: cfg().get<string>("systemDescription")?.trim() || undefined,
-    // Sinalizador de presença: a skill de verdade é o arquivo aberto.
-    skills: vscode.window.activeTextEditor ? [{ name: "aberto", content: "x" }] : undefined,
+    // Sinalizador de presença: o conteúdo de verdade só é lido na execução.
+    // O que decide se o cartão acende é haver arquivo ESCOLHIDO ou um arquivo
+    // de verdade aberto no editor — canal de saída e diff virtual não contam.
+    skills: arquivosDeSkill().length ? [{ name: "presente", content: "x" }] : undefined,
   });
 }
 
@@ -580,6 +999,21 @@ function cartoes(): CartaoDeAnalisador[] {
     // `not_selected` não é indisponibilidade: o plano de sondagem não pediu
     // nada, e cada cartão é selecionável por conta própria.
     const disponivel = !e || e.willRun || e.reason === "not_selected";
+    const estado = estadoDosCartoes.get(id);
+
+    // O `uses` do analisador, com a frase do que se perde sem cada vizinho.
+    //
+    // É a resposta na tela para "as regras de negócio dependem da modelagem de
+    // ameaças?": não dependem — o `uses` é enriquecimento e o orquestrador
+    // nunca arrasta um analisador para dentro do plano por causa de outro. O
+    // que muda sem ele está escrito em `analyzer.degraded.*`, e agora aparece
+    // no cartão em vez de só no canal de saída. Ver AUDITORIA.md#UX-25.
+    const usa = (getAnalyzer(id)?.uses ?? []).map((u) => ({
+      id: u,
+      nome: t(`analyzer.${u}.name` as MessageKey),
+      aviso: t(`analyzer.degraded.${u}` as MessageKey),
+    }));
+
     return {
       id,
       nome: t(`analyzer.${id}.name` as MessageKey),
@@ -588,20 +1022,53 @@ function cartoes(): CartaoDeAnalisador[] {
       motivo: e && !disponivel ? descreverMotivo(e) : undefined,
       usaIa: !!CUSTA_IA[id],
       remoto: remoto && (id === "sast" || id === "sca"),
+      estado: estado?.estado,
+      achados: estado?.achados,
+      detalhe: estado?.detalhe,
+      usa: usa.length ? usa : undefined,
     };
   });
 }
 
-function montarResultado(achados: Achado[], rodaram: AnalyzerId[]): ResultadoNaTela {
+function montarResultado(
+  run: AnalysisRun,
+  achados: Achado[],
+  rodaram: AnalyzerId[]
+): ResultadoNaTela {
   const contagem: Record<string, number> = {};
   for (const a of achados) contagem[a.severity] = (contagem[a.severity] ?? 0) + 1;
 
   const rotulos: Record<string, string> = {};
   for (const s of Object.keys(ORDEM_SEV)) rotulos[s] = t(`severity.${s}` as MessageKey);
 
+  // A degradação sai do canal de saída e vem para a tela: "rodou sem o
+  // analisador X" é informação sobre o RESULTADO, e quem lê o resultado está
+  // olhando o painel. Repetida por analisador, sem duplicar a frase.
+  const avisos = [
+    ...new Set(
+      Object.values(run.outcomes)
+        .filter((o) => o.status === "done")
+        .flatMap((o) => o.degraded)
+        .map((d) => t(`analyzer.degraded.${d}` as MessageKey))
+    ),
+  ];
+
+  // Os requisitos que a modelagem extraiu. Sem contador e fora da lista de
+  // achados de propósito: são o CONTRATO que as regras de negócio conferem, e
+  // não problemas encontrados — é a lição do UX-22.
+  const modelo = run.outcomes.threat?.status === "done"
+    ? (run.outcomes.threat.result as ThreatModel | undefined)
+    : undefined;
+  const requisitos = (modelo?.requirements ?? []).map((r) => ({
+    id: r.id,
+    texto: r.text,
+  }));
+
   return {
     contagem,
     rotulos,
+    avisos,
+    requisitos,
     grupos: rodaram.map((id) => ({
       id,
       nome: t(`analyzer.${id}.name` as MessageKey),
@@ -613,12 +1080,29 @@ function montarResultado(achados: Achado[], rodaram: AnalyzerId[]): ResultadoNaT
             x.file.localeCompare(y.file) ||
             (x.line ?? 0) - (y.line ?? 0)
         )
-        .map((a) => ({
-          chave: chaveDe(a),
-          titulo: a.title,
-          local: a.line ? `${a.file}:${a.line}` : a.file,
-          severidade: a.severity,
-        })),
+        .map((a) => {
+          // Quem responde se dá para corrigir é o CORRETOR do analisador, não
+          // uma suposição daqui — é ele que sabe que dependência sem versão
+          // corrigida não tem correção possível. E o motivo é exibido, não
+          // engolido: caixa ausente sem explicação parece defeito.
+          const fixer = getAnalyzer(a.analyzer)?.fix;
+          const pode = fixer?.can(paraFinding(a));
+          return {
+            chave: chaveDe(a),
+            titulo: a.title,
+            local: a.line ? `${a.file}:${a.line}` : a.file,
+            severidade: a.severity,
+            corrigivel: !!pode?.ok,
+            motivo: pode?.ok
+              ? undefined
+              : pode
+                ? t(pode.reasonKey)
+                : // Analisador SEM corretor. O de skills é assim de propósito:
+                  // reescrever um prompt automaticamente entregaria um texto
+                  // que ninguém revisou. Fica declarado, não em branco.
+                  t("panel.fixNoAutoFix"),
+          };
+        }),
     })),
   };
 }
@@ -661,12 +1145,16 @@ function ganchosDoPainel(): GanchosDoPainel {
         conta: sessao?.account.label,
         analisadores: sessao ? cartoes() : [],
         descricao: cfg().get<string>("systemDescription") ?? "",
+        skills: arquivosDeSkill(),
         // Primeira abertura: já vêm marcados os que não custam IA. É o padrão
         // que a configuração `analyzers.enabled` sempre declarou, e evita a
         // tela abrir com o botão desabilitado e nada explicando o porquê.
         selecionados: selecao.length
           ? selecao
           : (cfg().get<AnalyzerId[]>("analyzers.enabled") ?? ["sast", "sca"]),
+        rodando,
+        resultado: ultimoResultado,
+        correcoes: correcoesNaTela(),
       };
     },
 
@@ -697,14 +1185,31 @@ function ganchosDoPainel(): GanchosDoPainel {
       await analisar(ids);
     },
     aoCancelar: () => {
-      cancelamento?.cancel();
+      // Os dois: quem clica em cancelar quer parar o que estiver acontecendo,
+      // e não escolher entre a análise e a geração de correções.
+      abortarAnalise?.abort();
+      abortarCorrecao?.abort();
     },
     aoAbrir: async (chave) => {
       const a = achadosPorChave.get(chave);
       const root = raiz();
-      if (!a || !root) return;
-      const uri = vscode.Uri.joinPath(vscode.Uri.file(root), a.file);
+      if (!a) return;
       const linha = Math.max(0, (a.line ?? 1) - 1);
+
+      // O achado de skill não aponta um caminho do projeto: `file` é o NOME da
+      // skill. O caminho de verdade é o que a pessoa escolheu no painel — sem
+      // isto, clicar tentava abrir `<raiz>/prompts.md` e falhava em silêncio.
+      if (a.analyzer === "skills") {
+        const caminho = skillsEscolhidas.find((c) => nomeDe(c) === a.file);
+        if (!caminho) return;
+        await vscode.window.showTextDocument(vscode.Uri.file(caminho), {
+          selection: new vscode.Range(linha, 0, linha, 0),
+        });
+        return;
+      }
+
+      if (!root) return;
+      const uri = vscode.Uri.joinPath(vscode.Uri.file(root), a.file);
       await vscode.window.showTextDocument(uri, {
         selection: new vscode.Range(linha, 0, linha, 0),
       });
@@ -717,6 +1222,64 @@ function ganchosDoPainel(): GanchosDoPainel {
     },
     aoMudarSelecao: async (ids) => {
       selecao = ids;
+    },
+
+    // Sem `filters`: prompt mora em arquivo de todo tipo de nome — `SKILL.md`,
+    // `prompts.md`, `system.txt`, um `.mdc` de regra do editor. Uma lista de
+    // extensões aqui esconderia o arquivo que a pessoa veio buscar, e o diálogo
+    // do sistema não oferece "todos os arquivos" quando há filtro declarado.
+    aoEscolherSkills: async () => {
+      const escolha = await vscode.window.showOpenDialog({
+        canSelectMany: true,
+        canSelectFolders: false,
+        openLabel: t("panel.skillsPick"),
+        title: t("panel.skills"),
+      });
+      if (!escolha?.length) return;
+      skillsEscolhidas = acrescentar(
+        skillsEscolhidas,
+        escolha.map((u) => u.fsPath)
+      );
+      await ctxGlobal.workspaceState.update(SKILLS_ESCOLHIDAS, skillsEscolhidas);
+      await painel.atualizar();
+    },
+
+    aoRemoverSkill: async (caminho) => {
+      skillsEscolhidas = skillsEscolhidas.filter((c) => c !== caminho);
+      await ctxGlobal.workspaceState.update(SKILLS_ESCOLHIDAS, skillsEscolhidas);
+      await painel.atualizar();
+    },
+
+    aoCorrigirLote: async (chaves) => {
+      await corrigirLote(chaves);
+    },
+
+    aoVerCorrecao: async (chave) => {
+      const g = propostas.get(chave);
+      const principal = g?.proposta?.changes[0];
+      if (!principal) return;
+      await mostrarDiff(principal);
+      // A explicação da IA acompanha o diff. Sem ela, o que se revisa é um
+      // conjunto de linhas trocadas sem motivo declarado.
+      if (g?.proposta?.explanation) {
+        void vscode.window.showInformationMessage(g.proposta.explanation);
+      }
+    },
+
+    aoAplicarCorrecao: async (chave) => {
+      await aplicarCorrecoes([chave]);
+    },
+
+    aoAplicarTudo: async () => {
+      await aplicarCorrecoes(
+        [...propostas.values()].filter((p) => p.estado === "pronta").map((p) => p.chave)
+      );
+    },
+
+    aoDescartarCorrecoes: async () => {
+      // Nada foi gravado: descartar é esquecer, não desfazer.
+      propostas.clear();
+      await painel.atualizar();
     },
   };
 }
@@ -738,6 +1301,9 @@ function descreverMotivo(e: PlanEntry): string | undefined {
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   ctxGlobal = ctx;
+  // Os arquivos de skill sobrevivem ao recarregar da janela: quem apontou o
+  // `prompts.md` não deve reapontá-lo a cada reinício do editor.
+  skillsEscolhidas = ctx.workspaceState.get<string[]>(SKILLS_ESCOLHIDAS) ?? [];
   saida = vscode.window.createOutputChannel("StarGuard");
   colecoes = new Map(
     ANALYZER_IDS.map((id) => [

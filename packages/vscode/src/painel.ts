@@ -25,8 +25,25 @@ export interface CartaoDeAnalisador {
   motivo?: string;
   usaIa: boolean;
   remoto: boolean;
-  estado?: "ocioso" | "rodando" | "pronto" | "erro";
+  estado?: "ocioso" | "rodando" | "pronto" | "erro" | "pulado";
   achados?: number;
+  /** Mensagem do próprio analisador enquanto roda ("baixando regras…"). */
+  detalhe?: string;
+  /**
+   * Analisadores que ENRIQUECEM este, com a frase que explica o que se perde
+   * sem cada um. Não é pré-requisito: o painel mostra o aviso e roda mesmo
+   * assim. É a resposta, na tela, para "regras de negócio depende da
+   * modelagem?" — ver AUDITORIA.md#UX-25.
+   */
+  usa?: { id: AnalyzerId; nome: string; aviso: string }[];
+}
+
+/** Uma entrada da lista de skills — escolhida a dedo ou herdada do editor. */
+export interface ArquivoDeSkill {
+  caminho: string;
+  nome: string;
+  /** Veio do editor aberto, não de uma escolha: não tem botão de remover. */
+  doEditor: boolean;
 }
 
 export interface AchadoNaTela {
@@ -34,12 +51,31 @@ export interface AchadoNaTela {
   titulo: string;
   local: string;
   severidade: string;
+  /** Dá para corrigir automaticamente? Quem responde é o `Fixer` do analisador. */
+  corrigivel: boolean;
+  /** Por que não dá — texto já traduzido, exibido no lugar da caixa. */
+  motivo?: string;
 }
 
 export interface ResultadoNaTela {
   contagem: Record<string, number>;
   rotulos: Record<string, string>;
   grupos: { id: string; nome: string; achados: AchadoNaTela[] }[];
+  /** Frases de degradação da execução — o que rodou sem o contexto do vizinho. */
+  avisos: string[];
+  /** O que a modelagem de ameaças extraiu. Vazio quando ela não rodou. */
+  requisitos: { id: string; texto: string }[];
+}
+
+/** Uma correção proposta, por ARQUIVO — nunca por achado. Ver `fix/batch.ts`. */
+export interface CorrecaoNaTela {
+  chave: string;
+  arquivo: string;
+  achados: number;
+  /** Outros arquivos que a mesma proposta toca (o corretor de agente faz isso). */
+  extras: number;
+  estado: "gerando" | "pronta" | "semMudanca" | "erro" | "aplicada" | "cancelada";
+  erro?: string;
 }
 
 export interface GanchosDoPainel {
@@ -50,7 +86,18 @@ export interface GanchosDoPainel {
     conta?: string;
     analisadores: CartaoDeAnalisador[];
     descricao: string;
+    skills: ArquivoDeSkill[];
     selecionados: AnalyzerId[];
+    /**
+     * Quem manda no botão é a EXTENSÃO, não o webview.
+     *
+     * Antes o estado de "analisando" só chegava por evento de progresso, e o
+     * último evento de uma execução dizia `rodando: true` — o botão ficava
+     * girando para sempre depois que tudo tinha terminado. Ver UX-24.
+     */
+    rodando: boolean;
+    resultado?: ResultadoNaTela | null;
+    correcoes: CorrecaoNaTela[];
   }>;
   aoEntrar: () => Promise<void>;
   aoSair: () => Promise<void>;
@@ -62,6 +109,14 @@ export interface GanchosDoPainel {
   aoCorrigir: (chave: string) => Promise<void>;
   aoSalvarDescricao: (texto: string) => Promise<void>;
   aoMudarSelecao: (ids: AnalyzerId[]) => Promise<void>;
+  aoEscolherSkills: () => Promise<void>;
+  aoRemoverSkill: (caminho: string) => Promise<void>;
+  /** Correção em LOTE: uma proposta por arquivo, não por achado. */
+  aoCorrigirLote: (chaves: string[]) => Promise<void>;
+  aoVerCorrecao: (chave: string) => Promise<void>;
+  aoAplicarCorrecao: (chave: string) => Promise<void>;
+  aoAplicarTudo: () => Promise<void>;
+  aoDescartarCorrecoes: () => Promise<void>;
 }
 
 export class PainelStarGuard implements vscode.WebviewViewProvider {
@@ -128,6 +183,27 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
         case "selecao":
           await this.ganchos.aoMudarSelecao((m.ids as AnalyzerId[]) ?? []);
           break;
+        case "escolherSkills":
+          await this.ganchos.aoEscolherSkills();
+          break;
+        case "removerSkill":
+          await this.ganchos.aoRemoverSkill(m.caminho as string);
+          break;
+        case "corrigirLote":
+          await this.ganchos.aoCorrigirLote((m.chaves as string[]) ?? []);
+          break;
+        case "verCorrecao":
+          await this.ganchos.aoVerCorrecao(m.chave as string);
+          break;
+        case "aplicarCorrecao":
+          await this.ganchos.aoAplicarCorrecao(m.chave as string);
+          break;
+        case "aplicarTudo":
+          await this.ganchos.aoAplicarTudo();
+          break;
+        case "descartarCorrecoes":
+          await this.ganchos.aoDescartarCorrecoes();
+          break;
       }
     });
   }
@@ -139,9 +215,18 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
     await this.view.webview.postMessage({ tipo: "estado", estado: { ...base, ...extra } });
   }
 
-  /** Progresso de um analisador, sem reconstruir o resto. */
-  progresso(id: AnalyzerId, estado: string, rodando: boolean, achados?: number): void {
-    void this.view?.webview.postMessage({ tipo: "progresso", id, estado, rodando, achados });
+  /**
+   * Progresso de um analisador, sem reconstruir o resto.
+   *
+   * `rodando` não vem daqui de propósito — quem sabe se a execução acabou é
+   * quem a conduz, e um evento de progresso nunca soube disso. Ver UX-24.
+   */
+  progresso(
+    id: AnalyzerId,
+    estado: string,
+    extra: { achados?: number; detalhe?: string } = {}
+  ): void {
+    void this.view?.webview.postMessage({ tipo: "progresso", id, estado, ...extra });
   }
 
   /** Traz o painel para a frente — usado quando um comando precisa dele. */
