@@ -3671,6 +3671,22 @@ a.cell-strong:hover {
   justify-content: flex-end;
 }
 
+/* No passo de retorno há um botão só, e ele é a ação que destrava o fluxo:
+   ocupa a largura toda para não parecer opcional. */
+.oauth-actions > a.button {
+  flex: 1;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.oauth-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .device-list {
   display: grid;
   gap: 10px;

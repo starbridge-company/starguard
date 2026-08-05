@@ -52,8 +52,9 @@ export default function AuthorizePage() {
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const [invalido, setInvalido] = useState(false);
   const [enviando, setEnviando] = useState(false);
-  const [pronto, setPronto] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  /** O `redirect_uri` já com o código — nulo até haver autorização. */
+  const [destino, setDestino] = useState<string | null>(null);
 
   useEffect(() => {
     initTheme();
@@ -99,8 +100,23 @@ export default function AuthorizePage() {
       const url = new URL(pedido.redirectUri);
       url.searchParams.set("code", r.code);
       if (r.state) url.searchParams.set("state", r.state);
-      setPronto(true);
-      window.location.href = url.toString();
+      const alvo = url.toString();
+
+      setDestino(alvo);
+      setEnviando(false);
+
+      // Tentativa automática — que pode simplesmente NÃO acontecer, e é por
+      // isso que existe o botão logo abaixo.
+      //
+      // Abrir um esquema externo (`vscode://`) exige do navegador uma ativação
+      // por gesto do usuário, e o gesto do clique não sobrevive ao `await` da
+      // chamada acima: quando esta linha roda, a ativação já foi consumida e o
+      // Chrome descarta a navegação **em silêncio** — sem erro, sem diálogo.
+      // O sintoma é exatamente o que apareceu: "Autorizado", e nada abre.
+      //
+      // O link renderizado a seguir resolve porque clicar nele é um gesto
+      // NOVO. Automático quando dá, manual sempre.
+      window.location.href = alvo;
     } catch (e) {
       setErro(apiError(e, "oauth.failed"));
       setEnviando(false);
@@ -163,31 +179,53 @@ export default function AuthorizePage() {
           ))}
         </ul>
 
-        {/* A defesa que nenhum código dá: o link pode ter sido mandado por
-            outra pessoa. Quem lê precisa saber que a pergunta certa é "fui eu
-            que comecei isto?". */}
-        <div className="alert info">{t("oauth.warning")}</div>
+        {destino ? (
+          <>
+            <div className="alert success">
+              {t("oauth.opening", { client: nomeCliente })}
+            </div>
+            <div className="oauth-actions">
+              {/* Âncora de verdade, e não `onClick` com `location.href`:
+                  o navegador precisa ver um clique NOVO para abrir um
+                  aplicativo, e um handler assíncrono já não tem esse gesto. */}
+              <a className="button primary" href={destino}>
+                {t("oauth.openApp", { client: nomeCliente })}
+              </a>
+            </div>
+            <p className="oauth-hint">{t("oauth.openHint")}</p>
+            <p className="oauth-hint">{t("oauth.openExpires")}</p>
+          </>
+        ) : (
+          <>
+            {/* A defesa que nenhum código dá: o link pode ter sido mandado por
+                outra pessoa. Quem lê precisa saber que a pergunta certa é "fui
+                eu que comecei isto?". */}
+            <div className="alert info">{t("oauth.warning")}</div>
 
-        {erro && <div className="alert error">{erro}</div>}
-        {pronto && (
-          <div className="alert success">{t("oauth.done", { client: nomeCliente })}</div>
+            {erro && <div className="alert error">{erro}</div>}
+
+            <div className="oauth-actions">
+              <button
+                type="button"
+                className="button ghost"
+                onClick={cancelar}
+                disabled={enviando}
+              >
+                {t("oauth.deny")}
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                onClick={autorizar}
+                disabled={enviando}
+                aria-busy={enviando}
+              >
+                {enviando ? <span className="button-spinner" /> : null}
+                {t("oauth.approve")}
+              </button>
+            </div>
+          </>
         )}
-
-        <div className="oauth-actions">
-          <button type="button" className="button ghost" onClick={cancelar} disabled={enviando}>
-            {t("oauth.deny")}
-          </button>
-          <button
-            type="button"
-            className="button primary"
-            onClick={autorizar}
-            disabled={enviando || pronto}
-            aria-busy={enviando}
-          >
-            {enviando ? <span className="button-spinner" /> : null}
-            {t("oauth.approve")}
-          </button>
-        </div>
       </div>
     </div>
   );

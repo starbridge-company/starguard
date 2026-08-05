@@ -911,6 +911,11 @@ export const PT_BR = {
   "oauth.approve": "Autorizar",
   "oauth.deny": "Cancelar",
   "oauth.done": "Pronto. Pode voltar para {client}.",
+  "oauth.opening": "Autorizado. Abrindo o {client}…",
+  "oauth.openApp": "Abrir o {client}",
+  "oauth.openHint":
+    "Se nada acontecer em alguns segundos, clique no botão acima: o navegador só abre um aplicativo depois de um clique seu. Ele vai pedir confirmação, e o editor também.",
+  "oauth.openExpires": "Este link vale por 2 minutos.",
   "oauth.denied": "Autorização cancelada. Nada foi conectado.",
   "oauth.failed": "Não foi possível concluir a autorização.",
   "oauth.invalidRequest":
@@ -1779,6 +1784,11 @@ const EN: Record<MessageKey, string> = {
   "oauth.approve": "Authorize",
   "oauth.deny": "Cancel",
   "oauth.done": "Done. You can go back to {client}.",
+  "oauth.opening": "Authorized. Opening {client}…",
+  "oauth.openApp": "Open {client}",
+  "oauth.openHint":
+    "If nothing happens in a few seconds, click the button above: a browser only opens an application after a click of yours. It will ask for confirmation, and so will the editor.",
+  "oauth.openExpires": "This link is valid for 2 minutes.",
   "oauth.denied": "Authorization cancelled. Nothing was connected.",
   "oauth.failed": "The authorization could not be completed.",
   "oauth.invalidRequest":
@@ -2649,6 +2659,11 @@ const ES: Record<MessageKey, string> = {
   "oauth.approve": "Autorizar",
   "oauth.deny": "Cancelar",
   "oauth.done": "Listo. Puedes volver a {client}.",
+  "oauth.opening": "Autorizado. Abriendo {client}…",
+  "oauth.openApp": "Abrir {client}",
+  "oauth.openHint":
+    "Si no ocurre nada en unos segundos, pulsa el botón de arriba: el navegador solo abre una aplicación tras un clic tuyo. Te pedirá confirmación, y el editor también.",
+  "oauth.openExpires": "Este enlace es válido durante 2 minutos.",
   "oauth.denied": "Autorización cancelada. No se conectó nada.",
   "oauth.failed": "No se pudo completar la autorización.",
   "oauth.invalidRequest":

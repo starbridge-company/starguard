@@ -217,6 +217,34 @@ describe("o painel bloqueado oferece a saída, não só o diagnóstico", () => {
   });
 });
 
+describe("a chave de IA é da Starbridge — não há chave local a configurar", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("não há comando de definir chave no manifesto", () => {
+    const cmds = (
+      manifesto.contributes as { commands: Array<{ command: string }> }
+    ).commands.map((c) => c.command);
+    expect(cmds).not.toContain("starguard.setApiKey");
+  });
+
+  it("não há configuração de chave", () => {
+    const props = (
+      manifesto.contributes as { configuration: { properties: Record<string, unknown> } }
+    ).configuration.properties;
+    expect(Object.keys(props).some((k) => /apikey/i.test(k))).toBe(false);
+  });
+
+  it("a extensão não GRAVA chave no chaveiro", () => {
+    expect(fonte).not.toMatch(/secrets\.store\(\s*"starguard\.apiKey"/);
+  });
+
+  it("uma chave de versão anterior é APAGADA na ativação", () => {
+    // Sem comando para ver ou trocar, ela viraria um segredo órfão que a
+    // extensão continuaria injetando em `process.env` sem ninguém saber.
+    expect(fonte).toMatch(/secrets\.delete\(\s*"starguard\.apiKey"\s*\)/);
+  });
+});
+
 describe("metadados exigidos para publicar", () => {
   it("tem ícone declarado", () => {
     expect((manifesto as unknown as { icon?: string }).icon).toBe("icon.png");

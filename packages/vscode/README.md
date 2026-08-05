@@ -51,8 +51,14 @@ modelo. **A extensão pede consentimento explícito antes da primeira vez.**
 regra, arquivo e linha, tokens e custo. **O código não é persistido**: existe em
 memória durante a análise e é descartado.
 
-**O que você controla:** configure uma chave de IA própria e nada sai da
-máquina; revogue o dispositivo em *Conta → Dispositivos conectados*; desinstale.
+**O que você controla:** a IA só é usada nos analisadores que a exigem —
+**regras de negócio**, **modelagem de ameaças** e a correção assistida. Rodar
+apenas código e dependências não manda nada para lugar nenhum. A extensão
+**pergunta uma vez** antes da primeira chamada, e você pode revogar o
+dispositivo em *Conta → Dispositivos conectados* ou desinstalar.
+
+**A chave de IA é da Starbridge.** Não há chave para você configurar: o custo
+é da conta e fica registrado nela.
 
 ## Segurança da sua conta
 

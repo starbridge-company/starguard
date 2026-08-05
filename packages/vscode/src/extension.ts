@@ -890,10 +890,14 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const auth = new StarGuardAuthProvider(ctx);
   ctx.subscriptions.push(auth);
 
-  // A chave de IA vive no SecretStorage, nunca em `settings.json` — aquele
-  // arquivo é versionado em muitos projetos.
-  const chave = await ctx.secrets.get("starguard.apiKey");
-  if (chave) process.env.ANTHROPIC_API_KEY = chave;
+  // A IA é da conta, e só. Não há chave própria para configurar aqui.
+  //
+  // Uma versão anterior guardava uma `ANTHROPIC_API_KEY` no SecretStorage.
+  // Apagamos a que tiver sobrado: sem comando para ver ou trocar, ela seria
+  // um segredo órfão no chaveiro do sistema que a extensão continuaria
+  // injetando em `process.env` sem ninguém saber. Deixar para trás um segredo
+  // invisível é pior que remover a funcionalidade.
+  await ctx.secrets.delete("starguard.apiKey");
 
   painel = vscode.window.createTreeView("starguard.analyzers", {
     treeDataProvider: arvore,
@@ -981,19 +985,6 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     vscode.commands.registerCommand("starguard.signOut", async () => {
       // O editor cuida da confirmação e chama `removeSession` do provider.
       await vscode.commands.executeCommand("workbench.action.manageTrustedExtensionsForAccount");
-    }),
-
-    vscode.commands.registerCommand("starguard.setApiKey", async () => {
-      const v = await vscode.window.showInputBox({
-        prompt: "ANTHROPIC_API_KEY",
-        password: true,
-        ignoreFocusOut: true,
-      });
-      if (v) {
-        await ctx.secrets.store("starguard.apiKey", v);
-        process.env.ANTHROPIC_API_KEY = v;
-        await arvore.recarregar();
-      }
     }),
 
     vscode.commands.registerCommand("starguard.doctor", async () => {

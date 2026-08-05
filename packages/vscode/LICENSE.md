@@ -40,9 +40,14 @@ qual regra disparou, arquivo e linha, consumo de tokens e custo. **O conteúdo
 do código não é persistido** — ele existe em memória durante a análise e é
 descartado.
 
-**O que você controla.** Não usar a IA pela conta (configure uma chave própria
-e nada sai da máquina); revogar o dispositivo em *Conta → Dispositivos
-conectados*; desinstalar a extensão.
+**O que você controla.** A IA só é acionada pelos analisadores que a exigem
+(regras de negócio, modelagem de ameaças e a correção assistida): usar apenas
+os analisadores de código e de dependências não envia nada. Você também pode
+recusar o consentimento, revogar o dispositivo em *Conta → Dispositivos
+conectados* ou desinstalar a extensão.
+
+**A credencial do provedor de modelo é da Starbridge.** A extensão não aceita
+chave de IA própria; o consumo é da conta e fica registrado nela.
 
 ## 4. Disponibilidade e cota
 

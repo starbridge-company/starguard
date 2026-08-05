@@ -2,7 +2,7 @@
   "name": "starguard-vscode",
   "displayName": "StarGuard",
   "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "starbridge",
   "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
@@ -48,10 +48,6 @@
         "icon": "$(clear-all)"
       },
       {
-        "command": "starguard.setApiKey",
-        "title": "StarGuard: definir a chave de IA"
-      },
-      {
         "command": "starguard.doctor",
         "title": "StarGuard: diagnóstico"
       },
@@ -94,10 +90,6 @@
         },
         {
           "command": "starguard.doctor",
-          "when": "view == starguard.analyzers"
-        },
-        {
-          "command": "starguard.setApiKey",
           "when": "view == starguard.analyzers"
         }
       ],

@@ -17,8 +17,23 @@ import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { oauthCodes } from "@/db/schema";
 
-/** Vida do código. Curta de propósito: ele só precisa sobreviver a um redirect. */
-const TTL_MS = 60_000;
+/**
+ * Vida do código. Curta de propósito — mas não tão curta que o redirect não
+ * caiba nela.
+ *
+ * Eram 60 s, pensados para um salto automático de navegador. O salto para um
+ * aplicativo nativo não é automático: o navegador exige um clique novo para
+ * abrir `vscode://`, e depois ainda pergunta "abrir o Visual Studio Code?" e o
+ * editor pergunta se aceita a URI. São três confirmações humanas dentro da
+ * janela, e 60 s não bastam para quem lê antes de clicar.
+ *
+ * A RFC 6749 §4.1.2 recomenda **no máximo 10 minutos**; 2 min continua cinco
+ * vezes mais apertado que isso. O que sustenta a segurança aqui não é o
+ * relógio: o código é de uso único, guardado hasheado, amarrado a
+ * `client_id` + `redirect_uri` + `code_challenge` — e sem o `code_verifier`,
+ * que nunca sai do cliente, um código interceptado não vale nada.
+ */
+const TTL_MS = 120_000;
 
 function hash(code: string): string {
   return createHash("sha256").update(code).digest("hex");
