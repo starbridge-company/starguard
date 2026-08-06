@@ -7,16 +7,20 @@
 // analisador. NODE-ONLY.
 // ============================================================
 import { execFile } from "node:child_process";
-import { cpus } from "node:os";
+
 import { promisify } from "node:util";
-import { BIN, ENGINES, sastConfig } from "../config";
+import { BIN, ENGINES, sastConfig, sastJobs, sastMaxMemoryMb } from "../config";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
 import { comSocorroLocal, probeBinary } from "../binaries";
 import { enrichFindings } from "../enrich";
 import { makeCodeFixer } from "../fix/code-fixer";
 import { empacotarParaScan } from "../bundle";
-import { callRemoteScan, getScanTransport, usingRemoteScan } from "../scan-transport";
+import {
+  callRemoteScanPartido,
+  getScanTransport,
+  usingRemoteScan,
+} from "../scan-transport";
 import type { Analyzer } from "../contracts";
 import type { Locale } from "../i18n/config";
 import type { Vulnerability } from "../types";
@@ -55,6 +59,19 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
   //
   // Medido neste repositório (272 arquivos, ruleset local completo):
   // `--timeout 0` sem `--jobs` → **62,7 s**; com estes argumentos → **54,9 s**.
+  // ---- Por que `--jobs` deixou de sair de `os.cpus()` ----
+  //
+  // Dentro de um contêiner, `os.cpus()` conta os núcleos do HOSPEDEIRO. No
+  // servidor (0,5 CPU, 512 MB) ele respondia 8, e o scan abria oito processos
+  // numa caixa que comporta um: a memória estourava, a INSTÂNCIA MORRIA no meio
+  // da requisição e o editor recebia a página de erro da borda. Chegava como
+  // "403" no SAST e "502" no SCA que rodava em paralelo — dois analisadores
+  // derrubados por um. Ver AUDITORIA.md#ARQ-15.
+  //
+  // Na máquina de quem desenvolve nada muda: sem cgroup com limite, o valor
+  // continua sendo o número de núcleos.
+  const jobs = sastJobs();
+  const memoria = sastMaxMemoryMb();
   const args = [
     "--config",
     sastConfig(),
@@ -62,10 +79,9 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
     "--quiet",
     "--timeout",
     String(Number(process.env.SAST_RULE_TIMEOUT ?? 5)),
-    // Explícito porque o padrão varia entre compilações do Opengrep, e uma que
-    // caia para 1 processo transforma um scan de um minuto num de dez.
     "--jobs",
-    String(Math.max(1, cpus().length)),
+    String(jobs),
+    ...(memoria ? ["--max-memory", String(memoria)] : []),
     ".",
   ];
 
@@ -103,17 +119,28 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
  * manifestos, e é por isso que a interface separa os dois na hora de pedir
  * consentimento.
  */
-async function sastRemoto(dir: string, locale: Locale): Promise<Vulnerability[]> {
+async function sastRemoto(
+  dir: string,
+  locale: Locale,
+  report?: (m: string) => void
+): Promise<Vulnerability[]> {
   const t = getScanTransport();
   if (t.kind !== "remote") return runSast(dir);
 
   const pacote = await empacotarParaScan(dir, "sast");
   if (pacote.files.length === 0) return [];
-  const cru = await callRemoteScan(t, {
-    analyzer: "sast",
-    files: pacote.files,
-    locale,
-  });
+  // Partido quando recusado inteiro: é o pacote GRANDE que apanha de quem está
+  // no meio do caminho, e o SAST é justamente o que manda código-fonte.
+  //
+  // A divisão é ANUNCIADA. Ela deixa a análise mais lenta e, no limite, faz um
+  // achado que dependa de dois arquivos em metades diferentes se perder —
+  // acontecer em silêncio seria entregar um resultado menor com cara de
+  // completo, que é o UX-15 outra vez.
+  const cru = await callRemoteScanPartido(
+    t,
+    { analyzer: "sast", files: pacote.files, locale },
+    () => report?.("reenviando em partes")
+  );
   return (cru ?? []) as Vulnerability[];
 }
 
@@ -142,7 +169,7 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
     ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sast);
     const achados = usingRemoteScan()
       ? await comSocorroLocal(
-          () => sastRemoto(dir, ctx.locale),
+          () => sastRemoto(dir, ctx.locale, (m) => ctx.report?.(m)),
           () => runSast(dir),
           sastBinary(),
           ctx

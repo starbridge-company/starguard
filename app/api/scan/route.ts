@@ -34,9 +34,19 @@ export const dynamic = "force-dynamic";
 // Um scan de repositório grande passa dos 30 s padrão de algumas plataformas.
 export const maxDuration = 300;
 
-/** Teto do pacote. Acima disto a resposta é 413, antes de escrever no disco. */
-const MAX_BYTES = 16 * 1024 * 1024;
-const MAX_FILES = 2000;
+/**
+ * Teto do pacote. Acima disto a resposta é 413, antes de escrever no disco.
+ *
+ * Configurável por ambiente porque o teto certo é o da CAIXA, e quem hospeda é
+ * quem sabe qual é. O padrão vale para uma instância pequena: um pacote que o
+ * servidor aceita e não consegue processar é pior que um recusado — ele derruba
+ * a instância, e com ela as requisições dos vizinhos (AUDITORIA.md#ARQ-15).
+ *
+ * Recusar aqui não deixa ninguém sem análise: o cliente divide o pacote e
+ * reenvia em partes. Ver `callRemoteScanPartido`.
+ */
+const MAX_BYTES = Number(process.env.SCAN_MAX_BYTES) || 8 * 1024 * 1024;
+const MAX_FILES = Number(process.env.SCAN_MAX_FILES) || 800;
 
 interface ArquivoRecebido {
   path: string;

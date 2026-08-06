@@ -13,6 +13,7 @@
 // já tem um `.env` em produção não deveria precisar reescrevê-lo por causa de
 // uma reorganização de pastas.
 // ============================================================
+import { memoriaDisponivelMb, paralelismoDisponivel } from "./container";
 import type { AIProvider, AnalyzerId, PhaseKey, StepAIConfig } from "./types";
 
 const DEFAULT_PROVIDER = (process.env.AI_PROVIDER as AIProvider) || "anthropic";
@@ -193,6 +194,38 @@ export const BIN = {
 // ele FALHA no meio da análise, em vez de dizer que falta configuração.
 export function sastConfig(): string {
   return process.env.SAST_RULES || "auto";
+}
+
+/**
+ * Quantos processos o SAST pode abrir — AUDITORIA.md#ARQ-15.
+ *
+ * Sai do CGROUP, não de `os.cpus()`. A diferença derrubou o servidor: dentro do
+ * contêiner, `os.cpus()` conta os núcleos do hospedeiro, e o scan abria oito
+ * processos numa instância de meia CPU e 512 MB. A memória estourava, a
+ * instância morria no meio da requisição e o editor recebia a página de erro da
+ * borda — sem corpo JSON, o que fazia a mensagem virar "403" sem autor.
+ *
+ * `SAST_JOBS` tem precedência: quem hospeda sabe da própria caixa.
+ */
+export function sastJobs(): number {
+  const env = Number(process.env.SAST_JOBS);
+  if (Number.isFinite(env) && env >= 1) return Math.floor(env);
+  return paralelismoDisponivel();
+}
+
+/**
+ * Teto de memória por processo do SAST, em MB, ou `null` para não passar a
+ * flag. Derivado do limite do contêiner, dividido pelos processos e com folga
+ * para o Node — que também mora nesta caixa.
+ */
+export function sastMaxMemoryMb(): number | null {
+  const env = Number(process.env.SAST_MAX_MEMORY_MB);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  const total = memoriaDisponivelMb();
+  if (!total) return null;
+  // Metade da caixa para os scanners, dividida entre os processos. A outra
+  // metade é do Node, do JSON de saída e do sistema.
+  return Math.max(128, Math.floor((total * 0.5) / sastJobs()));
 }
 
 // Resumo legível para exibir no header/relatório ("como está configurado agora").

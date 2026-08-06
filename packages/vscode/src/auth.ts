@@ -120,6 +120,8 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
   private readonly assinaturas: vscode.Disposable[] = [];
   /** Access token em memória: dura 15 min e não vale a pena persistir. */
   private accessEmMemoria?: { token: string; expiraEm: number };
+  /** Renovação em voo. Quem chegar durante ela ESPERA, não abre outra. */
+  private renovando?: Promise<string | null>;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
     this.assinaturas.push(
@@ -343,6 +345,34 @@ export class StarGuardAuthProvider implements vscode.AuthenticationProvider, vsc
   private async accessToken(guardado: Guardado): Promise<string | null> {
     // Margem de 30 s: um token que expira no meio de uma chamada de análise
     // longa faria a requisição falhar por um detalhe de relógio.
+    if (this.accessEmMemoria && this.accessEmMemoria.expiraEm > Date.now() + 30_000) {
+      return this.accessEmMemoria.token;
+    }
+
+    // UMA renovação por vez — AUDITORIA.md#SEC-16.
+    //
+    // O orquestrador roda os analisadores EM PARALELO, e cada um pede o token
+    // antes de falar com o servidor. Com o access expirado, dois pedidos
+    // simultâneos disparavam duas renovações com o MESMO refresh — e a rotação
+    // é atômica no servidor de propósito (`token.test.ts`: dez rotações
+    // simultâneas, uma vence). O perdedor recebia recusa de reuso, e o sintoma
+    // aparecia num analisador só, aleatoriamente: o outro tinha renovado
+    // primeiro e seguia funcionando.
+    //
+    // Pior que a falha: o perdedor GRAVAVA o refresh dele por cima do que o
+    // vencedor tinha acabado de guardar, deixando um token já rotacionado no
+    // chaveiro — o que faz a sessão inteira cair na próxima abertura do editor.
+    if (this.renovando) return this.renovando;
+    this.renovando = this.renovar(guardado).finally(() => {
+      this.renovando = undefined;
+    });
+    return this.renovando;
+  }
+
+  /** Renovação de verdade. Só chega aqui uma por vez — ver `accessToken`. */
+  private async renovar(guardado: Guardado): Promise<string | null> {
+    // Reconferido DENTRO da fila: quem esperou a renovação de outro já tem
+    // token novo em mãos e não precisa gastar mais uma rotação.
     if (this.accessEmMemoria && this.accessEmMemoria.expiraEm > Date.now() + 30_000) {
       return this.accessEmMemoria.token;
     }

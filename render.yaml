@@ -77,3 +77,36 @@ services:
       # remoto a cada análise, o que precisa de rede e de CA confiável.
       - key: SAST_RULES
         value: /opt/opengrep-rules
+
+      # ---- O tamanho da caixa — AUDITORIA.md#ARQ-15 ----
+      #
+      # O plano `starter` é 0,5 CPU e 512 MB. Dentro do contêiner, `os.cpus()`
+      # conta os núcleos do HOSPEDEIRO: o scan abria oito processos do opengrep
+      # aqui dentro, estourava a memória e **matava a instância no meio da
+      # requisição**. O editor recebia 403 e 502 — páginas de erro da borda, sem
+      # corpo JSON — e o analisador que morria derrubava junto o que rodava em
+      # paralelo.
+      #
+      # O código já lê o cgroup e chega sozinho a `1`; estes valores são
+      # explícitos para que o número apareça no painel do Render, ao lado do
+      # plano, em vez de ficar escondido numa dedução.
+      #
+      # Ao subir de plano, suba estes três juntos — senão a caixa cresce e o
+      # trabalho não.
+      - key: SAST_JOBS
+        value: "1"
+      - key: SAST_MAX_MEMORY_MB
+        value: "200"
+
+      # Teto do que UMA requisição de scan carrega. Um pacote aceito e não
+      # processado é pior que um recusado: o cliente divide e reenvia em partes,
+      # mas a instância derrubada não responde a ninguém.
+      - key: SCAN_MAX_FILES
+        value: "800"
+      - key: SCAN_MAX_BYTES
+        value: "8388608"
+
+      # O Node divide a caixa com dois scanners. Sem teto explícito ele cresce
+      # até o limite do contêiner e sobra menos ainda para o opengrep.
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=256"

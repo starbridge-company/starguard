@@ -174,7 +174,19 @@ describe("argumentos do SAST", () => {
     // O padrão varia entre compilações do Opengrep, e uma que caia para 1
     // processo transforma um scan de um minuto num de dez.
     expect(fonte).toContain('"--jobs"');
-    expect(fonte).toContain("cpus().length");
+  });
+
+  it("…e sai do CONTÊINER, não de `os.cpus()` — AUDITORIA.md#ARQ-15", () => {
+    // Era `cpus().length`, que dentro de um contêiner conta os núcleos do
+    // HOSPEDEIRO: oito processos do opengrep numa instância de meia CPU e
+    // 512 MB. A memória estourava e a instância morria no meio da requisição —
+    // o editor recebia 403 e 502 de páginas de erro, sem corpo JSON.
+    expect(fonte).toContain("sastJobs()");
+    expect(fonte).not.toContain("cpus().length");
+  });
+
+  it("o teto de memória por processo é passado quando a caixa tem limite", () => {
+    expect(fonte).toContain("--max-memory");
   });
 });
 
@@ -250,5 +262,81 @@ describe("403 sem autor não chega mais à tela (UX-27)", () => {
     responder(500, "", {});
     const erro = await chamar().catch((e) => e as Error);
     expect(erro.message).toContain("500");
+  });
+});
+
+describe("pacote recusado inteiro é reenviado em PARTES (UX-27)", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+    setScanTransport({ kind: "local" });
+  });
+
+  const transporte = {
+    kind: "remote" as const,
+    baseUrl: "https://exemplo.invalido",
+    getToken: async () => "tok",
+  };
+
+  const arquivos = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ path: `a${i}.ts`, content: "x" }));
+
+  const partido = async (files: { path: string; content: string }[]) => {
+    const { callRemoteScanPartido } = await import("../src/scan-transport");
+    return callRemoteScanPartido(transporte, { analyzer: "sast", files, locale: "pt-BR" });
+  };
+
+  /** Recusa sem corpo nosso (a CDN) acima de `teto` arquivos; abaixo, responde. */
+  function servidorQueRecusaPacoteGrande(teto: number, chamadas: number[]) {
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      const n = (JSON.parse(init.body) as { files: unknown[] }).files.length;
+      chamadas.push(n);
+      if (n > teto) {
+        return new Response("<html>Blocked</html>", {
+          status: 403,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ result: Array.from({ length: n }, (_, i) => ({ id: `V-${i}` })) }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  it("divide até passar e devolve TODOS os achados", async () => {
+    const chamadas: number[] = [];
+    servidorQueRecusaPacoteGrande(2, chamadas);
+    const r = (await partido(arquivos(8))) as unknown[];
+    // 8 recusado, 4 e 4 recusados, quatro pacotes de 2 aceitos: nada se perde.
+    expect(r).toHaveLength(8);
+    expect(chamadas[0]).toBe(8);
+    expect(chamadas.filter((n) => n === 2)).toHaveLength(4);
+  });
+
+  it("um arquivo só não tem como dividir — o erro sobe", async () => {
+    const chamadas: number[] = [];
+    servidorQueRecusaPacoteGrande(0, chamadas);
+    await expect(partido(arquivos(1))).rejects.toThrow(RemoteScanError);
+  });
+
+  it("recusa NOSSA não divide — dividir multiplicaria a mesma falha", async () => {
+    const chamadas: number[] = [];
+    globalThis.fetch = (async (_u: string, init: { body: string }) => {
+      chamadas.push((JSON.parse(init.body) as { files: unknown[] }).files.length);
+      return new Response(JSON.stringify({ error: "Sessão expirada." }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    await expect(partido(arquivos(8))).rejects.toThrow("Sessão expirada.");
+    expect(chamadas).toEqual([8]);
+  });
+
+  it("pacote que passa de primeira NÃO é dividido", async () => {
+    const chamadas: number[] = [];
+    servidorQueRecusaPacoteGrande(100, chamadas);
+    await partido(arquivos(8));
+    expect(chamadas).toEqual([8]);
   });
 });

@@ -145,6 +145,57 @@ function causaDeRede(e: unknown): string {
  */
 const TETO_MS = 90_000;
 
+/**
+ * O scan remoto, partindo o pacote quando ele é recusado inteiro.
+ *
+ * O caso que motivou isto: `sca` passava e `sast` levava 403 do mesmo servidor,
+ * com o mesmo token, no mesmo minuto. A diferença entre os dois é o TAMANHO —
+ * o SCA manda manifestos (kilobytes) e o SAST manda o código-fonte (megabytes).
+ * A recusa vinha sem corpo JSON, ou seja, não era nossa: alguém no caminho
+ * (CDN, proxy de empresa, inspeção de conteúdo do antivírus) recusou o pacote
+ * grande e devolveu uma página.
+ *
+ * Não dá para consertar o que está no meio do caminho de quem usa. Dá para
+ * parar de depender de um pacote único: metade de cada vez, até passar. É o
+ * mesmo recurso que a revisão por IA já usa quando a primeira tentativa não
+ * cabe — reduzir o escopo e tentar de novo.
+ *
+ * **Só divide quando a recusa NÃO é nossa** (`unreachable`). Um 413 do
+ * StarGuard já diz o tamanho certo, e uma sessão expirada continuaria expirada
+ * em qualquer tamanho — dividir ali seria multiplicar a mesma falha.
+ *
+ * O resultado de cada analisador é uma LISTA de achados, então juntar é
+ * concatenar. Um achado que dependesse de dois arquivos em metades diferentes
+ * seria perdido; nas regras de padrão do Opengrep, que olham arquivo a arquivo,
+ * isso não acontece. Fica declarado como limitação, não como surpresa.
+ */
+export async function callRemoteScanPartido(
+  t: RemoteScanTransport,
+  input: RemoteScanInput,
+  aviso?: (partes: number) => void
+): Promise<unknown> {
+  try {
+    return await callRemoteScan(t, input);
+  } catch (e) {
+    // `too_large` entra junto: é a MESMA situação dita com todas as letras
+    // pelo servidor, em vez de deduzida de uma página de erro. Recusar por
+    // tamanho e não tentar menor seria desistir com a solução na mão.
+    const podeDividir =
+      e instanceof RemoteScanError &&
+      (e.code === "unreachable" || e.code === "too_large") &&
+      input.files.length > 1;
+    if (!podeDividir || input.signal?.aborted) throw e;
+
+    const meio = Math.ceil(input.files.length / 2);
+    aviso?.(2);
+    const partes = await Promise.all([
+      callRemoteScanPartido(t, { ...input, files: input.files.slice(0, meio) }, aviso),
+      callRemoteScanPartido(t, { ...input, files: input.files.slice(meio) }, aviso),
+    ]);
+    return partes.flatMap((p) => (Array.isArray(p) ? p : []));
+  }
+}
+
 export async function callRemoteScan(
   t: RemoteScanTransport,
   input: RemoteScanInput
