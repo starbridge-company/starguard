@@ -859,6 +859,11 @@ export const PT_BR = {
     "Precisa de uma chave de IA e nenhuma foi configurada.",
   "analyzer.reason.cancelled": "Cancelado antes de rodar.",
 
+  // Estado do scan remoto, exibido no cartão enquanto ele acontece.
+  "scan.queued": "na fila — aguardando o outro scan terminar",
+  "scan.split": "reenviando em partes menores",
+  "scan.server": "no servidor",
+
   // Rodou, mas com menos contexto do que teria em conjunto. É dito em voz
   // alta: um resultado degradado silencioso passa por resultado completo.
   "analyzer.degraded.threat":
@@ -1930,6 +1935,10 @@ const EN: Record<MessageKey, string> = {
   "analyzer.reason.no_ai_key": "Needs an AI key and none is configured.",
   "analyzer.reason.cancelled": "Cancelled before it ran.",
 
+  "scan.queued": "queued — waiting for the other scan to finish",
+  "scan.split": "resending in smaller parts",
+  "scan.server": "on the server",
+
   "analyzer.degraded.threat":
     "Threat modeling was not part of this run: there were no declared requirements to check.",
   "analyzer.degraded.sast":
@@ -2973,6 +2982,10 @@ const ES: Record<MessageKey, string> = {
   "analyzer.reason.engine_off": "Desactivado por configuración.",
   "analyzer.reason.no_ai_key": "Necesita una clave de IA y no hay ninguna configurada.",
   "analyzer.reason.cancelled": "Cancelado antes de ejecutarse.",
+
+  "scan.queued": "en cola — esperando a que termine el otro escaneo",
+  "scan.split": "reenviando en partes más pequeñas",
+  "scan.server": "en el servidor",
 
   "analyzer.degraded.threat":
     "El modelado de amenazas no formó parte de esta ejecución: no había requisitos declarados que verificar.",

@@ -386,3 +386,114 @@ describe("a divisão é SEQUENCIAL (ARQ-15)", () => {
     expect(pico).toBe(1);
   });
 });
+
+describe("fila do CLIENTE: marcar os dois e rodar junto continua valendo (ARQ-15)", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+    setScanTransport({ kind: "local" });
+  });
+
+  const t = {
+    kind: "remote" as const,
+    baseUrl: "https://exemplo.invalido",
+    getToken: async () => "tok",
+  };
+
+  it("os dois scans passam, um de cada vez, e ninguém é recusado", async () => {
+    // O orquestrador dispara `sast` e `sca` em paralelo — isso não mudou. O
+    // que mudou é que a conversa com o servidor é serializada AQUI, com aviso,
+    // em vez de os dois scanners nativos se atropelarem lá.
+    let emVoo = 0;
+    let pico = 0;
+    globalThis.fetch = (async () => {
+      emVoo++;
+      pico = Math.max(pico, emVoo);
+      await new Promise((r) => setTimeout(r, 10));
+      emVoo--;
+      return new Response(JSON.stringify({ result: [{ id: "V" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const { callRemoteScan } = await import("../src/scan-transport");
+    const avisos: string[] = [];
+    const [a, b] = await Promise.all([
+      callRemoteScan(t, { analyzer: "sast", files: [], locale: "pt-BR" }),
+      callRemoteScan(t, {
+        analyzer: "sca",
+        files: [],
+        locale: "pt-BR",
+        report: (m) => avisos.push(m),
+      }),
+    ]);
+
+    // Nenhum perdido, nenhum erro.
+    expect(a).toEqual([{ id: "V" }]);
+    expect(b).toEqual([{ id: "V" }]);
+    // E nunca dois no ar ao mesmo tempo.
+    expect(pico).toBe(1);
+  });
+
+  it("quem espera é AVISADO — «na fila» é estado, não erro", async () => {
+    globalThis.fetch = (async () => {
+      await new Promise((r) => setTimeout(r, 15));
+      return new Response(JSON.stringify({ result: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const { callRemoteScan, MSG_NA_FILA } = await import("../src/scan-transport");
+    const avisos: string[] = [];
+    await Promise.all([
+      callRemoteScan(t, { analyzer: "sast", files: [], locale: "pt-BR" }),
+      callRemoteScan(t, {
+        analyzer: "sca",
+        files: [],
+        locale: "pt-BR",
+        report: (m) => avisos.push(m),
+      }),
+    ]);
+    expect(avisos).toContain(MSG_NA_FILA);
+  });
+
+  it("o primeiro NÃO recebe aviso de fila — ele não esperou ninguém", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ result: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof globalThis.fetch;
+
+    const { callRemoteScan } = await import("../src/scan-transport");
+    const avisos: string[] = [];
+    await callRemoteScan(t, {
+      analyzer: "sast",
+      files: [],
+      locale: "pt-BR",
+      report: (m) => avisos.push(m),
+    });
+    expect(avisos).toEqual([]);
+  });
+
+  it("scan que falha não trava a fila para o seguinte", async () => {
+    let n = 0;
+    globalThis.fetch = (async () => {
+      n++;
+      if (n === 1) throw new Error("caiu");
+      return new Response(JSON.stringify({ result: [{ id: "V" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const { callRemoteScan } = await import("../src/scan-transport");
+    const primeiro = callRemoteScan(t, { analyzer: "sast", files: [], locale: "pt-BR" }).catch(
+      (e: Error) => e
+    );
+    const segundo = callRemoteScan(t, { analyzer: "sca", files: [], locale: "pt-BR" });
+    await primeiro;
+    await expect(segundo).resolves.toEqual([{ id: "V" }]);
+  });
+});

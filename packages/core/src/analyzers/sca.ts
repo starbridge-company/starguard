@@ -17,6 +17,8 @@ import { makeDepsFixer } from "../fix/deps-fixer";
 import { empacotarParaScan } from "../bundle";
 import { callRemoteScan, getScanTransport, usingRemoteScan } from "../scan-transport";
 import type { Analyzer } from "../contracts";
+import { translate } from "../i18n/translate";
+import type { MessageKey } from "../i18n/messages";
 import type { Locale } from "../i18n/config";
 import type { DependencyVuln } from "../types";
 
@@ -70,7 +72,11 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
  * escrita por você sai da máquina — o que faz do SCA remoto a opção sem custo
  * de privacidade.
  */
-async function scaRemoto(dir: string, locale: Locale): Promise<DependencyVuln[]> {
+async function scaRemoto(
+  dir: string,
+  locale: Locale,
+  report?: (m: string) => void
+): Promise<DependencyVuln[]> {
   const t = getScanTransport();
   if (t.kind !== "remote") return runSca(dir);
 
@@ -85,6 +91,9 @@ async function scaRemoto(dir: string, locale: Locale): Promise<DependencyVuln[]>
     analyzer: "sca",
     files: pacote.files,
     locale,
+    // "na fila" chega por aqui: o servidor roda um scanner por vez, e esperar
+    // a vez é estado a mostrar, não erro a relatar.
+    report: (m) => report?.(translate(locale, m as MessageKey)),
   });
   return (cru ?? []) as DependencyVuln[];
 }
@@ -107,10 +116,10 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   },
 
   async run(ctx) {
-    ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sca);
+    ctx.report?.(usingRemoteScan() ? translate(ctx.locale, "scan.server") : ENGINES.sca);
     const deps = usingRemoteScan()
       ? await comSocorroLocal(
-          () => scaRemoto(ctx.workspace!.root, ctx.locale),
+          () => scaRemoto(ctx.workspace!.root, ctx.locale, (m) => ctx.report?.(m)),
           () => runSca(ctx.workspace!.root),
           BIN.trivy,
           ctx

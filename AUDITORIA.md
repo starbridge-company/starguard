@@ -534,6 +534,22 @@ aberto:
   o `/api/health` do servidor e imprime, em voz alta, quando um scanner está
   ausente do outro lado. Era o `UX-15` valendo só dentro do processo: a tela
   dizia `✔ sast — servidor` enquanto o servidor não tinha opengrep nenhum.
+- **A fila ficou no CLIENTE, não no servidor** — corrigido no mesmo dia depois
+  da pergunta certa: *"então não posso mais marcar os dois e rodar juntos?"*.
+  Pode, e a resposta a essa pergunta é o desenho. A primeira versão recusava com
+  `429` quando a fila enchia, o que transforma a defesa do servidor em defeito
+  na cara de quem não fez nada errado. Agora `sast` e `sca` continuam saindo em
+  paralelo do orquestrador, mas a CONVERSA com o servidor é serializada no
+  transporte — e quem espera **é avisado**: o cartão mostra "na fila —
+  aguardando o outro scan terminar". Ninguém é recusado, nada se perde.
+  - O contador é lido na ENTRADA da fila, não quando o scan começa. Os dois
+    analisadores são disparados no mesmo instante e o primeiro só executa no
+    microtask seguinte: um sinalizador de "está rodando" ainda estaria falso
+    quando o segundo chegasse, e o aviso nunca apareceria. Custou um teste
+    vermelho para ficar claro.
+  - A fila do servidor continua, folgada (`SCAN_QUEUE_MAX=4`), para o caso de
+    várias pessoas ao mesmo tempo — e o cliente passou a tratar `429` como
+    "espere", honrando o `Retry-After`, em vez de desistir.
 - **O que NÃO dá para corrigir por código:** fazer o Render rodar o Dockerfile é
   ação de painel. Ver `PEND-45`.
 

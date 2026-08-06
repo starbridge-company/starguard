@@ -106,6 +106,55 @@ export interface RemoteScanInput {
   files: ArquivoEmpacotado[];
   locale: Locale;
   signal?: AbortSignal;
+  /** Para dizer na tela o que está acontecendo — inclusive "na fila". */
+  report?: (mensagem: string) => void;
+}
+
+// ------------------------------------------------------------
+// UM scan remoto por vez, POR CLIENTE — AUDITORIA.md#ARQ-15
+// ------------------------------------------------------------
+//
+// O orquestrador roda os analisadores em paralelo, e isso continua certo: a
+// modelagem, as regras e as skills não disputam nada. Mas `sast` e `sca` acabam
+// no MESMO servidor, e lá são dois scanners nativos famintos — o opengrep
+// carrega o ruleset inteiro, o trivy sobe o banco de vulnerabilidades. Juntos,
+// eles derrubavam a instância.
+//
+// A fila fica aqui, e não só no servidor, por uma razão de produto: daqui dá
+// para AVISAR. O servidor só pode recusar (e recusa vira erro na cara de quem
+// não fez nada de errado); o cliente pode dizer "na fila" e esperar a vez, sem
+// perder nada. Quem marcou os dois analisadores continua marcando os dois.
+//
+// Serializa só o que fala com o servidor. O resto da execução segue paralelo.
+let filaRemota: Promise<unknown> = Promise.resolve();
+/**
+ * Quantos já entraram na fila e ainda não saíram.
+ *
+ * Contado no momento da ENTRADA, e não quando o scan começa a rodar. A
+ * diferença não é sutil: `sast` e `sca` são disparados no mesmo instante, e o
+ * primeiro só começa de fato no próximo microtask — um sinalizador de "está
+ * rodando" ainda estaria falso quando o segundo chegasse, e ninguém receberia o
+ * aviso de fila.
+ */
+let aguardando = 0;
+
+async function naFilaRemota<T>(fn: () => Promise<T>, aoEsperar?: () => void): Promise<T> {
+  // Quem encontra alguém na frente é quem espera — e é avisado.
+  if (aguardando > 0) aoEsperar?.();
+  aguardando++;
+
+  // `then(fn, fn)`: a fila encadeia o DESFECHO, não o resultado. Um scan que
+  // falha não pode travar a vez de quem vem depois.
+  const minhaVez = filaRemota.then(fn, fn);
+  filaRemota = minhaVez.then(
+    () => undefined,
+    () => undefined
+  );
+  try {
+    return await minhaVez;
+  } finally {
+    aguardando--;
+  }
 }
 
 /**
@@ -144,6 +193,16 @@ function causaDeRede(e: unknown): string {
  * já encontra a instância acordada pela primeira.
  */
 const TETO_MS = 90_000;
+
+/**
+ * Quanto esperar entre as tentativas depois de um 429, quando o servidor não
+ * diz o tempo no `Retry-After`. Cresce porque a fila do outro lado esvazia no
+ * ritmo de um scan, não no de uma requisição.
+ */
+const ESPERAS_429 = [3_000, 8_000, 20_000] as const;
+
+/** Teto de UMA espera: um `Retry-After` exagerado não trava o editor. */
+const TETO_ESPERA_MS = 30_000;
 
 /**
  * O scan remoto, partindo o pacote quando ele é recusado inteiro.
@@ -214,6 +273,21 @@ export async function callRemoteScan(
   t: RemoteScanTransport,
   input: RemoteScanInput
 ): Promise<unknown> {
+  // A fila envolve a chamada inteira. Quem chega e encontra outro scan em voo
+  // é avisado e espera a vez — ninguém é recusado por isso.
+  return naFilaRemota(
+    () => enviarScan(t, input),
+    () => input.report?.(MSG_NA_FILA)
+  );
+}
+
+/** Chave da mensagem "na fila". Quem traduz é o analisador, que tem o idioma. */
+export const MSG_NA_FILA = "scan.queued";
+
+async function enviarScan(
+  t: RemoteScanTransport,
+  input: RemoteScanInput
+): Promise<unknown> {
   const token = await t.getToken();
   if (!token) {
     throw new RemoteScanError("Sessão expirada. Entre novamente.", "unauthorized");
@@ -261,6 +335,35 @@ export async function callRemoteScan(
     } catch (segunda) {
       throw new RemoteScanError(
         `Não foi possível falar com o servidor (${t.baseUrl}): ${causaDeRede(segunda)}`,
+        "unreachable"
+      );
+    }
+  }
+
+  // ---- 429 é "espere", não "desista" ----
+  //
+  // O servidor executa UM scanner por vez (o opengrep e o trivy juntos não
+  // cabem na mesma caixa), e recusa com 429 + `Retry-After` quando a fila
+  // enche. Tratar isso como falha definitiva transformaria a defesa do servidor
+  // num defeito do cliente: quem pediu dois analisadores veria um deles morrer
+  // por estar na vez errada.
+  //
+  // Espera o que o servidor MANDOU esperar, com teto: um `Retry-After` grande
+  // demais deixaria o editor parado sem explicação.
+  for (let tentativa = 0; res.status === 429 && tentativa < ESPERAS_429.length; tentativa++) {
+    const pedido = Number(res.headers.get("retry-after"));
+    const espera = Math.min(
+      Number.isFinite(pedido) && pedido > 0 ? pedido * 1000 : ESPERAS_429[tentativa]!,
+      TETO_ESPERA_MS
+    );
+    if (input.signal?.aborted) throw new RemoteScanError("Análise cancelada.", "unreachable");
+    await new Promise((r) => setTimeout(r, espera));
+    if (input.signal?.aborted) throw new RemoteScanError("Análise cancelada.", "unreachable");
+    try {
+      res = await tentar();
+    } catch (e) {
+      throw new RemoteScanError(
+        `Não foi possível falar com o servidor (${t.baseUrl}): ${causaDeRede(e)}`,
         "unreachable"
       );
     }

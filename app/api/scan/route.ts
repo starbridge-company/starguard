@@ -72,8 +72,15 @@ interface ArquivoRecebido {
 let filaDeScan: Promise<unknown> = Promise.resolve();
 let scansNaFila = 0;
 
-/** Quantos podem esperar antes de recusarmos de imediato. */
-const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 2;
+/**
+ * Quantos podem esperar antes de recusarmos de imediato.
+ *
+ * Folgado de propósito: o CLIENTE já serializa os scans dele (ver
+ * `scan-transport.ts`), então um editor sozinho nunca chega aqui. Este teto
+ * existe para o caso de várias pessoas ao mesmo tempo — e mesmo nele a recusa é
+ * `429` com `Retry-After`, que o cliente espera e repete em vez de desistir.
+ */
+const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 4;
 
 async function naFila<T>(fn: () => Promise<T>): Promise<T> {
   scansNaFila++;

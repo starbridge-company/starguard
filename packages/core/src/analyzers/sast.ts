@@ -22,6 +22,8 @@ import {
   usingRemoteScan,
 } from "../scan-transport";
 import type { Analyzer } from "../contracts";
+import { translate } from "../i18n/translate";
+import type { MessageKey } from "../i18n/messages";
 import type { Locale } from "../i18n/config";
 import type { Vulnerability } from "../types";
 
@@ -138,8 +140,14 @@ async function sastRemoto(
   // completo, que é o UX-15 outra vez.
   const cru = await callRemoteScanPartido(
     t,
-    { analyzer: "sast", files: pacote.files, locale },
-    () => report?.("reenviando em partes")
+    {
+      analyzer: "sast",
+      files: pacote.files,
+      locale,
+      // O transporte fala por CHAVE; quem sabe o idioma é o analisador.
+      report: (m) => report?.(translate(locale, m as MessageKey)),
+    },
+    () => report?.(translate(locale, "scan.split"))
   );
   return (cru ?? []) as Vulnerability[];
 }
@@ -166,7 +174,7 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
 
   async run(ctx) {
     const dir = ctx.workspace!.root;
-    ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sast);
+    ctx.report?.(usingRemoteScan() ? translate(ctx.locale, "scan.server") : ENGINES.sast);
     const achados = usingRemoteScan()
       ? await comSocorroLocal(
           () => sastRemoto(dir, ctx.locale, (m) => ctx.report?.(m)),
