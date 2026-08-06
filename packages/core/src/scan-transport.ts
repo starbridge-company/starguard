@@ -186,13 +186,27 @@ export async function callRemoteScanPartido(
       input.files.length > 1;
     if (!podeDividir || input.signal?.aborted) throw e;
 
+    // UMA metade de cada vez, e não `Promise.all`.
+    //
+    // Paralelizar aqui é o instinto errado: a divisão só acontece porque o
+    // outro lado JÁ não deu conta do pacote inteiro. Mandar as duas metades
+    // juntas dobra a carga exatamente no momento em que ela precisa cair — e,
+    // quando a causa é falta de memória no servidor, cada rodada de divisão
+    // multiplica as requisições simultâneas (2, 4, 8) e mantém a instância no
+    // chão. Sequencial é mais lento e é o único que converge.
     const meio = Math.ceil(input.files.length / 2);
     aviso?.(2);
-    const partes = await Promise.all([
-      callRemoteScanPartido(t, { ...input, files: input.files.slice(0, meio) }, aviso),
-      callRemoteScanPartido(t, { ...input, files: input.files.slice(meio) }, aviso),
-    ]);
-    return partes.flatMap((p) => (Array.isArray(p) ? p : []));
+    const primeira = await callRemoteScanPartido(
+      t,
+      { ...input, files: input.files.slice(0, meio) },
+      aviso
+    );
+    const segunda = await callRemoteScanPartido(
+      t,
+      { ...input, files: input.files.slice(meio) },
+      aviso
+    );
+    return [primeira, segunda].flatMap((p) => (Array.isArray(p) ? p : []));
   }
 }
 

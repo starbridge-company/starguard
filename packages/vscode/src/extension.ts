@@ -1735,6 +1735,62 @@ function ganchosDoPainel(): GanchosDoPainel {
 
 
 
+/**
+ * O diagnóstico do SERVIDOR — AUDITORIA.md#ARQ-15.
+ *
+ * Com o transporte remoto, o `probe` de `sast` e `sca` responde "ok, servidor"
+ * sem nunca perguntar ao servidor se ELE tem os scanners. O resultado é o pior
+ * tipo de resposta: a tela diz ✔ e a análise não encontra nada, porque do outro
+ * lado não há opengrep nem trivy instalados.
+ *
+ * Aconteceu de verdade, e custou horas: a produção respondia `"status":
+ * "degraded"` com os dois scanners ausentes enquanto o editor mostrava tudo
+ * verde. É o UX-15 — não confundir "não encontrou" com "não procurou" —
+ * atravessando a fronteira do processo.
+ *
+ * `/api/health` é pública de propósito: não precisa de sessão e não expõe
+ * segredo. Falha de rede aqui não é erro do diagnóstico, é informação.
+ */
+async function diagnosticarServidor(): Promise<void> {
+  if (!usingRemoteScan()) return;
+
+  saida.appendLine("");
+  saida.appendLine(`Servidor (${servidor()})`);
+  try {
+    const res = await fetch(`${servidor()}/api/health`, {
+      signal: AbortSignal.timeout(20_000),
+    });
+    const corpo = (await res.json()) as {
+      status?: string;
+      db?: string;
+      scanners?: { name: string; configured: string; present: boolean }[];
+      scannersMessage?: string;
+    };
+    saida.appendLine(`  status: ${corpo.status ?? res.status} · banco: ${corpo.db ?? "?"}`);
+    for (const s of corpo.scanners ?? []) {
+      saida.appendLine(
+        s.present
+          ? `  ✔ ${s.name} — ${s.configured} instalado no servidor`
+          : `  ✖ ${s.name} — ${s.configured} AUSENTE no servidor: o scan roda e não encontra nada`
+      );
+    }
+    // O aviso repetido em voz alta: um scanner ausente do outro lado é o
+    // motivo mais provável de "analisou e não achou nada".
+    if ((corpo.scanners ?? []).some((s) => !s.present)) {
+      saida.appendLine("");
+      saida.appendLine(
+        "  O servidor não tem os scanners instalados. Enquanto isso, o scan remoto"
+      );
+      saida.appendLine(
+        "  não produz achados — instale-os no host ou use os binários locais."
+      );
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    saida.appendLine(`  ✖ não respondeu: ${msg}`);
+  }
+}
+
 function descreverMotivo(e: PlanEntry): string | undefined {
   if (e.willRun || !e.reason || e.reason === "not_selected") return undefined;
   return translate(
@@ -1906,6 +1962,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
             : `✖ ${nome} — ${t(reasonKey(e.reason!), { bin: e.detail ?? "" })}`
         );
       }
+      await diagnosticarServidor();
     }),
 
     // O que muda a disponibilidade muda a árvore: caminho de binário, idioma,

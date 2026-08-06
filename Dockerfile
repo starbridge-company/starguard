@@ -106,14 +106,44 @@ RUN set -eu; \
 # (.pre-commit-config.yaml, stats/*.yml, templates). Filtrar por conteúdo — só
 # fica o que tem `rules:` no topo — sobrevive a mudanças do upstream, ao
 # contrário de uma lista fixa de exclusões.
+#
+# ---- Por que o ruleset é RECORTADO ----
+#
+# O opengrep carrega TODAS as regras do `--config` na memória antes de olhar o
+# primeiro arquivo. O repositório completo traz dezenas de linguagens que este
+# produto não escaneia (elixir, ocaml, swift, clojure, terraform…) e categorias
+# que não são segurança (best-practice, correctness, performance). Numa
+# instância de 512 MB isso é a diferença entre escanear e ser morto pelo kernel:
+# o processo estourava a memória e derrubava o SERVIDOR junto, não só o scan.
+# Ver AUDITORIA.md#ARQ-15.
+#
+# `OPENGREP_LANGS` é o recorte, e é sobrescritível no build para quem hospeda
+# numa caixa maior ou escaneia outra pilha.
 ARG OPENGREP_RULES_REF=main
+ARG OPENGREP_LANGS="javascript typescript python java go php ruby csharp c generic html"
 RUN set -eu; \
     if git clone --depth 1 --branch "$OPENGREP_RULES_REF" \
          https://github.com/opengrep/opengrep-rules.git /opt/opengrep-rules; then \
       rm -rf /opt/opengrep-rules/.git /opt/opengrep-rules/.github; \
+      # 1. Fora as linguagens que não escaneamos.
+      for dir in /opt/opengrep-rules/*/; do \
+        nome="$(basename "$dir")"; \
+        manter=0; \
+        for lang in $OPENGREP_LANGS; do [ "$nome" = "$lang" ] && manter=1; done; \
+        [ "$manter" = "1" ] || rm -rf "$dir"; \
+      done; \
+      # 2. Fora o que não é regra de SEGURANÇA. O `find` não é zelo estético:
+      #    UM único YAML inválido no --config aborta o scan inteiro (exit 7,
+      #    zero achados). Filtrar por CONTEÚDO — só fica o que tem `rules:` no
+      #    topo — sobrevive a mudanças do upstream, ao contrário de uma lista
+      #    fixa de exclusões.
+      find /opt/opengrep-rules -type d \
+        \( -name 'best-practice' -o -name 'correctness' -o -name 'performance' \
+           -o -name 'maintainability' -o -name 'portability' \) -prune -exec rm -rf {} +; \
       find /opt/opengrep-rules -type f \( -name '*.yaml' -o -name '*.yml' \) \
         ! -exec grep -qE '^rules:' {} \; -delete; \
       echo "regras validas: $(find /opt/opengrep-rules -name '*.y*ml' | wc -l)"; \
+      echo "tamanho do ruleset: $(du -sh /opt/opengrep-rules | cut -f1)"; \
     else \
       rm -rf /opt/opengrep-rules; \
       echo "AVISO: opengrep-rules nao clonado — SAST usara o registro remoto (auto)."; \

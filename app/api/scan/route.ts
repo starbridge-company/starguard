@@ -54,6 +54,44 @@ interface ArquivoRecebido {
 }
 
 /**
+ * UM scan por vez nesta instância — AUDITORIA.md#ARQ-15.
+ *
+ * O cliente pede `sast` e `sca` EM PARALELO, porque do lado dele são dois
+ * analisadores independentes. Do lado de cá são dois scanners nativos famintos
+ * dividindo a mesma caixa: o opengrep carrega o ruleset inteiro e o trivy sobe
+ * o banco de vulnerabilidades. Juntos, numa instância de 512 MB, o kernel mata
+ * o processo — e aí não morre um scan, morre o SERVIDOR, levando junto todas as
+ * requisições em voo. Foi o que produziu "403 no sast e 502 no sca no mesmo
+ * segundo", nenhum dos dois com corpo JSON.
+ *
+ * Serializar é o que transforma "a instância caiu" em "espere sua vez". A fila
+ * é por instância (estado de módulo): não é coordenação distribuída, é a defesa
+ * mínima de quem está com o processo na mão. Com mais de uma instância, cada
+ * uma protege a si mesma, que é exatamente o necessário.
+ */
+let filaDeScan: Promise<unknown> = Promise.resolve();
+let scansNaFila = 0;
+
+/** Quantos podem esperar antes de recusarmos de imediato. */
+const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 2;
+
+async function naFila<T>(fn: () => Promise<T>): Promise<T> {
+  scansNaFila++;
+  const minhaVez = filaDeScan.then(fn, fn);
+  // A fila encadeia o DESFECHO, não o resultado: um scan que falha não pode
+  // travar a fila para sempre.
+  filaDeScan = minhaVez.then(
+    () => undefined,
+    () => undefined
+  );
+  try {
+    return await minhaVez;
+  } finally {
+    scansNaFila--;
+  }
+}
+
+/**
  * O caminho relativo, ou `null` se ele tentar sair da raiz.
  *
  * Recusa: caminho absoluto, `..` em qualquer posição, e o caso do Windows
@@ -89,6 +127,14 @@ export async function POST(req: NextRequest) {
   const rl = await rateLimit(`scan:${sessao.sub}:${ip}`, { max: 20, windowMs: 60_000 });
   if (!rl.allowed) {
     return jsonError(429, "Muitos scans seguidos. Tente em instantes.", "err.tooManyRequests");
+  }
+
+  // Recusar CEDO, com corpo e status honestos, é melhor que aceitar e morrer:
+  // a instância derrubada não responde nem a esta requisição nem às dos outros.
+  if (scansNaFila >= FILA_MAX) {
+    const res = jsonError(429, "Outro scan está em andamento. Tente em instantes.", "err.tooManyRequests");
+    res.headers.set("Retry-After", "20");
+    return res;
   }
 
   const corpo = (await readJson(req)) as {
@@ -145,10 +191,21 @@ export async function POST(req: NextRequest) {
     const { runSca } = await import("@starguard/core/analyzers/sca");
     const { enrichFindings, enrichDependencies } = await import("@starguard/core/enrich");
 
+    // O scanner nativo roda na FILA; o enriquecimento não. Só o primeiro
+    // disputa memória com o vizinho — segurar a fila durante a chamada de IA
+    // faria um scan barato esperar por uma tradução de texto.
+    // `const` local: dentro da closure da fila, o compilador não sabe que
+    // `raiz` (que o `finally` precisa ver mutável) já foi atribuída.
+    const dir = raiz;
+    const bruto =
+      analyzer === "sast"
+        ? await naFila(() => runSast(dir))
+        : await naFila(() => runSca(dir));
+
     const result =
       analyzer === "sast"
-        ? await enrichFindings(await runSast(raiz), locale)
-        : await enrichDependencies(await runSca(raiz), locale);
+        ? await enrichFindings(bruto as Awaited<ReturnType<typeof runSast>>, locale)
+        : await enrichDependencies(bruto as Awaited<ReturnType<typeof runSca>>, locale);
 
     audit(
       "scan.remote",

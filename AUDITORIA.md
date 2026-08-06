@@ -501,6 +501,42 @@ foram rodados contra o GitHub. Ver `PEND-44`.
   os vizinhos. O dimensionamento por cgroup é a regra geral disso, e é por isso
   que virou módulo com teste, e não uma constante no `sast.ts`.
 
+**Segunda rodada, e a descoberta que muda o quadro (06/08/2026).** O `--jobs`
+não bastou: o Render seguiu reportando `Ran out of memory (used over 512MB)`.
+Foi consultar `/api/health` da produção — rota **pública**, que ninguém tinha
+aberto:
+
+```
+"status":"degraded"
+"scanners":[{"name":"sast","configured":"opengrep","present":false},
+            {"name":"sca","configured":"trivy","present":false}]
+```
+
+- **O servidor não tem os scanners instalados.** Ele não está rodando a imagem
+  Docker: subiu pelo buildpack de Node, que instala dependências npm e mais
+  nada. É o cenário que o cabeçalho do `render.yaml` já descrevia — *"um serviço
+  já existente não passa a seguir este arquivo sozinho"* — e que ninguém tinha
+  verificado depois.
+- **Consequência dupla:** o scan remoto **nunca teve como funcionar** ali, e a
+  memória ia embora processando o JSON de megabytes para, no fim, chamar um
+  binário inexistente.
+- **Um erro meu, corrigido junto:** a divisão em partes do UX-27 usava
+  `Promise.all`. Sobre um servidor que já estava morrendo, cada rodada de
+  divisão **dobrava** as requisições simultâneas (2, 4, 8) e mantinha a
+  instância no chão. Agora é sequencial, com teste que trava o pico em 1.
+- **Três defesas novas do lado do servidor:** fila de **um scan por vez** por
+  instância (o cliente pede `sast` e `sca` em paralelo; do lado de cá são dois
+  scanners nativos dividindo a mesma caixa), recusa imediata com `429` e
+  `Retry-After` quando a fila enche, e o **ruleset recortado** na imagem — só as
+  linguagens que escaneamos e só as regras de segurança, porque o opengrep
+  carrega tudo o que está no `--config` antes de olhar o primeiro arquivo.
+- **E o diagnóstico atravessou a fronteira:** `starguard.doctor` agora consulta
+  o `/api/health` do servidor e imprime, em voz alta, quando um scanner está
+  ausente do outro lado. Era o `UX-15` valendo só dentro do processo: a tela
+  dizia `✔ sast — servidor` enquanto o servidor não tinha opengrep nenhum.
+- **O que NÃO dá para corrigir por código:** fazer o Render rodar o Dockerfile é
+  ação de painel. Ver `PEND-45`.
+
 ### UX-26 · As ações ficavam DEPOIS de dezenas de achados ✅
 **P2 · Esforço P**
 
@@ -913,6 +949,7 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-41** | SEC-11 | O proxy de IA nunca foi chamado por um cliente real | A rota, a cota e o registro de consumo estão testados, mas o percurso completo — extensão logada → consentimento → chamada com Bearer → resposta do modelo → linha em `ai_usage` — **não rodou**. Depende da PEND-37 (o login ponta a ponta), e junta-se a ela. |
 | **PEND-42** | ARQ-04 | A fila nunca processou um job de verdade | `FOR UPDATE SKIP LOCKED`, o backoff e a retomada de worker morto estão escritos; o que rodou contra Postgres real foi só o OAuth. Falta subir a app, criar uma análise e ver o worker pegá-la — e, principalmente, matar o processo no meio para conferir que outro a retoma. É a promessa central do ARQ-04 e é a que continua sem prova. |
 | **PEND-44** | ~~UX-27~~ → **ARQ-15** | ~~O 403 do scan remoto no `sast` não tem causa provada~~ **RESOLVIDA em 06/08/2026** | A causa era o `--jobs` saindo de `os.cpus()` dentro do contêiner: oito processos do opengrep numa instância de 0,5 CPU e 512 MB matavam o servidor no meio da requisição, e a borda devolvia 403 e 502 sem corpo JSON. Quem entregou a resposta foi a **instrumentação do UX-27** — as duas mensagens juntas (`text/html` do Render + o 502 do vizinho no mesmo `cf-ray`) descartaram "recusa" e apontaram "instância caindo". **O que continua pendente é a verificação:** o servidor precisa de um DEPLOY para a correção valer, e depois disso o percurso a fazer é rodar `sast` e `sca` juntos num projeto grande e ver os dois terminarem. *Registro anterior: catorze sondagens no total, incluindo o cliente idêntico ao da extensão e as duas requisições em paralelo — nenhuma reproduziu. O app foi descartado por leitura completa do middleware (403 só em `/admin`). Duas defesas entregues: renovação com fila (SEC-16) e reenvio em partes. **O que fecha isto é uma linha de log da próxima ocorrência**, que agora nomeia o autor da recusa.* O `sca` passa e o `sast` não, com o mesmo token, no mesmo endereço. Oito requisições de sondagem contra a produção **não reproduziram**: conteúdo com cara de ataque, 6,43 MB de código real, corpos de 1/4/8/12 MB e `Authorization` inválido devolveram todos o 401 do próprio app. O que se sabe pela mensagem: o corpo do 403 **não era JSON nosso**, então quem recusou está entre o cliente e o app (a produção fica atrás de Cloudflare). A instrumentação entregue faz a próxima ocorrência dizer `content-type`, `cf-ray` e o começo do corpo — **pedir ao usuário essa linha do canal de saída é o próximo passo**, e com o `cf-ray` em mãos o bloqueio é localizável no painel da Cloudflare. Enquanto isso o socorro local assume, então a análise acontece. |
+| **PEND-45** | ARQ-15 | **A produção não roda o Dockerfile — não há opengrep nem trivy no servidor** | `/api/health` da produção responde `"status":"degraded"` com os dois scanners `present: false`. O serviço foi criado à mão no painel e subiu pelo buildpack de Node; o `render.yaml` (`runtime: docker`) **não é adotado por um serviço que já existe**. Enquanto isso o scan remoto não tem como produzir achado nenhum, e a instância gasta 512 MB processando o JSON para chamar um binário que não está lá. **É ação de painel, só você pode fazer:** Blueprints → New Blueprint Instance apontando para o repositório (ou trocar o serviço existente para runtime Docker) e migrar as variáveis. Depois: `curl https://<servidor>/api/health` tem de responder `"status":"ok"` com os dois scanners `present: true` — é a única prova de que o scan remoto passou a existir. **Segundo passo, provável:** 512 MB não comporta opengrep + trivy + Next; o ruleset recortado ajuda, mas o plano `standard` (2 GB) é a resposta confiável. |
 | **PEND-43** | SEC-13 | O hook nunca segurou um commit real | Instalação, remoção, recusa de hook de terceiro e `core.hooksPath` têm teste. O que não foi visto: `git commit` de verdade com achado grave, com `starguard.hookBlocks=true`, num repositório com semgrep configurado. |
 | **PEND-44** | UX-26 | O Pull Request da extensão nunca foi aberto de verdade | A montagem está coberta por 10 asserções (um PR e não um por achado, dedup por arquivo, mudança vazia que não entra, motivo dito quando falta `origin`), mas **nada disso tocou o GitHub**. O que continua sem prova: `vscode.authentication.getSession("github", ["repo"])` devolvendo token com escopo de escrita dentro do extension host, `openPullRequestBatch` criando branch/blobs/árvore/commit com esse token, e o retorno com número e URL chegando ao painel. Percurso: abrir um repositório com `origin` no GitHub, analisar, marcar dois achados **no mesmo arquivo**, corrigir, aplicar e clicar em Abrir Pull Request — o PR deve sair com **um commit** e o arquivo aparecendo **uma vez**. Vale conferir também o caminho triste: repositório sem `origin`, e recusar a autorização do GitHub. |
 | **PEND-45** | UX-26 | Os três travamentos foram corrigidos por leitura, não reproduzidos | O mecanismo de cada um está identificado no código e travado por asserção, mas nenhum foi **provocado** no editor: esconder a barra lateral no meio de uma análise (o webview descartado), fazer `openWorkspace` falhar durante o lote, e forçar exceção no `propose` da lâmpada. Os três são reproduzíveis à mão e valem mais que a asserção de texto que os cobre hoje. Junta-se à PEND-33. |

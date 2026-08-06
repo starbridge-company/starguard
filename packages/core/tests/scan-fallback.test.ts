@@ -340,3 +340,49 @@ describe("pacote recusado inteiro é reenviado em PARTES (UX-27)", () => {
     expect(chamadas).toEqual([8]);
   });
 });
+
+describe("a divisão é SEQUENCIAL (ARQ-15)", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+    setScanTransport({ kind: "local" });
+  });
+
+  it("nunca há duas metades no ar ao mesmo tempo", async () => {
+    // Paralelizar a divisão é o instinto errado: ela só acontece porque o
+    // outro lado já não deu conta. Quando a causa é falta de memória no
+    // servidor, cada rodada em paralelo (2, 4, 8) mantém a instância no chão.
+    let emVoo = 0;
+    let pico = 0;
+    globalThis.fetch = (async (_u: string, init: { body: string }) => {
+      emVoo++;
+      pico = Math.max(pico, emVoo);
+      await new Promise((r) => setTimeout(r, 5));
+      const n = (JSON.parse(init.body) as { files: unknown[] }).files.length;
+      emVoo--;
+      if (n > 1) {
+        return new Response("<html>morreu</html>", {
+          status: 502,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response(JSON.stringify({ result: [{ id: "V" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const { callRemoteScanPartido } = await import("../src/scan-transport");
+    const r = (await callRemoteScanPartido(
+      { kind: "remote", baseUrl: "https://x.invalido", getToken: async () => "t" },
+      {
+        analyzer: "sast",
+        files: Array.from({ length: 4 }, (_, i) => ({ path: `${i}.ts`, content: "x" })),
+        locale: "pt-BR",
+      }
+    )) as unknown[];
+
+    expect(r).toHaveLength(4);
+    expect(pico).toBe(1);
+  });
+});
