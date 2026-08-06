@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { BIN, ENGINES, sastConfig } from "../config";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
-import { probeBinary } from "../binaries";
+import { comSocorroLocal, probeBinary } from "../binaries";
 import { enrichFindings } from "../enrich";
 import { makeCodeFixer } from "../fix/code-fixer";
 import { empacotarParaScan } from "../bundle";
@@ -111,7 +111,12 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
     const dir = ctx.workspace!.root;
     ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sast);
     const achados = usingRemoteScan()
-      ? await sastRemoto(dir, ctx.locale)
+      ? await comSocorroLocal(
+          () => sastRemoto(dir, ctx.locale),
+          () => runSast(dir),
+          sastBinary(),
+          ctx
+        )
       : await runSast(dir);
     // Descrições legíveis no idioma de quem pediu. O catálogo local resolve a
     // maioria sem custo; a IA entra em lote só no que sobra, e nunca lança.

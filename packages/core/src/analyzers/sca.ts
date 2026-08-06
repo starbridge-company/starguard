@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
 import { parseTrivy } from "../parsers";
 import { ScanUnavailable } from "../git";
-import { probeBinary } from "../binaries";
+import { comSocorroLocal, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
 import { empacotarParaScan } from "../bundle";
@@ -109,7 +109,12 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   async run(ctx) {
     ctx.report?.(usingRemoteScan() ? "servidor" : ENGINES.sca);
     const deps = usingRemoteScan()
-      ? await scaRemoto(ctx.workspace!.root, ctx.locale)
+      ? await comSocorroLocal(
+          () => scaRemoto(ctx.workspace!.root, ctx.locale),
+          () => runSca(ctx.workspace!.root),
+          BIN.trivy,
+          ctx
+        )
       : await runSca(ctx.workspace!.root);
     // Dependência não passa por IA: o texto é montado por template — o Trivy
     // já diz o pacote, a versão instalada e a que corrige. Ver o princípio do

@@ -59,6 +59,31 @@ export function usingRemoteScan(): boolean {
   return atual.kind === "remote";
 }
 
+/**
+ * O servidor não respondeu — dá para fazer o trabalho AQUI?
+ *
+ * Este é o socorro do "fetch failed": o servidor do MVP hiberna, e uma falha de
+ * rede na primeira requisição do dia deixava a análise inteira sem acontecer,
+ * mesmo com o binário instalado a um palmo de distância. Não analisar nada é o
+ * pior desfecho possível para uma ferramenta de segurança — pior que analisar
+ * mais devagar.
+ *
+ * **Só para falha de REDE.** `unauthorized` é problema de sessão e precisa ser
+ * resolvido, não contornado; `too_large` continuaria grande localmente. Cair
+ * para o local nesses casos esconderia o que a pessoa precisa consertar.
+ *
+ * Sobre privacidade, a direção é a segura: o remoto manda arquivos para fora, o
+ * local não manda nada. Cair para o local nunca amplia o que sai da máquina —
+ * o contrário seria inaceitável sem perguntar.
+ *
+ * E é DECLARADO: quem chama avisa na tela que rodou local e por quê. Trocar o
+ * lugar onde o código é processado em silêncio é o tipo de decisão que este
+ * produto não toma pelas costas de ninguém.
+ */
+export function podeCairParaLocal(e: unknown): boolean {
+  return e instanceof RemoteScanError && (e.code === "unreachable" || e.code === "unavailable");
+}
+
 export type RemoteScanErrorCode =
   | "unauthorized"
   | "too_large"
@@ -90,6 +115,36 @@ export interface RemoteScanInput {
  * servidor roda exatamente o mesmo código do núcleo. Traduzir aqui criaria um
  * segundo formato para manter em sincronia.
  */
+/**
+ * O que REALMENTE aconteceu na rede.
+ *
+ * `fetch` do Node devolve sempre a mesma frase — `"fetch failed"` — e guarda a
+ * informação em `cause`. Medido: DNS inexistente e porta inválida produzem
+ * mensagens idênticas e causas diferentes (`ENOTFOUND`, `bad port`).
+ *
+ * Repassar só a mensagem era o que fazia o painel da extensão dizer
+ * "Não foi possível falar com o servidor: fetch failed" — uma frase que não
+ * distingue servidor dormindo, DNS errado, proxy no caminho e certificado
+ * vencido, que são quatro problemas com quatro soluções diferentes.
+ */
+function causaDeRede(e: unknown): string {
+  const err = e as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+  if (err?.name === "TimeoutError" || err?.name === "AbortError") return "timeout";
+  return err?.cause?.code || err?.cause?.message || err?.message || "erro desconhecido";
+}
+
+/**
+ * Quanto esperar antes de desistir de UMA tentativa.
+ *
+ * O servidor do MVP hiberna quando fica ocioso, e a primeira requisição depois
+ * disso paga o tempo de subir a instância — medido acima de 45 s nesta
+ * infraestrutura. Sem teto explícito o `fetch` do Node espera 300 s, e a
+ * extensão fica parada sem dizer nada; com um teto curto demais, toda primeira
+ * análise do dia falha. Daí o par: teto generoso e UMA segunda tentativa, que
+ * já encontra a instância acordada pela primeira.
+ */
+const TETO_MS = 90_000;
+
 export async function callRemoteScan(
   t: RemoteScanTransport,
   input: RemoteScanInput
@@ -99,26 +154,51 @@ export async function callRemoteScan(
     throw new RemoteScanError("Sessão expirada. Entre novamente.", "unauthorized");
   }
 
+  const payload = JSON.stringify({
+    analyzer: input.analyzer,
+    locale: input.locale,
+    files: input.files,
+  });
+
+  const tentar = async (): Promise<Response> => {
+    // Dois motivos para abortar: o teto de tempo e o cancelamento de quem
+    // clicou. Um controlador só, alimentado pelos dois.
+    const ctrl = new AbortController();
+    const relogio = setTimeout(() => ctrl.abort(), TETO_MS);
+    const repassar = () => ctrl.abort();
+    input.signal?.addEventListener("abort", repassar);
+    try {
+      return await fetch(`${t.baseUrl}/api/scan`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: payload,
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(relogio);
+      input.signal?.removeEventListener("abort", repassar);
+    }
+  };
+
   let res: Response;
   try {
-    res = await fetch(`${t.baseUrl}/api/scan`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        analyzer: input.analyzer,
-        locale: input.locale,
-        files: input.files,
-      }),
-      signal: input.signal,
-    });
-  } catch (e) {
-    throw new RemoteScanError(
-      `Não foi possível falar com o servidor: ${(e as Error).message}`,
-      "unreachable"
-    );
+    res = await tentar();
+  } catch {
+    // Cancelamento de quem clicou NÃO é falha de rede e não se tenta de novo.
+    if (input.signal?.aborted) {
+      throw new RemoteScanError("Análise cancelada.", "unreachable");
+    }
+    try {
+      res = await tentar();
+    } catch (segunda) {
+      throw new RemoteScanError(
+        `Não foi possível falar com o servidor (${t.baseUrl}): ${causaDeRede(segunda)}`,
+        "unreachable"
+      );
+    }
   }
 
   if (res.ok) {

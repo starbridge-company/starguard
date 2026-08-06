@@ -9,6 +9,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "./config";
+import { podeCairParaLocal } from "./scan-transport";
+import { translate } from "./i18n/translate";
+import type { Locale } from "./i18n/config";
 
 const pExecFile = promisify(execFile);
 
@@ -61,6 +64,50 @@ export async function probeBinary(bin: string): Promise<BinaryProbe> {
 export function clearProbeCache(): void {
   probeCache.clear();
   cache = null;
+}
+
+/**
+ * Tenta no servidor; se a REDE falhar e o binário existir aqui, faz aqui.
+ *
+ * Nasceu de um relato de uma frase: "deu fetch failed, continua não fazendo a
+ * análise". O servidor do MVP hiberna quando fica ocioso, e a primeira
+ * requisição depois disso pode não voltar. Até aqui, isso derrubava o
+ * analisador inteiro — com o `opengrep` instalado na máquina, parado, sem ser
+ * chamado. **Não analisar nada é o pior desfecho possível para uma ferramenta
+ * de segurança**, e é pior que analisar mais devagar.
+ *
+ * Três limites, todos deliberados:
+ *
+ * - **Só falha de rede.** `podeCairParaLocal` recusa `unauthorized` (é sessão,
+ *   precisa ser resolvida) e `too_large` (continuaria grande aqui). Contornar
+ *   esses dois esconderia o que a pessoa precisa consertar.
+ * - **Só com o binário presente.** Sem ele não há nada a fazer localmente, e o
+ *   erro do servidor é a informação certa a mostrar.
+ * - **Sempre declarado.** A troca aparece na tela via `report`. Mudar em
+ *   silêncio o lugar onde o código é processado é o tipo de decisão que este
+ *   produto não toma pelas costas de ninguém — mesmo que a mudança seja para
+ *   o lado mais privado, que é o caso: o local não manda nada para fora.
+ */
+export async function comSocorroLocal<T>(
+  remoto: () => Promise<T>,
+  local: () => Promise<T>,
+  bin: string | null,
+  ctx: { locale: Locale; report?: (message: string, pct?: number) => void }
+): Promise<T> {
+  try {
+    return await remoto();
+  } catch (e) {
+    if (!podeCairParaLocal(e) || !bin) throw e;
+    const r = await probeBinary(bin);
+    if (!r.present) throw e;
+
+    const motivo = (e as Error).message;
+    ctx.report?.(translate(ctx.locale, "scan.fellBackLocal", { bin }));
+    // O motivo vai junto no canal de saída de quem estiver escutando: a frase
+    // curta explica O QUE mudou, e esta explica POR QUÊ.
+    ctx.report?.(motivo);
+    return await local();
+  }
 }
 
 const TTL_MS = 60_000;

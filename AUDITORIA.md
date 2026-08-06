@@ -183,6 +183,50 @@ contrato do `jsonError` e idioma da exportação.
   em três arquivos, corrigir, revisar três diffs, aplicar tudo. ⚠️ **Não
   verificado no editor real** — ver PEND-33.
 
+### BUG-25 · "fetch failed" derrubava a análise inteira, com o scanner ao lado ✅
+**P0 · Esforço P**
+
+> ✅ **Corrigido em 06/08/2026.** Relatado assim: "tentei rodar a extensão mas
+> deu fetch failed, continua não fazendo a análise".
+
+- **A mensagem não dizia nada.** `fetch` do Node devolve **sempre** a mesma
+  frase — `"fetch failed"` — e guarda a informação de verdade em `cause`. O
+  transporte repassava só `e.message`, então servidor dormindo, DNS errado,
+  proxy no caminho e certificado vencido produziam **o mesmo texto na tela**:
+  quatro problemas com quatro soluções diferentes, indistinguíveis. Medido:
+  host inexistente e porta inválida → `message` idêntica, `cause` `ENOTFOUND`
+  vs `bad port`. Agora a causa e a **URL** vão na mensagem.
+- **O desfecho era o pior possível.** Falha de rede derrubava o analisador
+  inteiro — com o `opengrep` instalado na máquina, parado, sem ser chamado.
+  `comSocorroLocal` passa a rodar aqui quando o servidor não responde **e** o
+  binário existe. Não analisar nada é o pior desfecho para uma ferramenta de
+  segurança, e é pior que analisar mais devagar.
+- **Três limites, todos deliberados.** Só falha de REDE (`unauthorized` é
+  sessão e precisa ser resolvida; `too_large` continuaria grande aqui); só com
+  o binário presente; e **sempre declarado** na tela — trocar em silêncio o
+  lugar onde o código é processado é decisão que este produto não toma pelas
+  costas de ninguém. A direção é a segura: o local não manda nada para fora.
+- **Teto de tempo e uma segunda tentativa.** O servidor do MVP hiberna. Sem
+  teto, o `fetch` do Node espera 300 s com a extensão parada; com teto curto,
+  toda primeira análise do dia falha. 90 s e **uma** repetição, que já encontra
+  a instância acordada pela primeira. Cancelamento de quem clicou não é tratado
+  como falha de rede e não repete.
+
+**Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| O servidor está de pé? | `fetch` direto | `/login` **200 em 2,7 s** · `/api/scan` **401 em 0,3 s** · `/api/health` **timeout em 45 s** (partida a frio) |
+| A mensagem esconde a causa | `fetch` para host inválido e porta inválida | `message` **idêntica** (`"fetch failed"`) nos dois; `cause` `ENOTFOUND` vs `bad port` |
+| Socorro local | `packages/core/tests/scan-fallback.test.ts` | **10 asserções**: rede autoriza, sessão e tamanho **não**, sem binário o erro sobe, remoto que funciona não chama o local, e a troca é declarada com o motivo |
+| Suíte | `npm test` | **699 testes** em 48 arquivos (eram 689 em 47) |
+| `npm run typecheck` / `lint` | tsc + eslint | limpo · 0 erros, 12 avisos pré-existentes |
+| Build + instalação | `build:packages` + `install:local` | `dist/extension.js` **526,2 kB**; instalado como **v0.2.1**, com a **0.2.0 removida** |
+
+⚠️ **Não exercitado:** a queda para o local dentro do editor, com o servidor
+realmente dormindo. Ver `PEND-47`. E o `/api/health` que levou mais de 45 s —
+consistente com partida a frio, mas **não confirmado** como só isso.
+
 ### BUG-24 · A configuração de caminho dos scanners nunca valeu nada ✅
 **P0 · Esforço P**
 
@@ -680,6 +724,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-44** | UX-26 | O Pull Request da extensão nunca foi aberto de verdade | A montagem está coberta por 10 asserções (um PR e não um por achado, dedup por arquivo, mudança vazia que não entra, motivo dito quando falta `origin`), mas **nada disso tocou o GitHub**. O que continua sem prova: `vscode.authentication.getSession("github", ["repo"])` devolvendo token com escopo de escrita dentro do extension host, `openPullRequestBatch` criando branch/blobs/árvore/commit com esse token, e o retorno com número e URL chegando ao painel. Percurso: abrir um repositório com `origin` no GitHub, analisar, marcar dois achados **no mesmo arquivo**, corrigir, aplicar e clicar em Abrir Pull Request — o PR deve sair com **um commit** e o arquivo aparecendo **uma vez**. Vale conferir também o caminho triste: repositório sem `origin`, e recusar a autorização do GitHub. |
 | **PEND-45** | UX-26 | Os três travamentos foram corrigidos por leitura, não reproduzidos | O mecanismo de cada um está identificado no código e travado por asserção, mas nenhum foi **provocado** no editor: esconder a barra lateral no meio de uma análise (o webview descartado), fazer `openWorkspace` falhar durante o lote, e forçar exceção no `propose` da lâmpada. Os três são reproduzíveis à mão e valem mais que a asserção de texto que os cobre hoje. Junta-se à PEND-33. |
 | **PEND-46** | BUG-24 | A correção do caminho foi provada no motor, não na tela | O `BIN` preguiçoso está travado por 6 asserções e foi verificado por reprodução direta contra o `dist`, mas o percurso da interface não rodou: abrir a extensão numa máquina sem os binários no PATH, ver o cartão desabilitado com as duas saídas, clicar em "Apontar o caminho do executável…", preencher `starguard.semgrepPath` e ver o cartão **acender sem recarregar a janela** (o `onDidChangeConfiguration` já dispara `recarregarPlano`, mas isso não foi visto). Conferir também o caminho oposto: limpar o campo e o cartão voltar a apagar. Junta-se à PEND-33. |
+| **PEND-47** | BUG-25 | A queda para o local nunca aconteceu de verdade | As 10 asserções injetam o erro; o percurso real não rodou: servidor dormindo (ou `starguard.server` apontando para um host inválido), analisar, e ver o cartão dizer "o servidor não respondeu — rodei com o opengrep desta máquina" **e trazer achados**. Conferir também o caminho que NÃO deve cair: sessão expirada tem de falhar com a mensagem de sessão, não rodar local em silêncio. |
+| **PEND-48** | BUG-25 | `/api/health` levou mais de 45 s | Medido uma vez, contra `starguard-31l1.onrender.com`: `/api/health` não respondeu em 45 s enquanto `/login` respondeu em 2,7 s e `/api/scan` em 0,3 s logo depois. O mais provável é partida a frio da instância (a primeira requisição paga por todas), mas **não foi confirmado** — pode ser um endpoint que espera por banco ou por binário sem teto de tempo. Repetir com a instância comprovadamente acordada; se persistir, é o `/api/health` que precisa de timeout próprio. |
 | **PEND-36** | ARQ-13 | Nenhum pacote foi publicado nem instalado de fora | `@starguard/core` e `@starguard/cli` compilam, e o `dist` do núcleo foi carregado em Node puro — mas sempre a partir do repositório, com o link do workspace. Um `npm pack` seguido de instalação limpa em outro diretório é o que provaria que o mapa de `exports` e o passo `add-extensions.mjs` cobrem tudo o que um consumidor externo importa. O mesmo vale para `vsce package` na extensão. |
 
 ### Histórico

@@ -195,17 +195,28 @@ lateral para conferir vê a versão velha e conclui que a mudança não funciono
 Testes verdes e um `.vsix` velho instalado é o pior dos dois mundos — parece
 pronto e não está.
 
-Toda mudança na extensão termina com estes dois comandos, nesta ordem:
+Toda mudança na extensão termina com estes três passos, nesta ordem:
 
 ```bash
-npm run build:packages                      # o NÚCLEO primeiro: o bundle da extensão lê o dist dele
-npm run install:local -w starguard-vscode   # empacota o .vsix e SUBSTITUI a instalação da máquina
+# 1. SUBIR A VERSÃO em packages/vscode/package.json (patch, sempre)
+npm run build:packages                      # 2. o NÚCLEO primeiro: o bundle da extensão lê o dist dele
+npm run install:local -w starguard-vscode   # 3. empacota o .vsix e SUBSTITUI a instalação da máquina
 ```
 
 Depois avise que a janela precisa de **Developer: Reload Window** — o extension
 host carrega o bundle uma vez e não o relê sozinho.
 
-Duas armadilhas que já custaram tempo aqui:
+**A versão sobe SEMPRE, mesmo em correção de uma linha.** Reinstalar `0.2.0`
+por cima de `0.2.0` é uma operação que o editor tem todo o direito de tratar
+como "já tenho essa" — e quando ele o faz, o sintoma é o pior possível: os
+comandos rodam sem erro, o `.vsix` é gerado, e o que está no editor continua
+sendo o bundle velho. O número na aba de Extensões é também a única forma de
+alguém CONFERIR, sem abrir terminal, que está olhando a versão nova. Sem ele,
+"não funcionou" e "não instalou" ficam indistinguíveis.
+
+Três armadilhas que já custaram tempo aqui:
+
+
 
 - **A ordem não é opcional.** `install:local` roda o esbuild sobre o `dist` do
   núcleo, não sobre o `src`. Pular o `build:packages` empacota a extensão com a
