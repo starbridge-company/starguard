@@ -96,9 +96,21 @@ export async function empacotarParaScan(
   alvo: "sast" | "sca",
   opcoes: OpcoesDePacote = {}
 ): Promise<Pacote> {
-  const maxFiles = opcoes.maxFiles ?? (alvo === "sca" ? 200 : 1200);
+  // ---- Os padrões espelham os do SERVIDOR, e não um palpite ----
+  //
+  // Eram 1200 arquivos e 12 MB para o `sast`, contra 800 e 8 MB aceitos pela
+  // rota. A conta não fechava para nenhum projeto de tamanho médio: o primeiro
+  // envio levava 413 SEMPRE, o pacote era dividido em duas metades e o opengrep
+  // rodava duas vezes, carregando o ruleset inteiro em cada uma. Uma lentidão
+  // garantida por configuração — e configuração invisível, porque os dois
+  // números moravam em arquivos diferentes que ninguém lia lado a lado.
+  //
+  // Quem chama pelo caminho remoto passa os limites que PERGUNTOU ao servidor
+  // (ver `limitesDoServidor`). Estes aqui são a rede de segurança para quando a
+  // pergunta não pôde ser feita.
+  const maxFiles = opcoes.maxFiles ?? (alvo === "sca" ? 200 : 800);
   const perFileBytes = opcoes.perFileBytes ?? 512 * 1024;
-  const totalBytes = opcoes.totalBytes ?? (alvo === "sca" ? 4 : 12) * 1024 * 1024;
+  const totalBytes = opcoes.totalBytes ?? (alvo === "sca" ? 4 : 8) * 1024 * 1024;
 
   const candidatos: { path: string; abs: string; size: number }[] = [];
 

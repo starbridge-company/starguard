@@ -863,6 +863,16 @@ export const PT_BR = {
   "scan.queued": "na fila — aguardando o outro scan terminar",
   "scan.split": "reenviando em partes menores",
   "scan.server": "no servidor",
+  "scan.uploading": "enviando {n} arquivos ({mb} MB) ao servidor…",
+  // A posição transforma espera em previsão. Uma barra sem número é
+  // indistinguível de uma barra travada — foi o que a extensão parecia.
+  "scan.queuedAt": "na fila do servidor ({n}º) — sua vez já vem",
+  "scan.scanning": "escaneando no servidor…",
+  "scan.slotQueued": "aguardando vaga de scanner ({n}º)",
+  // O que NÃO coube no envio é dito em voz alta: um resultado parcial
+  // silencioso passa por completo, e numa ferramenta de segurança isso é o
+  // pior tipo de mentira. Ver UX-15.
+  "scan.truncated": "{n} arquivos ficaram fora do envio (teto do servidor)",
 
   // Rodou, mas com menos contexto do que teria em conjunto. É dito em voz
   // alta: um resultado degradado silencioso passa por resultado completo.
@@ -1938,6 +1948,11 @@ const EN: Record<MessageKey, string> = {
   "scan.queued": "queued — waiting for the other scan to finish",
   "scan.split": "resending in smaller parts",
   "scan.server": "on the server",
+  "scan.uploading": "uploading {n} files ({mb} MB) to the server…",
+  "scan.queuedAt": "queued on the server (#{n}) — your turn is coming",
+  "scan.scanning": "scanning on the server…",
+  "scan.slotQueued": "waiting for a scanner slot (#{n})",
+  "scan.truncated": "{n} files were left out of the upload (server limit)",
 
   "analyzer.degraded.threat":
     "Threat modeling was not part of this run: there were no declared requirements to check.",
@@ -2986,6 +3001,11 @@ const ES: Record<MessageKey, string> = {
   "scan.queued": "en cola — esperando a que termine el otro escaneo",
   "scan.split": "reenviando en partes más pequeñas",
   "scan.server": "en el servidor",
+  "scan.uploading": "enviando {n} archivos ({mb} MB) al servidor…",
+  "scan.queuedAt": "en cola en el servidor (nº {n}) — tu turno ya llega",
+  "scan.scanning": "escaneando en el servidor…",
+  "scan.slotQueued": "esperando un puesto de escáner (nº {n})",
+  "scan.truncated": "{n} archivos quedaron fuera del envío (límite del servidor)",
 
   "analyzer.degraded.threat":
     "El modelado de amenazas no formó parte de esta ejecución: no había requisitos declarados que verificar.",

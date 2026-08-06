@@ -15,7 +15,15 @@ import { comSocorroLocal, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
 import { empacotarParaScan } from "../bundle";
-import { callRemoteScan, getScanTransport, usingRemoteScan } from "../scan-transport";
+import { comVaga } from "../scan-slot";
+import {
+  callRemoteScan,
+  getScanTransport,
+  limitesDoServidor,
+  opcoesDeScanLocal,
+  usingRemoteScan,
+  type OpcoesDeScanLocal,
+} from "../scan-transport";
 import type { Analyzer } from "../contracts";
 import { translate } from "../i18n/translate";
 import type { MessageKey } from "../i18n/messages";
@@ -24,8 +32,18 @@ import type { DependencyVuln } from "../types";
 
 const pExecFile = promisify(execFile);
 
-/** Roda o SCA (Trivy) em modo filesystem sobre o diretório clonado. */
-export async function runSca(dir: string): Promise<DependencyVuln[]> {
+/**
+ * Roda o SCA (Trivy) em modo filesystem sobre o diretório clonado.
+ *
+ * `opts` traz o cancelamento e o relato de fila pelo mesmo motivo do
+ * `runSast`: sem o `signal`, parar de esperar não parava o trivy, e o processo
+ * seguia com o banco de vulnerabilidades carregado na memória de uma caixa que
+ * mal comporta um scanner. Ver `scan-slot.ts`.
+ */
+export async function runSca(
+  dir: string,
+  opts: OpcoesDeScanLocal = {}
+): Promise<DependencyVuln[]> {
   const engine = ENGINES.sca;
   if (engine === "none") return [];
 
@@ -40,11 +58,19 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
   ];
 
   try {
-    const { stdout } = await pExecFile(BIN.trivy, args, {
-      cwd: dir,
-      timeout: 300_000,
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const { stdout } = await comVaga(
+      () => {
+        // Ver o mesmo trecho em `sast.ts`: a transição é o que se anuncia.
+        opts.report?.("scan.scanning");
+        return pExecFile(BIN.trivy, args, {
+          cwd: dir,
+          timeout: 300_000,
+          maxBuffer: 64 * 1024 * 1024,
+          signal: opts.signal,
+        });
+      },
+      (posicao) => opts.report?.("scan.slotQueued", posicao)
+    );
     return parseTrivy(JSON.parse(stdout));
   } catch (e: unknown) {
     const err = e as { stdout?: string; message?: string };
@@ -55,6 +81,8 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
         /* cai no throw */
       }
     }
+    // Cancelamento sobe como está: quem parou não deve ler "o SCA falhou".
+    if (opts.signal?.aborted) throw e;
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
         `Binário do SCA (${BIN.trivy}) não encontrado no host. Instale-o para habilitar a análise de dependências.`
@@ -75,12 +103,20 @@ export async function runSca(dir: string): Promise<DependencyVuln[]> {
 async function scaRemoto(
   dir: string,
   locale: Locale,
+  signal?: AbortSignal,
   report?: (m: string) => void
 ): Promise<DependencyVuln[]> {
   const t = getScanTransport();
-  if (t.kind !== "remote") return runSca(dir);
+  if (t.kind !== "remote") return runSca(dir, { signal });
 
-  const pacote = await empacotarParaScan(dir, "sca");
+  // O SCA manda só manifestos — alguns kilobytes — e nunca chega perto do teto.
+  // Perguntar mesmo assim mantém uma regra só para os dois analisadores, em vez
+  // de um caminho que respeita o servidor e outro que confia na sorte.
+  const limites = await limitesDoServidor(t);
+  const pacote = await empacotarParaScan(dir, "sca", {
+    maxFiles: Math.min(200, limites.maxFiles),
+    totalBytes: Math.min(4 * 1024 * 1024, limites.maxBytes),
+  });
   if (pacote.files.length === 0) {
     // Sem manifesto não há o que resolver. Devolver vazio é correto e é
     // diferente de falhar: o projeto pode simplesmente não declarar
@@ -91,9 +127,11 @@ async function scaRemoto(
     analyzer: "sca",
     files: pacote.files,
     locale,
-    // "na fila" chega por aqui: o servidor roda um scanner por vez, e esperar
-    // a vez é estado a mostrar, não erro a relatar.
-    report: (m) => report?.(translate(locale, m as MessageKey)),
+    signal,
+    // "na fila (2º)" chega por aqui: o servidor roda um scanner por vez, e
+    // esperar a vez é estado a mostrar, não erro a relatar.
+    report: (m, n) =>
+      report?.(translate(locale, m as MessageKey, n === undefined ? undefined : { n })),
   });
   return (cru ?? []) as DependencyVuln[];
 }
@@ -116,19 +154,27 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   },
 
   async run(ctx) {
+    const dir = ctx.workspace!.root;
     ctx.report?.(usingRemoteScan() ? translate(ctx.locale, "scan.server") : ENGINES.sca);
-    const deps = usingRemoteScan()
-      ? await comSocorroLocal(
-          () => scaRemoto(ctx.workspace!.root, ctx.locale, (m) => ctx.report?.(m)),
-          () => runSca(ctx.workspace!.root),
-          BIN.trivy,
-          ctx
-        )
-      : await runSca(ctx.workspace!.root);
+
     // Dependência não passa por IA: o texto é montado por template — o Trivy
     // já diz o pacote, a versão instalada e a que corrige. Ver o princípio do
     // CLAUDE.md ("resolva pelo catálogo antes de chamar a IA").
-    return enrichDependencies(deps, ctx.locale);
+    const local = async () =>
+      enrichDependencies(await runSca(dir, opcoesDeScanLocal(ctx)), ctx.locale);
+
+    if (!usingRemoteScan()) return local();
+
+    // Sem `enrichDependencies` no caminho remoto: o servidor já montou os
+    // textos, no idioma que este cliente pediu. Repetir aqui não é caro como no
+    // SAST (não há IA envolvida), mas produziria o mesmo objeto duas vezes — e
+    // no dia em que as duas versões divergirem, o bug aparece só na extensão.
+    return comSocorroLocal(
+      () => scaRemoto(dir, ctx.locale, ctx.signal, (m) => ctx.report?.(m)),
+      local,
+      BIN.trivy,
+      ctx
+    );
   },
 
   fix: makeDepsFixer(),

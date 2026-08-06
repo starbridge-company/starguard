@@ -553,6 +553,93 @@ aberto:
 - **O que NÃO dá para corrigir por código:** fazer o Render rodar o Dockerfile é
   ação de painel. Ver `PEND-45`.
 
+### ARQ-16 · O scan remoto tratava trabalho longo como requisição HTTP ✅
+**P0 · Esforço M**
+
+> ✅ **Corrigido em 06/08/2026.** Relatado assim: *"o sast e o outro scan estão
+> completamente quebrados, não consigo rodar, demora MUITO o sast, e não consigo
+> rodar em dois projetos ao mesmo tempo, mesmo com a fila, ela aparentemente
+> nunca é limpa."* Três sintomas, uma causa de raiz e mais seis defeitos que se
+> somavam a ela.
+
+**A causa de raiz: ninguém saía da fila.**
+
+O `POST /api/scan` escaneava DENTRO da requisição. Enquanto o SAST cabia no
+tempo, funcionava; quando deixou de caber, o encadeamento foi este:
+
+1. o cliente desistia no teto dele (`TETO_MS = 90_000`) e abortava o `fetch`;
+2. **do lado do servidor não acontecia nada** — a rota não olhava o `req.signal`,
+   então o opengrep continuava rodando com a vaga ocupada;
+3. o cliente tentava de novo e criava um **segundo** scan, tão órfão quanto;
+4. em três tentativas `scansNaFila` estava no teto e toda requisição — de
+   qualquer pessoa, de qualquer projeto — passava a levar `429`.
+
+A fila estava correta. O que não existia era **saída** dela, porque ninguém
+avisava o servidor de que o trabalho tinha deixado de interessar. Daí a frase
+"a fila nunca é limpa", que descreve o sintoma com precisão.
+
+**O conserto: o scan virou JOB.**
+
+```
+POST   /api/scan            aceita e responde 202 {jobId, position}
+GET    /api/scan?job=<id>   queued | running | done | error   (+ posição)
+DELETE /api/scan?job=<id>   MATA o processo e apaga o temporário
+GET    /api/scan            os tetos do servidor, para o cliente empacotar certo
+```
+
+Nenhuma requisição passa de segundos. Isso tira do caminho todo intermediário
+que mata conexão longa — CDN, proxy de empresa, teto da plataforma —, que era a
+outra metade dos "403 sem corpo JSON" do `ARQ-15`. E o polling passa a ser o
+**batimento cardíaco** do job: quem não pergunta há um minuto é recolhido, com
+processo e disco junto. Essa é a rede que cobre a janela sem `DELETE` (editor
+fechado, máquina suspensa, Wi-Fi caído).
+
+**Os outros seis, encontrados no caminho:**
+
+| # | Defeito | Efeito medido |
+|---|---|---|
+| 1 | O cliente empacotava **1200 arquivos / 12 MB**; a rota aceita **800 / 8 MB** | 413 garantido em todo projeto médio → divisão em duas metades → **opengrep rodando duas vezes**, carregando o ruleset inteiro em cada uma. Lentidão por configuração, não por acidente |
+| 2 | `enrichFindings` rodava **duas vezes** no SAST remoto | Uma segunda chamada de IA, paga, pelo mesmo texto, com teto de 280 s e até 2 retentativas. Maior fatia isolada do "demora MUITO" |
+| 3 | `ctx.signal` **nunca chegava** ao scan remoto | Cancelar parava de esperar; o servidor seguia trabalhando |
+| 4 | Cancelamento viajava como `unreachable` | E `unreachable` autoriza o socorro local: clicar em Cancelar **começava um scan local do zero** |
+| 5 | `429` esgotado virava `failed` (o corpo tem `error`) | "Outro scan está em andamento" como erro terminal, sem socorro local |
+| 6 | A vaga do scanner morava na ROTA | A análise do **painel web** chama `runSast`/`runSca` direto por `lib/jobs.ts`, sem passar por rota nenhuma. As duas entradas disputavam a mesma caixa e só uma sabia disso |
+
+**Entregue:**
+
+- `packages/core/src/scan-slot.ts` — a vaga saiu da borda e foi para junto de
+  quem gasta o recurso. Toda entrada atravessa o mesmo portão porque todas
+  chamam as mesmas funções. O número de vagas sai de `paralelismoDisponivel()`:
+  **1** no contêiner de meia CPU, os núcleos na máquina de quem desenvolve — um
+  teto fixo em 1 tornaria o terminal de todo mundo mais lento para proteger uma
+  caixa que não é a deles.
+- `lib/scan-jobs.ts` — ciclo de vida do job, recolhimento por abandono, TTL do
+  resultado e teto de **2 por pessoa** (que é o que uma análise pede: `sast` e
+  `sca`). O teto é por pessoa, e não global: era a outra metade do "não consigo
+  rodar em dois projetos ao mesmo tempo".
+- `runSast`/`runSca` aceitam `signal` (matam o processo filho) e `report`
+  (contam se estão na fila ou trabalhando — e a posição).
+- O cliente pergunta os tetos ao servidor em vez de adivinhá-los, e o que **não
+  coube** no envio é dito em voz alta (`scan.truncated`). Resultado parcial
+  silencioso passa por completo, que é o `UX-15` no lugar mais caro possível.
+- Três tetos de tempo no lugar de um: envio (120 s), consulta (20 s) e prazo do
+  scan (15 min). O prazo pode ser generoso justamente porque as consultas
+  provam, de segundo em segundo, que o servidor continua vivo — era essa prova
+  que faltava, e sem ela esperar era indistinguível de ter travado.
+- `/api/health` publica `scan: {slots, busy, waiting, jobs, activeJobs}` e o
+  `starguard.doctor` imprime a linha. "Está lento" e "está cheio" pedem
+  consertos diferentes, e não havia como distinguir os dois de fora — foi parte
+  do que fez esta investigação demorar.
+
+**O painel web não muda de comportamento**, e é a razão de a vaga ter descido
+para o núcleo em vez de virar uma segunda fila: ele passa a esperar a vez em vez
+de disputar memória com a extensão, e nada no caminho dele foi tocado.
+
+**Compatibilidade:** sem `mode: "async"` no corpo, a rota escaneia e devolve
+`{result}` como sempre fez. Uma extensão antiga já instalada continua
+funcionando durante a implantação — exigir versões casadas abriria uma janela em
+que ninguém consegue analisar nada.
+
 ### UX-26 · As ações ficavam DEPOIS de dezenas de achados ✅
 **P2 · Esforço P**
 

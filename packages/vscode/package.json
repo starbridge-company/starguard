@@ -2,7 +2,7 @@
   "name": "starguard-vscode",
   "displayName": "StarGuard",
   "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publisher": "starbridge",
   "license": "SEE LICENSE IN LICENSE.md",
   "engines": {

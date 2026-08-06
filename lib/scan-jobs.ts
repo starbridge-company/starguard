@@ -1,0 +1,397 @@
+// ============================================================
+// O scan do servidor como TRABALHO, não como requisição — AUDITORIA.md#ARQ-16.
+//
+// Por que isto existe, em uma frase: **um scan dura minutos e uma requisição
+// HTTP não.**
+//
+// O desenho anterior escaneava dentro do `POST /api/scan` e devolvia os
+// achados na mesma resposta. Enquanto o SAST cabia no tempo, funcionava. Quando
+// deixou de caber — instância de meia CPU, ruleset inteiro, repositório de
+// verdade — o encadeamento foi este, e vale escrito porque é a armadilha
+// clássica de tratar trabalho longo como requisição:
+//
+//   1. o cliente desistia no teto dele (90 s) e abortava o `fetch`;
+//   2. **aqui não acontecia nada**: a rota não olhava o `req.signal`, então o
+//      opengrep continuava rodando, com a vaga ocupada;
+//   3. o cliente tentava de novo e criava um SEGUNDO scan, tão órfão quanto;
+//   4. em três tentativas a fila estava cheia de trabalho que ninguém esperava,
+//      e a partir dali toda requisição — de qualquer pessoa, de qualquer
+//      projeto — levava 429.
+//
+// O relato de quem usava era "a fila nunca é limpa". A fila estava certa: o
+// que faltava era alguém SAIR dela. Ninguém saía porque ninguém era avisado de
+// que o trabalho tinha deixado de interessar.
+//
+// O que muda aqui:
+//
+//   - o `POST` **aceita** o trabalho e responde em segundos, com um `jobId`;
+//   - o `GET` responde o estado — e é o polling que prova que ainda há alguém
+//     do outro lado interessado no resultado;
+//   - o `DELETE` **mata o processo** e apaga o temporário;
+//   - o que ninguém consulta há um tempo é recolhido, com processo e disco
+//     junto. Esta é a rede de segurança: cobre a janela em que o editor foi
+//     fechado, a máquina hibernou ou o Wi-Fi caiu — casos em que não existe
+//     ninguém para mandar o `DELETE`.
+//
+// Estado de MÓDULO, e não banco: é a mesma escolha de `lib/jobs.ts`, pelo mesmo
+// motivo — o diretório temporário do scan também é local ao processo, então um
+// job que sobrevivesse ao reinício apontaria para arquivos que não existem
+// mais. Com mais de uma instância, cada uma cuida dos seus; o cliente trata
+// "job desconhecido" como falha de rede e cai para o binário local.
+// ============================================================
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { audit } from "@/lib/auth";
+import type { Locale } from "@/lib/i18n/config";
+
+export type EstadoDoScan = "queued" | "running" | "done" | "error" | "cancelled";
+
+export interface ScanJob {
+  id: string;
+  /** Dono. Ninguém consulta nem cancela o job de outra pessoa. */
+  userId: string;
+  analyzer: "sast" | "sca";
+  locale: Locale;
+  status: EstadoDoScan;
+  /** Diretório temporário com os arquivos recebidos. Apagado ao terminar. */
+  dir: string | null;
+  result?: unknown;
+  error?: string;
+  /** Binário ausente no host: o cliente distingue disso "o scan falhou". */
+  unavailable?: boolean;
+  /**
+   * Posição na fila de VAGAS do scanner, quando ele está esperando uma.
+   *
+   * É a posição mais honesta que existe: vem de quem distribui o recurso
+   * (`scan-slot.ts` do núcleo), e conta também os scans disparados pelo painel
+   * web, que não passam por rota nenhuma e portanto não aparecem no mapa de
+   * jobs.
+   */
+  vaga?: number;
+  /** Mata o processo nativo. É o que faz o `DELETE` ser mais que cosmético. */
+  abortar: AbortController;
+  criadoEm: number;
+  /** Última consulta. É por aqui que se descobre que ninguém quer mais isto. */
+  visitadoEm: number;
+  terminadoEm?: number;
+  /** Quantos arquivos e bytes entraram — para a auditoria, não para o cliente. */
+  arquivos: number;
+  bytes: number;
+}
+
+/**
+ * Sem consulta por este tempo, o job é considerado ABANDONADO.
+ *
+ * Generoso em relação ao intervalo de polling do cliente (que cresce até 5 s),
+ * porque a rede de quem usa nem sempre colabora: um minuto sem notícia é
+ * suspensão de máquina, queda de Wi-Fi ou aba fechada, não latência.
+ */
+const ABANDONO_MS = Number(process.env.SCAN_JOB_IDLE_MS) || 60_000;
+
+/**
+ * Quanto tempo um resultado pronto fica disponível para ser buscado.
+ *
+ * Ele já está na memória; o que se guarda é a resposta, não os arquivos (esses
+ * são apagados assim que o scanner termina). Cinco minutos cobrem uma retomada
+ * de rede sem transformar a instância em cache.
+ */
+const TTL_MS = Number(process.env.SCAN_JOB_TTL_MS) || 5 * 60_000;
+
+/**
+ * Quantos jobs uma pessoa pode ter ao mesmo tempo.
+ *
+ * Dois, porque é exatamente o que uma análise pede: `sast` e `sca`. Um terceiro
+ * pedido do mesmo dono derruba o mais velho — que, quando isso acontece, é
+ * quase sempre um resto de uma janela que já foi fechada.
+ */
+const POR_PESSOA = Number(process.env.SCAN_JOBS_PER_USER) || 2;
+
+// `globalThis` e não `const` de módulo: o hot reload do Next reavalia o módulo
+// e criaria um segundo mapa, deixando os jobs do primeiro rodando sem dono.
+const g = globalThis as unknown as { __sg_scan_jobs?: Map<string, ScanJob> };
+g.__sg_scan_jobs ||= new Map();
+const jobs = g.__sg_scan_jobs;
+
+/** Quantos jobs existem agora — o `/api/health` publica isto. */
+export function totalDeJobs(): number {
+  return jobs.size;
+}
+
+/** Quantos ainda não terminaram. É a fila de verdade. */
+export function jobsAtivos(): number {
+  let n = 0;
+  for (const j of jobs.values()) if (j.status === "queued" || j.status === "running") n++;
+  return n;
+}
+
+/**
+ * Posição na fila, 1 = próximo da vez.
+ *
+ * Duas fontes, e a primeira é melhor: quando o job já está disputando uma VAGA
+ * de scanner, a posição vem de quem distribui o recurso — e essa conta inclui os
+ * scans do painel web, que não passam por rota nenhuma e não aparecem no mapa
+ * de jobs. Antes disso, resta a ordem de chegada aqui.
+ *
+ * Nenhuma das duas é exata, e não precisa ser: a pergunta que ela responde é
+ * "falta muito?". Um número aproximado e honesto vale mais que uma barra sem
+ * número nenhum — que foi o que a extensão mostrou durante todo esse tempo.
+ */
+export function posicaoNaFila(id: string): number {
+  const job = jobs.get(id);
+  if (job?.vaga) return job.vaga;
+  const espera = [...jobs.values()]
+    .filter((j) => j.status === "queued")
+    .sort((a, b) => a.criadoEm - b.criadoEm);
+  const i = espera.findIndex((j) => j.id === id);
+  return i < 0 ? 0 : i + 1;
+}
+
+export function acharJob(id: string, userId: string): ScanJob | undefined {
+  const j = jobs.get(id);
+  // Dono errado responde igual a inexistente: confirmar a existência de um job
+  // alheio já é informação que ninguém precisa dar.
+  return j && j.userId === userId ? j : undefined;
+}
+
+/**
+ * Cria o diretório temporário e grava os arquivos recebidos.
+ *
+ * Continua sendo o ponto onde código de outra pessoa entra na nossa máquina, e
+ * a validação de caminho continua em `app/api/scan/route.ts`, junto do teste
+ * que a cobre. Aqui só se escreve o que já foi aprovado.
+ */
+export async function prepararDiretorio(
+  arquivos: { rel: string; content: string }[]
+): Promise<{ dir: string; escritos: number }> {
+  const dir = await mkdtemp(join(tmpdir(), "sg-scan-"));
+  let escritos = 0;
+  for (const f of arquivos) {
+    const destino = join(dir, f.rel);
+    // Cinto e suspensório: mesmo depois da normalização, confere que o absoluto
+    // resultante continua dentro da raiz.
+    if (!destino.startsWith(dir + sep)) continue;
+    await mkdir(join(destino, ".."), { recursive: true });
+    await writeFile(destino, f.content, "utf8");
+    escritos++;
+  }
+  return { dir, escritos };
+}
+
+export interface NovoJob {
+  userId: string;
+  analyzer: "sast" | "sca";
+  locale: Locale;
+  dir: string;
+  arquivos: number;
+  bytes: number;
+}
+
+/** Registra o job e dispara a execução. Não espera por ela — esse é o ponto. */
+export function criarJob(novo: NovoJob): ScanJob {
+  recolherAbandonados();
+  limitarPorPessoa(novo.userId);
+
+  const job: ScanJob = {
+    id: randomUUID(),
+    userId: novo.userId,
+    analyzer: novo.analyzer,
+    locale: novo.locale,
+    status: "queued",
+    dir: novo.dir,
+    abortar: new AbortController(),
+    criadoEm: Date.now(),
+    visitadoEm: Date.now(),
+    arquivos: novo.arquivos,
+    bytes: novo.bytes,
+  };
+  jobs.set(job.id, job);
+  // Sem `await`: a resposta sai agora e o trabalho segue. É a inversão inteira
+  // deste arquivo. A promessa é consumida aqui mesmo (`void` + `catch` dentro
+  // de `executar`), então nada vira rejeição não tratada.
+  void executar(job);
+  return job;
+}
+
+/**
+ * Roda o scanner e guarda o desfecho no job.
+ *
+ * NUNCA lança: quem chama não está esperando ninguém. Toda falha vira
+ * `status: "error"` com o texto redigido — que é o que o cliente vai ler.
+ */
+async function executar(job: ScanJob): Promise<void> {
+  const comecou = Date.now();
+  try {
+    const dir = job.dir!;
+    // Import dinâmico: o núcleo é NODE-ONLY e não deve ser carregado no
+    // caminho de módulos do edge.
+    const { runSast } = await import("@starguard/core/analyzers/sast");
+    const { runSca } = await import("@starguard/core/analyzers/sca");
+    const { enrichFindings, enrichDependencies } = await import("@starguard/core/enrich");
+
+    // A vaga é tomada DENTRO de `runSast`/`runSca` (ver `scan-slot.ts` do
+    // núcleo), e não aqui. Assim a análise pedida pelo painel web — que chama
+    // as mesmas funções por `lib/jobs.ts`, sem passar por rota nenhuma —
+    // disputa a MESMA vaga. Uma fila que só a extensão respeitava não protegia
+    // a caixa de nada.
+    //
+    // O `report` é como o job descobre em qual dos dois estados ele está.
+    // Marcar `running` já na entrada era mentira: entre pedir a vaga e recebê-la
+    // pode haver minutos, e o cliente mostrava "escaneando no servidor" para
+    // quem ainda estava atrás de outra pessoa na fila — sem número, sem
+    // previsão, indistinguível de travado.
+    const opcoes = {
+      signal: job.abortar.signal,
+      report: (chave: string, n?: number) => {
+        if (chave === "scan.slotQueued") {
+          job.status = "queued";
+          job.vaga = n;
+        } else if (chave === "scan.scanning") {
+          job.status = "running";
+          job.vaga = undefined;
+        }
+      },
+    };
+    const bruto =
+      job.analyzer === "sast" ? await runSast(dir, opcoes) : await runSca(dir, opcoes);
+
+    if (job.abortar.signal.aborted) {
+      job.status = "cancelled";
+      return;
+    }
+
+    // O enriquecimento acontece AQUI, e só aqui.
+    //
+    // O cliente não repete: enriquecer de novo do lado dele era uma segunda
+    // chamada de IA, paga, pelo mesmo texto. Ver `analyzers/sast.ts`.
+    job.result =
+      job.analyzer === "sast"
+        ? await enrichFindings(bruto as Awaited<ReturnType<typeof runSast>>, job.locale)
+        : enrichDependencies(bruto as Awaited<ReturnType<typeof runSca>>, job.locale);
+    job.status = "done";
+
+    audit(
+      "scan.remote",
+      {
+        analyzer: job.analyzer,
+        files: job.arquivos,
+        bytes: job.bytes,
+        ms: Date.now() - comecou,
+        findings: Array.isArray(job.result) ? job.result.length : 0,
+      },
+      job.userId
+    );
+  } catch (e) {
+    if (job.abortar.signal.aborted) {
+      job.status = "cancelled";
+      return;
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    // Binário ausente no servidor não é "o scan falhou": o cliente precisa
+    // distinguir para poder cair no binário da máquina dele.
+    job.unavailable = /não encontrado|not found|ENOENT/i.test(msg);
+    const { redact } = await import("@starguard/core/redact");
+    job.error = redact(msg);
+    job.status = "error";
+  } finally {
+    job.terminadoEm = Date.now();
+    // O compromisso inteiro desta rota mora nesta linha: o código de outra
+    // pessoa não sobrevive ao scan. O RESULTADO fica na memória pelo TTL; os
+    // ARQUIVOS vão embora agora, terminando bem ou mal.
+    await apagarDiretorio(job);
+  }
+}
+
+async function apagarDiretorio(job: ScanJob): Promise<void> {
+  const dir = job.dir;
+  if (!dir) return;
+  job.dir = null;
+  await rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
+/**
+ * Para o job: mata o processo, esquece o resultado, apaga o temporário.
+ *
+ * **Síncrono no que importa.** A remoção do mapa e o `abort` acontecem antes de
+ * qualquer `await`, e não depois — porque quem cancela costuma contar a fila na
+ * linha seguinte. Com a remoção pendurada num `await rm()`, um job cancelado
+ * continuava aparecendo como existente por alguns milissegundos, e o teto por
+ * pessoa deixava passar um job a mais. O apagar do disco é lento e não interessa
+ * a ninguém: vai para segundo plano.
+ *
+ * Idempotente de propósito — o `DELETE` do cliente e o recolhimento por
+ * abandono chegam juntos com frequência, e cancelar duas vezes não pode virar
+ * erro.
+ */
+export function cancelarJob(job: ScanJob): void {
+  if (job.status === "queued" || job.status === "running") {
+    job.status = "cancelled";
+    job.abortar.abort();
+  }
+  job.result = undefined;
+  jobs.delete(job.id);
+  void apagarDiretorio(job);
+}
+
+/**
+ * Recolhe o que ninguém quer mais.
+ *
+ * Duas regras, e a primeira é a que conserta o defeito relatado:
+ *
+ * - **abandonado** — sem consulta há mais de `ABANDONO_MS` e ainda rodando.
+ *   Cancelar libera a vaga, mata o opengrep e devolve a instância a quem
+ *   estiver esperando. Era isto que não existia.
+ * - **vencido** — terminado há mais de `TTL_MS`. Só ocupa memória.
+ *
+ * Chamado a cada requisição da rota, e não por temporizador: é barato (o mapa
+ * tem unidades de entradas), acontece exatamente quando há atividade e não
+ * segura o processo vivo com um `setInterval` que a plataforma não espera.
+ */
+export function recolherAbandonados(): { abandonados: number; vencidos: number } {
+  const agora = Date.now();
+  let abandonados = 0;
+  let vencidos = 0;
+
+  for (const job of [...jobs.values()]) {
+    const ativo = job.status === "queued" || job.status === "running";
+    if (ativo && agora - job.visitadoEm > ABANDONO_MS) {
+      abandonados++;
+      audit(
+        "scan.abandoned",
+        { analyzer: job.analyzer, ms: agora - job.criadoEm },
+        job.userId
+      );
+      cancelarJob(job);
+      continue;
+    }
+    if (!ativo && job.terminadoEm && agora - job.terminadoEm > TTL_MS) {
+      vencidos++;
+      jobs.delete(job.id);
+      void apagarDiretorio(job);
+    }
+  }
+  return { abandonados, vencidos };
+}
+
+/** Mantém no máximo `POR_PESSOA` jobs vivos por dono, derrubando o mais velho. */
+function limitarPorPessoa(userId: string): void {
+  const meus = [...jobs.values()]
+    .filter((j) => j.userId === userId && (j.status === "queued" || j.status === "running"))
+    .sort((a, b) => a.criadoEm - b.criadoEm);
+  while (meus.length >= POR_PESSOA) {
+    const velho = meus.shift()!;
+    cancelarJob(velho);
+  }
+}
+
+/** Marca que alguém ainda quer este resultado. É o batimento cardíaco do job. */
+export function tocarJob(job: ScanJob): void {
+  job.visitadoEm = Date.now();
+}
+
+/** **Só para teste.** Em produção os jobs saem pelo cancelamento ou pelo TTL. */
+export function limparJobs(): void {
+  for (const j of jobs.values()) j.abortar.abort();
+  jobs.clear();
+}

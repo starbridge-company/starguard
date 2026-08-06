@@ -1,5 +1,5 @@
 // ============================================================
-// Scan no servidor — AUDITORIA.md#ARQ-14.
+// Scan no servidor — AUDITORIA.md#ARQ-14, #ARQ-16.
 //
 // Por que existe: quem instala a extensão do VS Code **não deve precisar
 // instalar nada**. `opengrep` e `trivy` vivem na nossa imagem Docker; os
@@ -9,9 +9,10 @@
 // isso governa cada decisão abaixo:
 //
 //  1. **Nada é persistido.** Os arquivos são escritos num diretório temporário
-//     com nome aleatório, escaneados, e o diretório é removido no `finally`.
-//     Não há gravação em banco, em log ou em cache. O que fica registrado é
-//     metadado: quem pediu, qual analisador, quantos arquivos, quanto demorou.
+//     com nome aleatório, escaneados, e o diretório é removido assim que o
+//     scanner termina — bem ou mal. Não há gravação em banco, em log ou em
+//     cache. O que fica registrado é metadado: quem pediu, qual analisador,
+//     quantos arquivos, quanto demorou.
 //  2. **O caminho de cada arquivo é tratado como hostil.** Ele vem do cliente,
 //     e um `../` aceito escreveria fora do diretório temporário — que é
 //     escrita arbitrária no servidor. Cada caminho é normalizado e confinado.
@@ -19,19 +20,54 @@
 //     autenticado enche o disco da instância.
 //  4. **Bearer apenas.** É rota de ferramenta; não há caminho de navegador
 //     aqui, e portanto nenhuma credencial de cookie serve.
+//
+// ---- O que mudou, e por quê ----
+//
+// A rota escaneava DENTRO da requisição e devolvia os achados na mesma
+// resposta. Isso funciona enquanto o scan cabe no tempo de uma requisição — e
+// um SAST numa instância pequena não cabe. Passado o teto do cliente, ele
+// abortava o `fetch` e **aqui nada acontecia**: o opengrep seguia rodando, a
+// vaga seguia ocupada, e cada nova tentativa somava mais um scan órfão até a
+// fila ficar permanentemente cheia. Quem usava relatava "a fila nunca é
+// limpa"; a fila estava certa, o que faltava era alguém sair dela.
+//
+// Agora o trabalho é um JOB (ver `lib/scan-jobs.ts`):
+//
+//   POST   /api/scan            aceita e responde 202 {jobId, position}
+//   GET    /api/scan?job=<id>   estado: queued | running | done | error
+//   DELETE /api/scan?job=<id>   mata o processo e apaga o temporário
+//   GET    /api/scan            os tetos do servidor, para o cliente empacotar
+//                               exatamente o que cabe em vez de adivinhar
+//
+// Nenhuma requisição passa de segundos, o que tira do caminho todo intermediário
+// que mata conexão longa (CDN, proxy de empresa, teto da plataforma) — e essa
+// era a outra metade dos "403 sem corpo JSON" que a extensão relatava.
+//
+// **O modo síncrono continua existindo** para a geração anterior do cliente:
+// sem `mode: "async"` no corpo, a rota escaneia e devolve `{result}` como
+// sempre fez. Exigir versões casadas abriria uma janela em que quem tem a
+// extensão antiga instalada não consegue analisar nada.
 // ============================================================
 import type { NextRequest } from "next/server";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, normalize } from "node:path";
 import { jsonError, jsonOk, readJson, requireSession, credentialSource } from "@/lib/http";
-import { audit } from "@/lib/auth";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { normalizeLocale } from "@/lib/i18n/config";
+import {
+  acharJob,
+  cancelarJob,
+  criarJob,
+  jobsAtivos,
+  posicaoNaFila,
+  prepararDiretorio,
+  recolherAbandonados,
+  tocarJob,
+} from "@/lib/scan-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Um scan de repositório grande passa dos 30 s padrão de algumas plataformas.
+// Só o modo síncrono (cliente antigo) precisa disto. No modo job a resposta sai
+// em segundos, e é justamente essa a razão de o modo job existir.
 export const maxDuration = 300;
 
 /**
@@ -42,8 +78,12 @@ export const maxDuration = 300;
  * servidor aceita e não consegue processar é pior que um recusado — ele derruba
  * a instância, e com ela as requisições dos vizinhos (AUDITORIA.md#ARQ-15).
  *
- * Recusar aqui não deixa ninguém sem análise: o cliente divide o pacote e
- * reenvia em partes. Ver `callRemoteScanPartido`.
+ * Estes números são PUBLICADOS no `GET /api/scan`. Enquanto não eram, o cliente
+ * empacotava pelo palpite dele (12 MB e 1200 arquivos, contra 8 MB e 800 daqui)
+ * e todo projeto de tamanho médio levava 413 na primeira tentativa — para
+ * então ser dividido em duas metades e escaneado DUAS vezes, cada uma
+ * carregando o ruleset inteiro. Era uma lentidão garantida por configuração,
+ * não por acidente de rede.
  */
 const MAX_BYTES = Number(process.env.SCAN_MAX_BYTES) || 8 * 1024 * 1024;
 const MAX_FILES = Number(process.env.SCAN_MAX_FILES) || 800;
@@ -54,49 +94,15 @@ interface ArquivoRecebido {
 }
 
 /**
- * UM scan por vez nesta instância — AUDITORIA.md#ARQ-15.
+ * Quantos jobs podem existir antes de recusarmos de imediato.
  *
- * O cliente pede `sast` e `sca` EM PARALELO, porque do lado dele são dois
- * analisadores independentes. Do lado de cá são dois scanners nativos famintos
- * dividindo a mesma caixa: o opengrep carrega o ruleset inteiro e o trivy sobe
- * o banco de vulnerabilidades. Juntos, numa instância de 512 MB, o kernel mata
- * o processo — e aí não morre um scan, morre o SERVIDOR, levando junto todas as
- * requisições em voo. Foi o que produziu "403 no sast e 502 no sca no mesmo
- * segundo", nenhum dos dois com corpo JSON.
- *
- * Serializar é o que transforma "a instância caiu" em "espere sua vez". A fila
- * é por instância (estado de módulo): não é coordenação distribuída, é a defesa
- * mínima de quem está com o processo na mão. Com mais de uma instância, cada
- * uma protege a si mesma, que é exatamente o necessário.
+ * Folgado, e agora com sentido: o que ocupa a caixa é a VAGA do scanner
+ * (`scan-slot.ts` do núcleo), não o job. Um job na fila custa memória de um
+ * diretório temporário; ele espera a vez sem competir por CPU com ninguém.
+ * Este teto só existe para o caso de muita gente ao mesmo tempo — e mesmo nele
+ * a recusa é `429` com `Retry-After`, que o cliente espera e repete.
  */
-let filaDeScan: Promise<unknown> = Promise.resolve();
-let scansNaFila = 0;
-
-/**
- * Quantos podem esperar antes de recusarmos de imediato.
- *
- * Folgado de propósito: o CLIENTE já serializa os scans dele (ver
- * `scan-transport.ts`), então um editor sozinho nunca chega aqui. Este teto
- * existe para o caso de várias pessoas ao mesmo tempo — e mesmo nele a recusa é
- * `429` com `Retry-After`, que o cliente espera e repete em vez de desistir.
- */
-const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 4;
-
-async function naFila<T>(fn: () => Promise<T>): Promise<T> {
-  scansNaFila++;
-  const minhaVez = filaDeScan.then(fn, fn);
-  // A fila encadeia o DESFECHO, não o resultado: um scan que falha não pode
-  // travar a fila para sempre.
-  filaDeScan = minhaVez.then(
-    () => undefined,
-    () => undefined
-  );
-  try {
-    return await minhaVez;
-  } finally {
-    scansNaFila--;
-  }
-}
+const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 8;
 
 /**
  * O caminho relativo, ou `null` se ele tentar sair da raiz.
@@ -120,26 +126,48 @@ export function caminhoSeguro(bruto: string): string | null {
   return limpo;
 }
 
-export async function POST(req: NextRequest) {
+/** Autenticação e origem da credencial — igual nos três métodos. */
+async function porteiro(req: NextRequest) {
   const sessao = await requireSession(req);
-  if (!sessao) return jsonError(401, "Não autenticado.", "err.unauthenticated");
-
+  if (!sessao) {
+    return { erro: jsonError(401, "Não autenticado.", "err.unauthenticated") };
+  }
   // Rota de ferramenta: cookie não serve. Fecha a porta para um site de
   // terceiro induzir o navegador de alguém logado a mandar código para cá.
   if (credentialSource(req) !== "bearer") {
-    return jsonError(403, "Esta rota aceita apenas token de aplicativo.", "err.forbidden");
+    return {
+      erro: jsonError(403, "Esta rota aceita apenas token de aplicativo.", "err.forbidden"),
+    };
   }
+  return { sessao };
+}
+
+// ------------------------------------------------------------
+// POST — aceitar o trabalho
+// ------------------------------------------------------------
+
+export async function POST(req: NextRequest) {
+  const { sessao, erro } = await porteiro(req);
+  if (erro) return erro;
 
   const ip = clientIp(req.headers);
-  const rl = await rateLimit(`scan:${sessao.sub}:${ip}`, { max: 20, windowMs: 60_000 });
+  const rl = await rateLimit(`scan:${sessao!.sub}:${ip}`, { max: 20, windowMs: 60_000 });
   if (!rl.allowed) {
     return jsonError(429, "Muitos scans seguidos. Tente em instantes.", "err.tooManyRequests");
   }
 
+  // Recolher ANTES de contar. É o que impede um órfão de ontem de recusar o
+  // trabalho de hoje — e é a linha que fazia falta.
+  recolherAbandonados();
+
   // Recusar CEDO, com corpo e status honestos, é melhor que aceitar e morrer:
   // a instância derrubada não responde nem a esta requisição nem às dos outros.
-  if (scansNaFila >= FILA_MAX) {
-    const res = jsonError(429, "Outro scan está em andamento. Tente em instantes.", "err.tooManyRequests");
+  if (jobsAtivos() >= FILA_MAX) {
+    const res = jsonError(
+      429,
+      "Há scans demais em andamento neste servidor. Tente em instantes.",
+      "err.tooManyRequests"
+    );
     res.headers.set("Retry-After", "20");
     return res;
   }
@@ -147,6 +175,7 @@ export async function POST(req: NextRequest) {
   const corpo = (await readJson(req)) as {
     analyzer?: string;
     locale?: string;
+    mode?: string;
     files?: ArquivoRecebido[];
   } | null;
 
@@ -157,7 +186,7 @@ export async function POST(req: NextRequest) {
   const files = Array.isArray(corpo?.files) ? corpo!.files! : [];
   if (files.length === 0) return jsonError(400, "Nenhum arquivo enviado.", "err.badRequest");
   if (files.length > MAX_FILES) {
-    return jsonError(413, "Arquivos demais para um scan.", "err.tooLarge");
+    return limiteExcedido("Arquivos demais para um scan.");
   }
 
   let bytes = 0;
@@ -166,77 +195,155 @@ export async function POST(req: NextRequest) {
       return jsonError(400, "Arquivo malformado.", "err.badRequest");
     }
     bytes += f.content.length;
-    if (bytes > MAX_BYTES) return jsonError(413, "Pacote grande demais.", "err.tooLarge");
+    if (bytes > MAX_BYTES) return limiteExcedido("Pacote grande demais.");
+  }
+
+  // Caminhos hostis são descartados, não são motivo de erro — mas se NENHUM
+  // sobrar, não há o que escanear.
+  const aprovados: { rel: string; content: string }[] = [];
+  for (const f of files) {
+    const rel = caminhoSeguro(f.path);
+    if (rel) aprovados.push({ rel, content: f.content });
+  }
+  if (aprovados.length === 0) {
+    return jsonError(400, "Nenhum caminho de arquivo utilizável.", "err.badRequest");
   }
 
   const locale = normalizeLocale(corpo?.locale);
-  const comecou = Date.now();
-  let raiz: string | null = null;
-
-  try {
-    raiz = await mkdtemp(join(tmpdir(), "sg-scan-"));
-
-    let escritos = 0;
-    for (const f of files) {
-      const rel = caminhoSeguro(f.path);
-      if (!rel) continue; // caminho hostil: descartado, não é motivo de erro
-      const destino = join(raiz, rel);
-      // Cinto e suspensório: mesmo depois de `caminhoSeguro`, confere que o
-      // absoluto resultante continua dentro da raiz.
-      if (!destino.startsWith(raiz + sep)) continue;
-      await mkdir(join(destino, ".."), { recursive: true });
-      await writeFile(destino, f.content, "utf8");
-      escritos++;
-    }
-    if (escritos === 0) {
-      return jsonError(400, "Nenhum caminho de arquivo utilizável.", "err.badRequest");
-    }
-
-    // Import dinâmico: o núcleo é NODE-ONLY e não deve ser carregado no
-    // caminho de módulos do edge.
-    const { runSast } = await import("@starguard/core/analyzers/sast");
-    const { runSca } = await import("@starguard/core/analyzers/sca");
-    const { enrichFindings, enrichDependencies } = await import("@starguard/core/enrich");
-
-    // O scanner nativo roda na FILA; o enriquecimento não. Só o primeiro
-    // disputa memória com o vizinho — segurar a fila durante a chamada de IA
-    // faria um scan barato esperar por uma tradução de texto.
-    // `const` local: dentro da closure da fila, o compilador não sabe que
-    // `raiz` (que o `finally` precisa ver mutável) já foi atribuída.
-    const dir = raiz;
-    const bruto =
-      analyzer === "sast"
-        ? await naFila(() => runSast(dir))
-        : await naFila(() => runSca(dir));
-
-    const result =
-      analyzer === "sast"
-        ? await enrichFindings(bruto as Awaited<ReturnType<typeof runSast>>, locale)
-        : await enrichDependencies(bruto as Awaited<ReturnType<typeof runSca>>, locale);
-
-    audit(
-      "scan.remote",
-      {
-        analyzer,
-        files: escritos,
-        bytes,
-        ms: Date.now() - comecou,
-        findings: Array.isArray(result) ? result.length : 0,
-      },
-      sessao.sub
+  const { dir, escritos } = await prepararDiretorio(aprovados);
+  if (escritos === 0) {
+    await import("node:fs/promises").then((fs) =>
+      fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     );
-
-    return jsonOk({ result });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    // Binário ausente no servidor é 503, não 500: o cliente precisa
-    // distinguir "não dá para escanear agora" de "o scan falhou".
-    const semBinario = /não encontrado|not found|ENOENT/i.test(msg);
-    const { redact } = await import("@starguard/core/redact");
-    return jsonError(semBinario ? 503 : 500, redact(msg), null);
-  } finally {
-    // O compromisso inteiro desta rota mora nesta linha: o código de outra
-    // pessoa não sobrevive à requisição.
-    if (raiz) await rm(raiz, { recursive: true, force: true }).catch(() => {});
+    return jsonError(400, "Nenhum caminho de arquivo utilizável.", "err.badRequest");
   }
+
+  const job = criarJob({
+    userId: sessao!.sub,
+    analyzer,
+    locale,
+    dir,
+    arquivos: escritos,
+    bytes,
+  });
+
+  // ---- Cliente antigo: escaneia aqui e devolve o resultado ----
+  //
+  // Ele não sabe consultar estado, então a única resposta que serve para ele é
+  // a completa. Continua exposto a todos os problemas de uma requisição longa —
+  // é o desenho que ele conhece — mas pelo menos o trabalho agora é cancelável e
+  // recolhível como qualquer outro job.
+  if (corpo?.mode !== "async") {
+    const pronto = await esperarJob(job.id, sessao!.sub);
+    if (pronto === "gone") {
+      return jsonError(500, "O scan foi perdido durante a execução.", "err.server");
+    }
+    if (pronto.status === "error") {
+      return jsonError(pronto.unavailable ? 503 : 500, pronto.error ?? "Falha no scan.", null);
+    }
+    if (pronto.status === "cancelled") {
+      // Acontece quando um terceiro pedido da mesma pessoa derruba este (ver
+      // `limitarPorPessoa`). 409 e não 499: o segundo é do nginx, não do HTTP, e
+      // há intermediário que o trata como resposta inválida.
+      return jsonError(409, "O scan foi substituído por outro do mesmo usuário.", null);
+    }
+    return jsonOk({ result: pronto.result });
+  }
+
+  return jsonOk(
+    { jobId: job.id, status: job.status, position: posicaoNaFila(job.id) },
+    202
+  );
+}
+
+/** 413 com os tetos JUNTO: o cliente reempacota certo em vez de dividir no escuro. */
+function limiteExcedido(mensagem: string) {
+  const res = jsonError(413, mensagem, "err.tooLarge");
+  res.headers.set("X-Scan-Max-Files", String(MAX_FILES));
+  res.headers.set("X-Scan-Max-Bytes", String(MAX_BYTES));
+  return res;
+}
+
+/**
+ * Espera o job terminar — **só para o cliente da geração anterior**.
+ *
+ * O polling interno é o mesmo mecanismo do cliente novo, e mantém o job vivo
+ * (`tocarJob`) para que o recolhimento por abandono não o mate no meio.
+ */
+async function esperarJob(
+  id: string,
+  userId: string
+): Promise<"gone" | { status: string; result?: unknown; error?: string; unavailable?: boolean }> {
+  for (;;) {
+    const job = acharJob(id, userId);
+    if (!job) return "gone";
+    tocarJob(job);
+    if (job.status !== "queued" && job.status !== "running") {
+      return {
+        status: job.status,
+        result: job.result,
+        error: job.error,
+        unavailable: job.unavailable,
+      };
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+// ------------------------------------------------------------
+// GET — estado do job, ou os tetos do servidor
+// ------------------------------------------------------------
+
+export async function GET(req: NextRequest) {
+  const { sessao, erro } = await porteiro(req);
+  if (erro) return erro;
+
+  recolherAbandonados();
+
+  const id = req.nextUrl.searchParams.get("job");
+  if (!id) {
+    // Sem job: os tetos. É o que permite ao cliente empacotar exatamente o que
+    // cabe, em vez de mandar demais e ser recusado.
+    return jsonOk({ maxFiles: MAX_FILES, maxBytes: MAX_BYTES, active: jobsAtivos() });
+  }
+
+  const job = acharJob(id, sessao!.sub);
+  if (!job) return jsonError(404, "Scan não encontrado.", "err.notFound");
+
+  // ESTA linha é o batimento cardíaco do job: consultar é dizer "ainda quero".
+  // Sem ela, o recolhimento por abandono mataria um scan que está sendo
+  // acompanhado — e o defeito seria o oposto do que ele conserta.
+  tocarJob(job);
+
+  if (job.status === "queued") {
+    return jsonOk({ status: "queued", position: posicaoNaFila(job.id) });
+  }
+  if (job.status === "running") return jsonOk({ status: "running" });
+  if (job.status === "cancelled") return jsonOk({ status: "cancelled" });
+  if (job.status === "error") {
+    return jsonOk({ status: "error", error: job.error, unavailable: job.unavailable });
+  }
+  return jsonOk({ status: "done", result: job.result });
+}
+
+// ------------------------------------------------------------
+// DELETE — parar de verdade
+// ------------------------------------------------------------
+
+export async function DELETE(req: NextRequest) {
+  const { sessao, erro } = await porteiro(req);
+  if (erro) return erro;
+
+  const id = req.nextUrl.searchParams.get("job");
+  if (!id) return jsonError(400, "Scan não informado.", "err.badRequest");
+
+  const job = acharJob(id, sessao!.sub);
+  // Cancelar o que já não existe é sucesso, não erro: o `DELETE` chega junto
+  // com o recolhimento por abandono mais vezes do que se imagina, e devolver
+  // 404 ali faria a extensão registrar uma falha por ter feito a coisa certa.
+  if (!job) return jsonOk({ status: "cancelled" });
+
+  cancelarJob(job);
+  recolherAbandonados();
+  return jsonOk({ status: "cancelled" });
 }

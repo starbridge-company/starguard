@@ -1,6 +1,8 @@
 import { jsonOk } from "@/lib/http";
 import { checkSchema, schemaMessage, MIGRATE_HINT } from "@/lib/schema-check";
 import { checkBinaries } from "@starguard/core/binaries";
+import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot";
+import { jobsAtivos, recolherAbandonados, totalDeJobs } from "@/lib/scan-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +15,12 @@ export const dynamic = "force-dynamic";
  * Ver AUDITORIA.md#ARQ-12.
  */
 export async function GET() {
+  // O health check é o batimento mais frequente que esta instância tem. Usá-lo
+  // para recolher jobs abandonados dá ao mecanismo uma segunda chance de rodar
+  // mesmo quando ninguém está escaneando — que é justamente quando o resto de
+  // um scan órfão fica pendurado ocupando a caixa. Ver `lib/scan-jobs.ts`.
+  recolherAbandonados();
+
   const [schema, binaries] = await Promise.all([checkSchema(), checkBinaries()]);
 
   // Distinguimos "atrasado" de "inalcançável": são consertos diferentes.
@@ -32,6 +40,22 @@ export async function GET() {
       pending: schema.pending,
     },
     scanners: binaries,
+    /**
+     * O estado da fila, em números.
+     *
+     * Existe porque "está lento" e "está cheio" pedem consertos diferentes, e
+     * até aqui não havia como distinguir os dois de fora. `slots` é quanto a
+     * caixa comporta, `busy` quanto está em uso e `waiting` quantos esperam
+     * vaga — os três contando também os scans do painel web, que passam pelo
+     * mesmo portão. `jobs` é o mapa da extensão. Ver AUDITORIA.md#ARQ-16.
+     */
+    scan: {
+      slots: scanSlots(),
+      busy: vagasEmUso(),
+      waiting: naFilaDeVagas(),
+      jobs: totalDeJobs(),
+      activeJobs: jobsAtivos(),
+    },
     message: schemaMessage(schema),
     ...(schema.ok ? {} : { hint: MIGRATE_HINT }),
     ...(faltando.length

@@ -16,10 +16,14 @@ import { comSocorroLocal, probeBinary } from "../binaries";
 import { enrichFindings } from "../enrich";
 import { makeCodeFixer } from "../fix/code-fixer";
 import { empacotarParaScan } from "../bundle";
+import { comVaga } from "../scan-slot";
 import {
   callRemoteScanPartido,
   getScanTransport,
+  limitesDoServidor,
   usingRemoteScan,
+  opcoesDeScanLocal,
+  type OpcoesDeScanLocal,
 } from "../scan-transport";
 import type { Analyzer } from "../contracts";
 import { translate } from "../i18n/translate";
@@ -35,8 +39,23 @@ export function sastBinary(): string | null {
   return ENGINES.sast === "semgrep" ? BIN.semgrep : BIN.opengrep;
 }
 
-/** Roda o SAST configurado sobre o diretório clonado e devolve as vulnerabilidades. */
-export async function runSast(dir: string): Promise<Vulnerability[]> {
+/**
+ * Roda o SAST configurado sobre o diretório clonado e devolve as
+ * vulnerabilidades.
+ *
+ * Duas coisas entram por `opts`, e as duas existem por causa do mesmo defeito:
+ * uma requisição abandonada que continuava consumindo a máquina.
+ *
+ * - **`signal`** mata o processo filho. Sem ele, cancelar do lado de fora
+ *   parava de ESPERAR pelo opengrep — o opengrep seguia rodando até o fim,
+ *   segurando a vaga e a memória de quem viesse depois.
+ * - **`report`** conta que a vez ainda não chegou, com a posição. Esperar sem
+ *   saber por quanto é indistinguível de estar travado.
+ */
+export async function runSast(
+  dir: string,
+  opts: OpcoesDeScanLocal = {}
+): Promise<Vulnerability[]> {
   const engine = ENGINES.sast;
   if (engine === "none") return [];
 
@@ -88,15 +107,32 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
   ];
 
   try {
-    const { stdout } = await pExecFile(bin, args, {
-      cwd: dir,
-      timeout: 300_000,
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    // A vaga envolve só o PROCESSO NATIVO. Segurá-la durante o parse ou o
+    // enriquecimento faria um scan barato esperar por trabalho que não disputa
+    // CPU com ninguém. Ver `scan-slot.ts`.
+    const { stdout } = await comVaga(
+      () => {
+        // Dito na TRANSIÇÃO, e não antes: entre pedir a vaga e recebê-la pode
+        // haver minutos, e anunciar "escaneando" enquanto se espera é a mesma
+        // mentira que a barra parada contava. Quem lê isto do lado do servidor
+        // (`lib/scan-jobs.ts`) usa estas duas chaves para saber se o job está
+        // na fila ou trabalhando.
+        opts.report?.("scan.scanning");
+        return pExecFile(bin, args, {
+          cwd: dir,
+          timeout: 300_000,
+          maxBuffer: 64 * 1024 * 1024,
+          // Cancelar de fora precisa MATAR o opengrep, não só parar de esperar
+          // por ele. Ver o cabeçalho desta função.
+          signal: opts.signal,
+        });
+      },
+      (posicao) => opts.report?.("scan.slotQueued", posicao)
+    );
     return parseSemgrep(JSON.parse(stdout));
   } catch (e: unknown) {
     // Semgrep retorna exit code != 0 quando encontra achados; o stdout ainda é JSON válido.
-    const err = e as { stdout?: string; message?: string };
+    const err = e as { stdout?: string; message?: string; name?: string };
     if (err.stdout) {
       try {
         return parseSemgrep(JSON.parse(err.stdout));
@@ -104,6 +140,9 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
         /* cai no throw */
       }
     }
+    // Cancelamento não é falha do scanner: sobe como está, para quem cancelou
+    // não receber "o SAST falhou" por ter clicado em parar.
+    if (opts.signal?.aborted) throw e;
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
         `Binário do SAST (${bin}) não encontrado no host. Instale-o para habilitar o scan de código.`
@@ -120,17 +159,44 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
  * está sendo analisado. É a diferença em relação ao SCA, que manda só
  * manifestos, e é por isso que a interface separa os dois na hora de pedir
  * consentimento.
+ *
+ * O que volta daqui **já vem enriquecido**: quem escaneou foi o servidor, e ele
+ * chama `enrichFindings` antes de responder. Ver `run` abaixo.
  */
 async function sastRemoto(
   dir: string,
   locale: Locale,
+  signal?: AbortSignal,
   report?: (m: string) => void
 ): Promise<Vulnerability[]> {
   const t = getScanTransport();
-  if (t.kind !== "remote") return runSast(dir);
+  if (t.kind !== "remote") return runSast(dir, { signal });
 
-  const pacote = await empacotarParaScan(dir, "sast");
+  // Os tetos vêm do SERVIDOR, não de um palpite daqui. Ver `limitesDoServidor`.
+  const limites = await limitesDoServidor(t);
+  const pacote = await empacotarParaScan(dir, "sast", {
+    maxFiles: limites.maxFiles,
+    totalBytes: limites.maxBytes,
+  });
   if (pacote.files.length === 0) return [];
+
+  // O que NÃO coube é dito em voz alta.
+  //
+  // O teto do pacote é do servidor, não do projeto: um repositório grande passa
+  // dele com folga, e até aqui o excesso sumia dentro de `Pacote.truncated` sem
+  // ninguém ler. O resultado tinha cara de scan completo e cobria uma parte —
+  // que é exatamente o UX-15 ("não encontrou" x "não procurou") no lugar mais
+  // caro possível, o de uma ferramenta de segurança.
+  if (pacote.truncated > 0) {
+    report?.(translate(locale, "scan.truncated", { n: pacote.truncated }));
+  }
+  report?.(
+    translate(locale, "scan.uploading", {
+      n: pacote.files.length,
+      mb: (pacote.bytes / (1024 * 1024)).toFixed(1),
+    })
+  );
+
   // Partido quando recusado inteiro: é o pacote GRANDE que apanha de quem está
   // no meio do caminho, e o SAST é justamente o que manda código-fonte.
   //
@@ -144,8 +210,11 @@ async function sastRemoto(
       analyzer: "sast",
       files: pacote.files,
       locale,
-      // O transporte fala por CHAVE; quem sabe o idioma é o analisador.
-      report: (m) => report?.(translate(locale, m as MessageKey)),
+      signal,
+      // O transporte fala por CHAVE e por número; quem sabe o idioma é o
+      // analisador. `n` é a posição na fila do servidor quando há uma.
+      report: (m, n) =>
+        report?.(translate(locale, m as MessageKey, n === undefined ? undefined : { n })),
     },
     () => report?.(translate(locale, "scan.split"))
   );
@@ -175,18 +244,32 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
   async run(ctx) {
     const dir = ctx.workspace!.root;
     ctx.report?.(usingRemoteScan() ? translate(ctx.locale, "scan.server") : ENGINES.sast);
-    const achados = usingRemoteScan()
-      ? await comSocorroLocal(
-          () => sastRemoto(dir, ctx.locale, (m) => ctx.report?.(m)),
-          () => runSast(dir),
-          sastBinary(),
-          ctx
-        )
-      : await runSast(dir);
+
     // Descrições legíveis no idioma de quem pediu. O catálogo local resolve a
     // maioria sem custo; a IA entra em lote só no que sobra, e nunca lança.
     // Ver AUDITORIA.md#FEAT-03.
-    return enrichFindings(achados, ctx.locale);
+    const local = async () =>
+      enrichFindings(await runSast(dir, opcoesDeScanLocal(ctx)), ctx.locale);
+
+    if (!usingRemoteScan()) return local();
+
+    // ---- Por que NÃO há `enrichFindings` no caminho remoto ----
+    //
+    // Porque o servidor já enriqueceu antes de responder
+    // (`app/api/scan/route.ts`). Enriquecer de novo aqui era uma SEGUNDA
+    // chamada de IA — paga, pelo mesmo texto, com o teto de tempo da etapa
+    // `software` (280 s) e até duas retentativas. Numa análise remota isso
+    // podia custar mais tempo que o scan inteiro, e não mudava uma palavra do
+    // que aparecia na tela. Era a maior fatia isolada do "o SAST demora muito".
+    //
+    // O socorro local continua enriquecendo, porque ali quem escaneou foi esta
+    // máquina e ninguém explicou nada ainda.
+    return comSocorroLocal(
+      () => sastRemoto(dir, ctx.locale, ctx.signal, (m) => ctx.report?.(m)),
+      local,
+      sastBinary(),
+      ctx
+    );
   },
 
   // A correção mora AQUI, junto de quem achou o problema.

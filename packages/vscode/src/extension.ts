@@ -1765,8 +1765,29 @@ async function diagnosticarServidor(): Promise<void> {
       db?: string;
       scanners?: { name: string; configured: string; present: boolean }[];
       scannersMessage?: string;
+      scan?: {
+        slots: number;
+        busy: number;
+        waiting: number;
+        jobs: number;
+        activeJobs: number;
+      };
     };
     saida.appendLine(`  status: ${corpo.status ?? res.status} · banco: ${corpo.db ?? "?"}`);
+
+    // A fila, em números.
+    //
+    // "Está lento" e "está cheio" pedem consertos diferentes, e sem estes
+    // números não havia como distinguir os dois sem acesso ao servidor — foi
+    // parte do que fez a investigação da fila presa demorar tanto.
+    // Ver AUDITORIA.md#ARQ-16.
+    if (corpo.scan) {
+      const { slots, busy, waiting, activeJobs } = corpo.scan;
+      saida.appendLine(
+        `  fila: ${busy}/${slots} scanner(s) em uso · ${waiting} esperando vaga · ${activeJobs} scan(s) ativo(s)`
+      );
+    }
+
     for (const s of corpo.scanners ?? []) {
       saida.appendLine(
         s.present
