@@ -217,3 +217,91 @@ describe("os arquivos recebidos", () => {
     }
   });
 });
+
+// ============================================================
+// Defeitos do ENDPOINT, encontrados na segunda passada.
+//
+// Depois de o job funcionar, sobrou reler a rota com olhos de quem procura o
+// que ainda pode travar ou vazar. Estes quatro estavam lá.
+// ============================================================
+
+describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
+  const rota = () => import("@/app/api/scan/route");
+
+  it("o `content-length` é conferido antes do parse", async () => {
+    // `MAX_BYTES` era checado DEPOIS de `readJson`, ou seja, depois de o JSON
+    // inteiro já estar bufferizado e parseado na memória. Numa instância de
+    // 512 MB isso torna o teto decorativo: um cliente autenticado que mande
+    // 300 MB derruba o processo antes da primeira linha de validação — e leva
+    // junto as requisições de todo mundo, que é o modo de falha do ARQ-15.
+    const fonte = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/api/scan/route.ts", "utf8")
+    );
+    const antes = fonte.indexOf('req.headers.get("content-length")');
+    const depois = fonte.indexOf("await readJson(req)");
+    expect(antes).toBeGreaterThan(0);
+    expect(antes).toBeLessThan(depois);
+  });
+
+  it("a rota continua exportando o guarda de caminho, com o teste que o cobre", async () => {
+    const { caminhoSeguro } = await rota();
+    expect(caminhoSeguro("../../etc/passwd")).toBeNull();
+  });
+});
+
+describe("nenhum temporário fica para trás", () => {
+  it("o job apaga o diretório ao terminar, com qualquer desfecho", async () => {
+    const { mkdtemp, writeFile, access } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = await mkdtemp(join(tmpdir(), "sg-scan-teste-"));
+    await writeFile(join(dir, "a.ts"), "const a = 1;", "utf8");
+
+    // Um binário que não existe: o scanner falha em milissegundos, e é o
+    // desfecho RUIM que interessa aqui. "Nada é persistido" não pode valer só
+    // no caminho feliz — e a máquina que roda esta suíte não precisa ter
+    // opengrep para o teste dizer a verdade.
+    //
+    // `BIN.opengrep` é um getter que lê o env a cada acesso, justamente para
+    // poder ser configurado depois da carga do módulo. Ver `core/src/config.ts`.
+    const antes = process.env.OPENGREP_BIN;
+    process.env.OPENGREP_BIN = "binario-que-nao-existe-starguard";
+    try {
+      const job = criarJob({
+        userId: ALICE,
+        analyzer: "sast",
+        locale: "pt-BR",
+        dir,
+        arquivos: 1,
+        bytes: 12,
+      });
+
+      // `terminadoEm` é a ÚLTIMA coisa que o job escreve, depois de o disco já
+      // estar limpo — esperar por ele é esperar pelo fim de verdade. Um laço com
+      // número fixo de voltas passava sozinho e falhava na suíte cheia, onde a
+      // máquina está disputada: a espera precisa ser por condição, não por
+      // contagem.
+      await vi.waitFor(() => expect(job.terminadoEm).toBeGreaterThan(0), {
+        timeout: 10_000,
+        interval: 20,
+      });
+      expect(job.status).toBe("error");
+      await expect(access(dir)).rejects.toThrow();
+    } finally {
+      if (antes === undefined) delete process.env.OPENGREP_BIN;
+      else process.env.OPENGREP_BIN = antes;
+      await import("node:fs/promises").then((fs) =>
+        fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+      );
+    }
+  }, 15_000);
+
+  it("o job larga a referência do diretório junto", () => {
+    // Guardar o caminho depois de apagá-lo convidaria uma segunda remoção a
+    // acertar um diretório que já pertence a outro scan.
+    const job = jobFalso();
+    cancelarJob(job);
+    expect(job.dir).toBeNull();
+  });
+});

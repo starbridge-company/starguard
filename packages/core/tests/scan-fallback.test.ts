@@ -243,9 +243,18 @@ describe("403 sem autor não chega mais à tela (UX-27)", () => {
   it("recusa de intermediário AUTORIZA o socorro local", async () => {
     // Com o opengrep instalado a um palmo, deixar de analisar por causa de um
     // 403 de CDN é o pior desfecho possível — e o pedido nunca chegou ao app.
+    //
+    // O código é `blocked`, e não mais `unreachable`. A distinção nasceu de um
+    // defeito medido: com o servidor FORA DO AR, `unreachable` autorizava
+    // `callRemoteScanPartido` a dividir o pacote, e 800 arquivos desciam sete
+    // níveis de divisão repagando o teto de envio a cada um — vinte e oito
+    // minutos para concluir que o DNS não resolvia. Dividir só faz sentido
+    // quando ALGUÉM respondeu recusando; metade de um pacote não chega mais
+    // perto de um servidor que não atende. Ver AUDITORIA.md#ARQ-17.
     responder(403, "<html>Cloudflare</html>", { "content-type": "text/html" });
     const erro = await chamar().catch((e) => e as RemoteScanError);
-    expect(erro.code).toBe("unreachable");
+    expect(erro.code).toBe("blocked");
+    // O que importava neste teste continua valendo: a análise acontece.
     expect(podeCairParaLocal(erro)).toBe(true);
   });
 

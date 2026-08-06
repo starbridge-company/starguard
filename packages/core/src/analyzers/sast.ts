@@ -21,8 +21,10 @@ import {
   callRemoteScanPartido,
   getScanTransport,
   limitesDoServidor,
+  servidorRespondeu,
   usingRemoteScan,
   opcoesDeScanLocal,
+  RemoteScanError,
   type OpcoesDeScanLocal,
 } from "../scan-transport";
 import type { Analyzer } from "../contracts";
@@ -106,6 +108,20 @@ export async function runSast(
     ".",
   ];
 
+  // `--config auto` BAIXA o ruleset inteiro de semgrep.dev, a cada execução.
+  //
+  // É o padrão quando ninguém apontou regras locais, e é a explicação mais
+  // comum para "o SAST está rodando há vinte minutos e não sai do lugar": não há
+  // nada travado, há milhares de regras sendo buscadas pela rede antes de o
+  // primeiro arquivo ser lido. Numa máquina atrás de proxy com CA própria isso
+  // nem termina — falha no meio, e o sintoma é um erro de rede no lugar de
+  // "falta configurar".
+  //
+  // Não dá para consertar o download; dá para parar de fazê-lo em silêncio. A
+  // frase diz o que está acontecendo e qual é a saída, e o `doctor` repete o
+  // aviso antes de a pessoa esperar por nada. Ver AUDITORIA.md#ARQ-17.
+  if (sastConfig() === "auto") opts.report?.("scan.rulesRemote");
+
   try {
     // A vaga envolve só o PROCESSO NATIVO. Segurá-la durante o parse ou o
     // enriquecimento faria um scan barato esperar por trabalho que não disputa
@@ -171,6 +187,20 @@ async function sastRemoto(
 ): Promise<Vulnerability[]> {
   const t = getScanTransport();
   if (t.kind !== "remote") return runSast(dir, { signal });
+
+  // A sonda ANTES de ler o disco e de empacotar megabytes.
+  //
+  // Com o servidor fora do ar, o caminho anterior era: varrer o projeto,
+  // empacotar 8 MB, subir (120 s), tentar de novo (120 s), dividir em duas
+  // metades e repetir tudo — sete vezes. Vinte e oito minutos para chegar a uma
+  // conclusão que uma requisição de dezenas de bytes entrega em segundos.
+  report?.(translate(locale, "scan.probing"));
+  if (!(await servidorRespondeu(t))) {
+    throw new RemoteScanError(
+      `Não foi possível falar com o servidor (${t.baseUrl}).`,
+      "unreachable"
+    );
+  }
 
   // Os tetos vêm do SERVIDOR, não de um palpite daqui. Ver `limitesDoServidor`.
   const limites = await limitesDoServidor(t);

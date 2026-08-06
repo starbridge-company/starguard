@@ -14,6 +14,31 @@ export const dynamic = "force-dynamic";
  * faltava quando o login começou a devolver 500 sem explicação.
  * Ver AUDITORIA.md#ARQ-12.
  */
+/**
+ * Um health check que TRAVA é pior que um que responde mal.
+ *
+ * Medido contra a produção: `/api/health` não respondeu em 90 s. A causa é o
+ * `checkSchema`, que consulta o banco — ele trata erro, mas não trata DEMORA, e
+ * uma conexão pendurada espera para sempre. O efeito é o pior possível para esta
+ * rota em particular: ela é a única fonte de verdade sobre o estado do servidor,
+ * é o que o `starguard doctor` consulta e é o que o orquestrador usa para
+ * decidir se manda tráfego. Sem resposta, quem está depurando não consegue
+ * distinguir "o banco caiu" de "o servidor inteiro morreu" — e foi exatamente
+ * essa distinção que faltou aqui.
+ *
+ * Com prazo, o pior caso vira uma resposta que diz `"unknown"` no lugar do que
+ * não deu para medir. Uma resposta parcial e pontual vale mais que uma completa
+ * que nunca chega.
+ */
+const PRAZO_CHECAGEM_MS = Number(process.env.HEALTH_TIMEOUT_MS) || 8_000;
+
+function comPrazo<T>(promessa: Promise<T>, aoEstourar: T): Promise<T> {
+  return Promise.race([
+    promessa.catch(() => aoEstourar),
+    new Promise<T>((r) => setTimeout(() => r(aoEstourar), PRAZO_CHECAGEM_MS)),
+  ]);
+}
+
 export async function GET() {
   // O health check é o batimento mais frequente que esta instância tem. Usá-lo
   // para recolher jobs abandonados dá ao mecanismo uma segunda chance de rodar
@@ -21,7 +46,16 @@ export async function GET() {
   // um scan órfão fica pendurado ocupando a caixa. Ver `lib/scan-jobs.ts`.
   recolherAbandonados();
 
-  const [schema, binaries] = await Promise.all([checkSchema(), checkBinaries()]);
+  const [schema, binaries] = await Promise.all([
+    comPrazo(checkSchema(), {
+      ok: false,
+      expected: 0,
+      applied: 0,
+      pending: [],
+      error: `Sem resposta do banco em ${PRAZO_CHECAGEM_MS} ms.`,
+    }),
+    comPrazo(checkBinaries(), []),
+  ]);
 
   // Distinguimos "atrasado" de "inalcançável": são consertos diferentes.
   const db = schema.error ? "unreachable" : "ok";

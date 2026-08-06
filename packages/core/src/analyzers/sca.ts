@@ -21,7 +21,9 @@ import {
   getScanTransport,
   limitesDoServidor,
   opcoesDeScanLocal,
+  servidorRespondeu,
   usingRemoteScan,
+  RemoteScanError,
   type OpcoesDeScanLocal,
 } from "../scan-transport";
 import type { Analyzer } from "../contracts";
@@ -108,6 +110,16 @@ async function scaRemoto(
 ): Promise<DependencyVuln[]> {
   const t = getScanTransport();
   if (t.kind !== "remote") return runSca(dir, { signal });
+
+  // A sonda antes do pacote — ver o mesmo trecho em `sast.ts`. Aqui o pacote é
+  // pequeno, mas o teto de envio é o mesmo e a espera inútil também.
+  report?.(translate(locale, "scan.probing"));
+  if (!(await servidorRespondeu(t))) {
+    throw new RemoteScanError(
+      `Não foi possível falar com o servidor (${t.baseUrl}).`,
+      "unreachable"
+    );
+  }
 
   // O SCA manda só manifestos — alguns kilobytes — e nunca chega perto do teto.
   // Perguntar mesmo assim mantém uma regra só para os dois analisadores, em vez

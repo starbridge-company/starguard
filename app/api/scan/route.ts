@@ -49,6 +49,7 @@
 // extensão antiga instalada não consegue analisar nada.
 // ============================================================
 import type { NextRequest } from "next/server";
+import { rm } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { jsonError, jsonOk, readJson, requireSession, credentialSource } from "@/lib/http";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
@@ -172,6 +173,23 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
+  // ---- O TAMANHO é conferido ANTES de o corpo ser lido ----
+  //
+  // `MAX_BYTES` era checado depois de `readJson`, ou seja, depois de o JSON
+  // inteiro já ter sido bufferizado E parseado na memória. Numa instância de
+  // 512 MB isso torna o teto decorativo: um cliente autenticado que mande 300 MB
+  // derruba o processo antes de a primeira linha de validação rodar — e derruba
+  // junto as requisições de todo mundo, que é exatamente o modo de falha do
+  // ARQ-15. O `content-length` custa uma leitura de cabeçalho.
+  //
+  // A folga de 2× cobre o inchaço do JSON sobre o conteúdo cru (escapes, nomes
+  // de campo, aspas). O teto exato continua sendo aplicado abaixo, sobre os
+  // bytes de verdade.
+  const declarado = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declarado) && declarado > MAX_BYTES * 2) {
+    return limiteExcedido("Pacote grande demais.");
+  }
+
   const corpo = (await readJson(req)) as {
     analyzer?: string;
     locale?: string;
@@ -212,20 +230,27 @@ export async function POST(req: NextRequest) {
   const locale = normalizeLocale(corpo?.locale);
   const { dir, escritos } = await prepararDiretorio(aprovados);
   if (escritos === 0) {
-    await import("node:fs/promises").then((fs) =>
-      fs.rm(dir, { recursive: true, force: true }).catch(() => {})
-    );
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
     return jsonError(400, "Nenhum caminho de arquivo utilizável.", "err.badRequest");
   }
 
-  const job = criarJob({
-    userId: sessao!.sub,
-    analyzer,
-    locale,
-    dir,
-    arquivos: escritos,
-    bytes,
-  });
+  // O temporário só passa a ter dono quando o job existe. Se `criarJob` falhar,
+  // ninguém mais conhece este diretório — e um diretório com código de outra
+  // pessoa esquecido no disco é a única promessa que esta rota não pode quebrar.
+  let job;
+  try {
+    job = criarJob({
+      userId: sessao!.sub,
+      analyzer,
+      locale,
+      dir,
+      arquivos: escritos,
+      bytes,
+    });
+  } catch (e) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
 
   // ---- Cliente antigo: escaneia aqui e devolve o resultado ----
   //
@@ -237,6 +262,11 @@ export async function POST(req: NextRequest) {
     const pronto = await esperarJob(job.id, sessao!.sub);
     if (pronto === "gone") {
       return jsonError(500, "O scan foi perdido durante a execução.", "err.server");
+    }
+    if (pronto === "timeout") {
+      // 504 e não 500: é tempo, não defeito, e o cliente antigo trata 5xx como
+      // motivo para tentar de novo em vez de mostrar "o scan falhou".
+      return jsonError(504, "O scan passou do tempo desta requisição.", null);
     }
     if (pronto.status === "error") {
       return jsonError(pronto.unavailable ? 503 : 500, pronto.error ?? "Falha no scan.", null);
@@ -269,11 +299,25 @@ function limiteExcedido(mensagem: string) {
  *
  * O polling interno é o mesmo mecanismo do cliente novo, e mantém o job vivo
  * (`tocarJob`) para que o recolhimento por abandono não o mate no meio.
+ *
+ * **Com prazo**, e o prazo é menor que o `maxDuration` da rota. Sem ele este
+ * laço não tinha condição de parada nenhuma: um scanner que travasse deixaria a
+ * requisição aberta pelo tempo que a plataforma tolerasse, segurando uma conexão
+ * e um `setTimeout` a cada meio segundo. É o mesmo erro do desenho antigo — não
+ * existir saída — reintroduzido na compatibilidade, e por isso vale um teto
+ * explícito em vez da confiança em quem hospeda.
  */
+const ESPERA_SINCRONA_MS = Number(process.env.SCAN_SYNC_DEADLINE_MS) || 240_000;
+
 async function esperarJob(
   id: string,
   userId: string
-): Promise<"gone" | { status: string; result?: unknown; error?: string; unavailable?: boolean }> {
+): Promise<
+  | "gone"
+  | "timeout"
+  | { status: string; result?: unknown; error?: string; unavailable?: boolean }
+> {
+  const ate = Date.now() + ESPERA_SINCRONA_MS;
   for (;;) {
     const job = acharJob(id, userId);
     if (!job) return "gone";
@@ -285,6 +329,12 @@ async function esperarJob(
         error: job.error,
         unavailable: job.unavailable,
       };
+    }
+    if (Date.now() > ate) {
+      // Desistir de ESPERAR não é desistir do trabalho: o job segue, e é
+      // recolhido por abandono se ninguém voltar. Matá-lo aqui jogaria fora um
+      // scan que talvez estivesse a segundos de terminar.
+      return "timeout";
     }
     await new Promise((r) => setTimeout(r, 500));
   }

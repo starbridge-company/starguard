@@ -640,6 +640,61 @@ de disputar memória com a extensão, e nada no caminho dele foi tocado.
 funcionando durante a implantação — exigir versões casadas abriria uma janela em
 que ninguém consegue analisar nada.
 
+### ARQ-17 · Vinte minutos para descobrir que o servidor estava fora do ar ✅
+**P0 · Esforço P**
+
+> ✅ **Corrigido em 06/08/2026**, na segunda passada sobre o mesmo endpoint.
+> Relatado assim: *"o sast está rodando há 17 minutos e nada ainda"* e, depois,
+> *"deu isso ainda depois de tanto tempo: Não foi possível falar com o servidor
+> (…): ENOTFOUND"*.
+
+**A aritmética do defeito**, medida contra os tetos reais do código:
+
+```
+POST do pacote ......................... 120 s, com UMA segunda tentativa = 240 s
+`callRemoteScanPartido` divide ao levar `unreachable`
+800 arquivos -> 400 -> 200 -> 100 -> 50 -> 25 -> 12 -> ... -> 1  = 7 níveis
+-------------------------------------------------------------------------
+7 × 240 s = 28 minutos antes de o opengrep local ser sequer cogitado
+```
+
+A divisão em partes existe pelo `UX-27`: um intermediário recusa o pacote
+**grande** e devolve uma página, e ali dividir resolve. Mas quando **ninguém
+respondeu** — DNS que não resolve, porta fechada, tempo esgotado — o tamanho do
+pacote não tem nada a ver com a falha. Cada metade só repaga o mesmo teto.
+
+- **`unreachable` e `blocked` viraram códigos diferentes.** Nada respondeu × 
+  alguém respondeu recusando. Só o segundo autoriza dividir. Os dois continuam
+  autorizando o socorro local — que era o ponto do UX-27 e segue valendo.
+- **A sonda barata vai na frente.** `servidorRespondeu()` faz um `GET` de
+  dezenas de bytes antes de varrer o disco e empacotar megabytes. Com o servidor
+  mudo, a conclusão sai em segundos em vez de meia hora. Um `401` conta como
+  "atende": confundir sessão expirada com rede fora mandaria a pessoa caçar um
+  problema que não é o dela.
+
+**Mais quatro defeitos no mesmo endpoint, encontrados relendo-o a pedido:**
+
+| Defeito | Por que importa |
+|---|---|
+| `MAX_BYTES` era conferido **depois** de `readJson` | O teto era decorativo: o JSON inteiro já estava bufferizado e parseado na memória. Um cliente autenticado mandando 300 MB derruba a instância de 512 MB antes da primeira validação — o modo de falha do `ARQ-15`, pela porta da frente. Agora o `content-length` é lido primeiro |
+| `esperarJob` (caminho síncrono) não tinha prazo | Laço sem condição de parada segurando uma requisição pelo tempo que a plataforma tolerasse. É o erro do desenho antigo — não existir saída — reintroduzido na compatibilidade. Teto explícito de 240 s, e responde `504` |
+| `/api/health` **não respondia em 90 s** (medido contra a produção) | `checkSchema` trata erro do banco mas não trata DEMORA. É a única fonte de verdade sobre o servidor, é o que o `doctor` consulta — sem resposta não dá para distinguir "o banco caiu" de "o servidor morreu". Prazo de 8 s, e o que não deu para medir vem dito |
+| Temporário vazava em duas janelas | Se `criarJob` falhasse, ninguém mais conhecia o diretório; e um `OOM kill` entre o `writeFile` e o `rm` deixava código de outra pessoa no disco. Guarda no `catch` + varredura de `sg-scan-*` antigos na carga do módulo |
+
+**E o estado terminal passou a ser publicado DEPOIS de o disco estar limpo.** O
+desfecho fica numa variável local até o `finally` apagar o temporário. A janela
+anterior era de milissegundos e nunca causou defeito visível; ela importa porque
+*"os arquivos existem durante o scan e são apagados depois"* é a frase que
+sustenta esta rota inteira — e uma frase dessas se cumpre no relógio de quem lê.
+
+**O ruleset local, que é a outra metade do "demora MUITO".** Sem
+`starguard.sastRules`, o opengrep roda com `--config auto` e **baixa milhares de
+regras de semgrep.dev a cada execução** — sem erro, sem log, só espera. Nesta
+máquina o ruleset está em `C:\Users\Nelson\bin\opengrep-rules` e a configuração
+estava vazia. Não dá para consertar o download; dá para parar de fazê-lo em
+silêncio: o cartão agora diz o que está acontecendo e qual é a saída, e o
+`doctor` avisa **antes** de alguém esperar por nada.
+
 ### UX-26 · As ações ficavam DEPOIS de dezenas de achados ✅
 **P2 · Esforço P**
 

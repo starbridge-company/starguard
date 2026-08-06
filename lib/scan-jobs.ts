@@ -219,9 +219,22 @@ export function criarJob(novo: NovoJob): ScanJob {
  *
  * NUNCA lança: quem chama não está esperando ninguém. Toda falha vira
  * `status: "error"` com o texto redigido — que é o que o cliente vai ler.
+ *
+ * **O estado terminal é publicado DEPOIS de o disco estar limpo.** O desfecho
+ * fica numa variável local até o `finally` apagar o temporário; só então vai
+ * para o `job`. A ordem inversa — que era a daqui — deixava uma janela em que o
+ * cliente podia ler `status: "done"` com o código-fonte dele ainda no disco do
+ * servidor. A janela é de milissegundos e nunca causou defeito visível; ela
+ * importa porque "os arquivos existem durante o scan e são apagados depois" é a
+ * frase que sustenta esta rota inteira, e uma frase dessas se cumpre no relógio
+ * de quem lê, não no nosso.
  */
 async function executar(job: ScanJob): Promise<void> {
   const comecou = Date.now();
+  let desfecho: Pick<ScanJob, "status" | "result" | "error" | "unavailable"> = {
+    status: "error",
+    error: "O scan terminou sem desfecho.",
+  };
   try {
     const dir = job.dir!;
     // Import dinâmico: o núcleo é NODE-ONLY e não deve ser carregado no
@@ -257,7 +270,7 @@ async function executar(job: ScanJob): Promise<void> {
       job.analyzer === "sast" ? await runSast(dir, opcoes) : await runSca(dir, opcoes);
 
     if (job.abortar.signal.aborted) {
-      job.status = "cancelled";
+      desfecho = { status: "cancelled" };
       return;
     }
 
@@ -265,11 +278,11 @@ async function executar(job: ScanJob): Promise<void> {
     //
     // O cliente não repete: enriquecer de novo do lado dele era uma segunda
     // chamada de IA, paga, pelo mesmo texto. Ver `analyzers/sast.ts`.
-    job.result =
+    const result =
       job.analyzer === "sast"
         ? await enrichFindings(bruto as Awaited<ReturnType<typeof runSast>>, job.locale)
         : enrichDependencies(bruto as Awaited<ReturnType<typeof runSca>>, job.locale);
-    job.status = "done";
+    desfecho = { status: "done", result };
 
     audit(
       "scan.remote",
@@ -278,28 +291,39 @@ async function executar(job: ScanJob): Promise<void> {
         files: job.arquivos,
         bytes: job.bytes,
         ms: Date.now() - comecou,
-        findings: Array.isArray(job.result) ? job.result.length : 0,
+        findings: Array.isArray(result) ? result.length : 0,
       },
       job.userId
     );
   } catch (e) {
     if (job.abortar.signal.aborted) {
-      job.status = "cancelled";
+      desfecho = { status: "cancelled" };
       return;
     }
     const msg = e instanceof Error ? e.message : String(e);
-    // Binário ausente no servidor não é "o scan falhou": o cliente precisa
-    // distinguir para poder cair no binário da máquina dele.
-    job.unavailable = /não encontrado|not found|ENOENT/i.test(msg);
     const { redact } = await import("@starguard/core/redact");
-    job.error = redact(msg);
-    job.status = "error";
+    desfecho = {
+      status: "error",
+      error: redact(msg),
+      // Binário ausente no servidor não é "o scan falhou": o cliente precisa
+      // distinguir para poder cair no binário da máquina dele.
+      unavailable: /não encontrado|not found|ENOENT/i.test(msg),
+    };
   } finally {
-    job.terminadoEm = Date.now();
     // O compromisso inteiro desta rota mora nesta linha: o código de outra
     // pessoa não sobrevive ao scan. O RESULTADO fica na memória pelo TTL; os
     // ARQUIVOS vão embora agora, terminando bem ou mal.
     await apagarDiretorio(job);
+
+    // E SÓ AGORA o desfecho fica visível. Um job cancelado no meio já saiu do
+    // mapa e não volta a ter estado — publicar aqui o ressuscitaria como "done".
+    if (!job.abortar.signal.aborted) {
+      job.status = desfecho.status;
+      job.result = desfecho.result;
+      job.error = desfecho.error;
+      job.unavailable = desfecho.unavailable;
+    }
+    job.terminadoEm = Date.now();
   }
 }
 
@@ -394,4 +418,50 @@ export function tocarJob(job: ScanJob): void {
 export function limparJobs(): void {
   for (const j of jobs.values()) j.abortar.abort();
   jobs.clear();
+}
+
+/**
+ * Varre temporários de scan que sobraram de um processo ANTERIOR.
+ *
+ * O `finally` de cada scan apaga o seu diretório, e isso cobre tudo o que
+ * acontece dentro de uma vida do processo. Não cobre a morte do processo: um
+ * `OOM kill` — que é justamente o que este servidor vinha sofrendo — mata o Node
+ * entre o `writeFile` e o `rm`, e o `sg-scan-*` fica no disco com código de
+ * outra pessoa dentro.
+ *
+ * "Nada é persistido" é a promessa central desta rota. Uma promessa que só vale
+ * quando o processo termina bem não é a promessa que está escrita no cabeçalho.
+ *
+ * Roda uma vez, na carga do módulo, e só remove o que tem mais de uma hora —
+ * outra instância pode estar escaneando agora, e o `tmpdir` pode ser
+ * compartilhado.
+ */
+async function varrerRestosAntigos(): Promise<void> {
+  const LIMITE_MS = 60 * 60_000;
+  try {
+    const { readdir, stat } = await import("node:fs/promises");
+    const raiz = tmpdir();
+    for (const nome of await readdir(raiz)) {
+      if (!nome.startsWith("sg-scan-")) continue;
+      const caminho = join(raiz, nome);
+      try {
+        const info = await stat(caminho);
+        if (Date.now() - info.mtimeMs < LIMITE_MS) continue;
+        await rm(caminho, { recursive: true, force: true });
+      } catch {
+        /* sumiu no meio, ou é de outro dono: seguir */
+      }
+    }
+  } catch {
+    /* sem `tmpdir` legível não há o que varrer */
+  }
+}
+
+// Uma vez por processo, e sem `await`: a varredura não pode atrasar a primeira
+// requisição. `__sg_scan_varrido` no global porque o hot reload do Next reavalia
+// o módulo, e varrer a cada salvamento em desenvolvimento seria desperdício.
+const gv = globalThis as unknown as { __sg_scan_varrido?: boolean };
+if (!gv.__sg_scan_varrido) {
+  gv.__sg_scan_varrido = true;
+  void varrerRestosAntigos();
 }

@@ -1983,6 +1983,23 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
             : `✖ ${nome} — ${t(reasonKey(e.reason!), { bin: e.detail ?? "" })}`
         );
       }
+
+      // O ruleset do SAST local, dito ANTES de alguém esperar por ele.
+      //
+      // Sem `starguard.sastRules`, o opengrep roda com `--config auto` e baixa
+      // milhares de regras de semgrep.dev a cada execução. É a explicação mais
+      // comum para "está rodando há vinte minutos e não sai do lugar", e é
+      // invisível: não há erro, não há log, só espera. Ver AUDITORIA.md#ARQ-17.
+      const regras = cfg().get<string>("sastRules")?.trim();
+      saida.appendLine("");
+      saida.appendLine(
+        regras
+          ? `✔ Regras do SAST: ${regras}`
+          : "⚠ Regras do SAST: nenhuma configurada — o opengrep vai BAIXAR o ruleset de\n" +
+            "  semgrep.dev a cada execução (lento, e não funciona offline). Aponte um\n" +
+            "  diretório local em starguard.sastRules."
+      );
+
       await diagnosticarServidor();
     }),
 

@@ -863,6 +863,9 @@ export const PT_BR = {
   "scan.queued": "na fila — aguardando o outro scan terminar",
   "scan.split": "reenviando em partes menores",
   "scan.server": "no servidor",
+  "scan.probing": "verificando se o servidor responde…",
+  "scan.rulesRemote":
+    "baixando o ruleset de semgrep.dev (pode levar minutos) — aponte um diretório de regras em starguard.sastRules para rodar offline",
   "scan.uploading": "enviando {n} arquivos ({mb} MB) ao servidor…",
   // A posição transforma espera em previsão. Uma barra sem número é
   // indistinguível de uma barra travada — foi o que a extensão parecia.
@@ -1948,6 +1951,9 @@ const EN: Record<MessageKey, string> = {
   "scan.queued": "queued — waiting for the other scan to finish",
   "scan.split": "resending in smaller parts",
   "scan.server": "on the server",
+  "scan.probing": "checking whether the server answers…",
+  "scan.rulesRemote":
+    "downloading the ruleset from semgrep.dev (this can take minutes) — point starguard.sastRules at a local rules directory to run offline",
   "scan.uploading": "uploading {n} files ({mb} MB) to the server…",
   "scan.queuedAt": "queued on the server (#{n}) — your turn is coming",
   "scan.scanning": "scanning on the server…",
@@ -3001,6 +3007,9 @@ const ES: Record<MessageKey, string> = {
   "scan.queued": "en cola — esperando a que termine el otro escaneo",
   "scan.split": "reenviando en partes más pequeñas",
   "scan.server": "en el servidor",
+  "scan.probing": "comprobando si el servidor responde…",
+  "scan.rulesRemote":
+    "descargando el conjunto de reglas de semgrep.dev (puede tardar minutos) — indica un directorio de reglas en starguard.sastRules para trabajar sin conexión",
   "scan.uploading": "enviando {n} archivos ({mb} MB) al servidor…",
   "scan.queuedAt": "en cola en el servidor (nº {n}) — tu turno ya llega",
   "scan.scanning": "escaneando en el servidor…",

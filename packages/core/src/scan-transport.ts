@@ -85,14 +85,35 @@ export function usingRemoteScan(): boolean {
  * produto não toma pelas costas de ninguém.
  */
 export function podeCairParaLocal(e: unknown): boolean {
-  return e instanceof RemoteScanError && (e.code === "unreachable" || e.code === "unavailable");
+  return (
+    e instanceof RemoteScanError &&
+    (e.code === "unreachable" || e.code === "blocked" || e.code === "unavailable")
+  );
 }
 
 export type RemoteScanErrorCode =
   | "unauthorized"
   | "too_large"
   | "unavailable"
+  /**
+   * **Ninguém respondeu.** DNS que não resolve, porta fechada, tempo esgotado.
+   * Não houve resposta HTTP nenhuma.
+   */
   | "unreachable"
+  /**
+   * **Alguém respondeu recusando, e não fomos nós.** Uma página de CDN, um
+   * portal de rede, o proxy da empresa — resposta HTTP sem o `{error}` que toda
+   * recusa nossa carrega.
+   *
+   * Código próprio porque a diferença decide se vale DIVIDIR o pacote, e essa
+   * confusão custou vinte minutos por análise. Um intermediário que recusa o
+   * pacote grande e aceita o pequeno é o caso do UX-27, e ali dividir resolve.
+   * Quando ninguém respondeu, o tamanho não tem nada a ver com a falha: cada
+   * metade só repaga o mesmo teto de tempo, e são SETE níveis de divisão até
+   * chegar a um arquivo — 7 × 2 tentativas × 120 s = 28 minutos para descobrir
+   * que o servidor está fora do ar.
+   */
+  | "blocked"
   /**
    * Quem parou foi a pessoa. Código próprio porque isto viajava como
    * `unreachable` — e `unreachable` AUTORIZA o socorro local. O resultado era
@@ -269,6 +290,16 @@ const TETO_ENVIO_MS = Number(process.env.SCAN_UPLOAD_TIMEOUT_MS) || 120_000;
 const TETO_CONSULTA_MS = Number(process.env.SCAN_POLL_TIMEOUT_MS) || 20_000;
 
 /**
+ * Teto da SONDA — "tem alguém aí?".
+ *
+ * Mais generoso que uma consulta porque a instância do MVP hiberna e a primeira
+ * requisição do dia paga o tempo de acordá-la (medido acima de 45 s). Ainda
+ * assim é um teto só, pago uma vez, contra os 28 minutos que o desenho anterior
+ * gastava para chegar à mesma conclusão.
+ */
+const TETO_SONDA_MS = Number(process.env.SCAN_PROBE_TIMEOUT_MS) || 60_000;
+
+/**
  * Quanto tempo o scan tem para terminar no servidor, do envio ao resultado.
  *
  * Quinze minutos: um repositório grande num contêiner pequeno chega perto disso,
@@ -328,9 +359,17 @@ const TETO_ESPERA_MS = 30_000;
  * mesmo recurso que a revisão por IA já usa quando a primeira tentativa não
  * cabe — reduzir o escopo e tentar de novo.
  *
- * **Só divide quando a recusa NÃO é nossa** (`unreachable`). Um 413 do
- * StarGuard já diz o tamanho certo, e uma sessão expirada continuaria expirada
- * em qualquer tamanho — dividir ali seria multiplicar a mesma falha.
+ * **Só divide quando ALGUÉM RESPONDEU recusando** (`blocked`), ou quando o
+ * próprio StarGuard disse que não coube (`too_large`). Uma sessão expirada
+ * continuaria expirada em qualquer tamanho — dividir ali multiplicaria a mesma
+ * falha.
+ *
+ * E, acima de tudo, **não se divide quando ninguém respondeu** (`unreachable`).
+ * Essa linha custou vinte minutos por análise: com o servidor fora do ar, o
+ * pacote de 800 arquivos descia sete níveis de divisão, cada um repagando os
+ * 120 s do teto de envio duas vezes, antes de o socorro local sequer ser
+ * cogitado. Metade de um pacote não chega mais perto de um servidor que não
+ * atende do que o pacote inteiro.
  *
  * O resultado de cada analisador é uma LISTA de achados, então juntar é
  * concatenar. Um achado que dependesse de dois arquivos em metades diferentes
@@ -350,7 +389,7 @@ export async function callRemoteScanPartido(
     // tamanho e não tentar menor seria desistir com a solução na mão.
     const podeDividir =
       e instanceof RemoteScanError &&
-      (e.code === "unreachable" || e.code === "too_large") &&
+      (e.code === "blocked" || e.code === "too_large") &&
       input.files.length > 1;
     if (!podeDividir || input.signal?.aborted) throw e;
 
@@ -557,19 +596,21 @@ async function enviarScan(
     // resposta certa é avisar, não tentar de novo.
     throw new RemoteScanError(msg || "O scanner não está disponível no servidor.", "unavailable");
   }
-  // Recusa que NÃO é nossa é "não cheguei lá", não "fui recusado".
+  // Recusa que NÃO é nossa é "alguém no caminho barrou", não "fui recusado".
   //
   // Toda resposta do StarGuard é JSON com `error`. Sem isso, quem respondeu foi
-  // outra coisa no caminho — e o pedido nunca chegou ao app. Tratar como
-  // `unreachable` é o que autoriza o socorro local: com o `opengrep` instalado
-  // a um palmo, deixar de analisar por causa de um 403 de CDN é o pior desfecho
+  // outra coisa no caminho — e o pedido nunca chegou ao app. É `blocked`, e não
+  // `unreachable`, porque a diferença decide se vale dividir o pacote: aqui
+  // alguém ATENDEU e recusou, e é plausível que recuse o grande e aceite o
+  // pequeno. Os dois autorizam o socorro local — com o `opengrep` instalado a um
+  // palmo, deixar de analisar por causa de um 403 de CDN é o pior desfecho
   // possível. A troca continua sendo DECLARADA na tela, com o motivo junto.
   //
   // Um 403 NOSSO (com corpo JSON) continua sendo `failed` e sobe: aí é
   // permissão de verdade, e contornar esconderia o que precisa ser resolvido.
   throw new RemoteScanError(
     msg || `Falha no scan remoto (${res.status}). ${pistaDaResposta(res, bruto)}`,
-    msg ? "failed" : "unreachable"
+    msg ? "failed" : "blocked"
   );
 }
 
@@ -622,6 +663,29 @@ export async function limitesDoServidor(t: RemoteScanTransport): Promise<Limites
 /** **Só para teste** — o cache é por processo e não expira de propósito. */
 export function esquecerLimites(): void {
   limitesEmCache = undefined;
+}
+
+/**
+ * O servidor ATENDE? Perguntado com a requisição mais barata que existe.
+ *
+ * Subir 8 MB de código-fonte para descobrir que o servidor está fora do ar é
+ * pagar o preço caro por uma informação barata — e pagá-lo com o teto de envio,
+ * que é de dois minutos, duas vezes. A consulta de limites tem dezenas de bytes
+ * e responde exatamente a mesma pergunta em segundos.
+ *
+ * **Atender não é autorizar.** Um `401` prova que há servidor do outro lado; o
+ * que falta ali é sessão, e mandar a pessoa investigar a rede por causa de um
+ * login expirado seria trocar um problema de dois cliques por uma caçada. Por
+ * isso a pergunta é "houve resposta HTTP?", e não "a resposta foi boa?".
+ */
+export async function servidorRespondeu(t: RemoteScanTransport): Promise<boolean> {
+  try {
+    const token = (await t.getToken()) ?? "";
+    await requisitar(t, token, { method: "GET" }, TETO_SONDA_MS);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ------------------------------------------------------------
