@@ -114,6 +114,31 @@ export interface PrNaTela {
   erro?: string;
 }
 
+/**
+ * O andamento da análise, para a barra do painel.
+ *
+ * Determinada, e não uma listra andando de um lado para o outro: o plano
+ * SABE quantos analisadores vão rodar antes de o primeiro começar, e uma barra
+ * indeterminada num trabalho que pode passar de um minuto não informa nada —
+ * ela só prova que o processo não morreu.
+ *
+ * `desde` é o instante de início, e o relógio corre no NAVEGADOR. Mandar o
+ * tempo decorrido a cada segundo pela ponte de mensagens seria um redesenho
+ * por segundo do painel inteiro para mover dois dígitos.
+ */
+export interface ProgressoNaTela {
+  /** Quantos analisadores o plano vai executar. */
+  total: number;
+  /** Quantos já terminaram — com qualquer desfecho. */
+  feitos: number;
+  /** Nome do que está rodando agora, já traduzido. */
+  atual?: string;
+  /** O que ele está fazendo ("servidor", "baixando regras…"). */
+  detalhe?: string;
+  /** `Date.now()` do início, para o cronômetro da página. */
+  desde?: number;
+}
+
 export interface GanchosDoPainel {
   textos: () => TextosDoPainel;
   /** Cartões e conta — recalculado a cada abertura e a cada mudança. */
@@ -132,6 +157,8 @@ export interface GanchosDoPainel {
      * girando para sempre depois que tudo tinha terminado. Ver UX-24.
      */
     rodando: boolean;
+    /** Andamento da execução em curso. `null` quando não há nenhuma. */
+    progresso: ProgressoNaTela | null;
     resultado?: ResultadoNaTela | null;
     correcoes: CorrecaoNaTela[];
     pr: PrNaTela;

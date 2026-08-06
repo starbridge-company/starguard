@@ -76,6 +76,10 @@ export interface TextosDoPainel {
   prAbrindo: string;
   prVer: string;
   prAberto: string;
+  // Barra de progresso. `{feitos}`/`{total}` chegam CRUS: os números só
+  // existem na página, e a frase seria remontada lá de todo jeito.
+  progresso: string;
+  progressoAguarde: string;
   corrigir: string;
   diagnostico: string;
   sair: string;
@@ -379,6 +383,31 @@ export function htmlDoPainel(opts: {
   .correcao.erro { border-color: var(--vscode-charts-red, #f85149); }
   .correcao.aplicada { opacity: .6; }
 
+  /* ---- Barra de progresso ----
+     Determinada: o plano sabe quantos analisadores vão rodar antes de o
+     primeiro começar. Uma listra indeterminada num trabalho que passa de um
+     minuto só prova que o processo não morreu — não informa nada. */
+  .progresso { margin: 10px 0 0; }
+  .progresso .trilho {
+    height: 4px; border-radius: 2px; overflow: hidden;
+    background: var(--vscode-progressBar-background, var(--borda));
+    opacity: .35;
+  }
+  .progresso .trilho > i {
+    display: block; height: 100%;
+    background: var(--vscode-progressBar-background, var(--vscode-button-background));
+    transition: width .25s ease;
+  }
+  .progresso .legenda {
+    display: flex; justify-content: space-between; gap: 8px;
+    margin-top: 5px; font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+  }
+  .progresso .agora {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .progresso .cronometro { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
   /* ---- Pull Request ---- */
   .pr { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--borda); }
   .pr p { margin: 0 0 6px; font-size: 11px; line-height: 1.5; }
@@ -438,7 +467,7 @@ export function htmlDoPainel(opts: {
 (function () {
   const vscode = acquireVsCodeApi();
   const T = ${jsonSeguroEmScript(opts.textos)};
-  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, resultado: null, correcoes: [], pr: { abrindo: false }, erro: null };
+  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, progresso: null, resultado: null, correcoes: [], pr: { abrindo: false }, erro: null };
 
   const h = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -626,6 +655,40 @@ export function htmlDoPainel(opts: {
     '</div>';
   }
 
+  /**
+   * A barra da análise em curso.
+   *
+   * Fica logo ABAIXO do botão de analisar, que é onde o olho já está depois do
+   * clique — e não no fim da página, onde ninguém rolaria para procurar.
+   *
+   * O cronômetro corre aqui, num setInterval de um segundo que toca APENAS o
+   * texto dos dígitos. Redesenhar a página inteira a cada segundo apagaria o
+   * que a pessoa estivesse digitando na descrição do sistema — o mesmo cuidado
+   * que desenhar() já toma com o foco.
+   *
+   * (Sem crase em comentário aqui dentro: este bloco mora num template
+   * literal, e uma crase solta FECHA a string da página inteira.)
+   */
+  function barraDeProgresso() {
+    const p = estado.progresso;
+    if (!estado.rodando || !p || !p.total) return '';
+    const pct = Math.min(100, Math.round((p.feitos / p.total) * 100));
+    const agora = p.atual
+      ? h(p.atual) + (p.detalhe ? ' <span class="muted">· ' + h(p.detalhe) + '</span>' : '')
+      : h(T.progressoAguarde);
+
+    return '<div class="progresso">' +
+      '<div class="trilho" role="progressbar" aria-valuemin="0" aria-valuemax="' + p.total +
+        '" aria-valuenow="' + p.feitos + '"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="legenda">' +
+        '<span class="agora">' + agora + '</span>' +
+        '<span class="cronometro" id="cronometro" data-desde="' + (p.desde || 0) + '">' +
+          h(fmt(T.progresso, { feitos: p.feitos, total: p.total })) +
+        '</span>' +
+      '</div>' +
+    '</div>';
+  }
+
   /** As propostas geradas — uma por ARQUIVO, nunca uma por achado. */
   function blocoDeCorrecoes() {
     const lista = estado.correcoes || [];
@@ -769,6 +832,8 @@ export function htmlDoPainel(opts: {
       (estado.rodando ? h(T.analisando) : nSel ? h(T.analisar) + ' (' + nSel + ')' : h(T.nenhumSelecionado)) +
     '</button>';
 
+    html += barraDeProgresso();
+
     if (estado.erro) html += '<div class="aviso">' + h(estado.erro) + '</div>';
 
     html += '<div style="margin-top:16px"><h2>' + h(T.resultado) + '</h2>';
@@ -788,6 +853,25 @@ export function htmlDoPainel(opts: {
     return html;
   }
 
+  /**
+   * O cronômetro da barra.
+   *
+   * Um setInterval que toca APENAS o texto dos dígitos, e nunca redesenha a
+   * página. Redesenhar a cada segundo apagaria o que a pessoa estivesse
+   * digitando na descrição do sistema.
+   */
+  let relogio = null;
+  function tique() {
+    const el = document.getElementById('cronometro');
+    if (!el) { clearInterval(relogio); relogio = null; return; }
+    const desde = Number(el.dataset.desde || 0);
+    if (!desde) return;
+    const seg = Math.max(0, Math.round((Date.now() - desde) / 1000));
+    const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+    const ss = String(seg % 60).padStart(2, '0');
+    el.textContent = el.dataset.base + '  ' + mm + ':' + ss;
+  }
+
   function desenhar() {
     const app = document.getElementById('app');
     // Preserva o que a pessoa está digitando: um redesenho por evento de
@@ -805,6 +889,17 @@ export function htmlDoPainel(opts: {
         t.focus();
         t.setSelectionRange(posicao[0], posicao[1]);
       }
+    }
+
+    // O cronômetro só existe enquanto a barra existir.
+    const cron = document.getElementById('cronometro');
+    if (cron) {
+      cron.dataset.base = cron.textContent;
+      tique();
+      if (!relogio) relogio = setInterval(tique, 1000);
+    } else if (relogio) {
+      clearInterval(relogio);
+      relogio = null;
     }
   }
 

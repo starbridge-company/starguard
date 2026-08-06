@@ -49,6 +49,7 @@ import {
   type CorrecaoNaTela,
   type GanchosDoPainel,
   type PrNaTela,
+  type ProgressoNaTela,
   type ResultadoNaTela,
 } from "./painel.js";
 import {
@@ -319,6 +320,14 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
   try {
     rodando = true;
     abortarAnalise = new AbortController();
+    // A barra é DETERMINADA: o plano sabe quantos vão rodar antes de o
+    // primeiro começar. Uma listra indeterminada num trabalho que passa de um
+    // minuto só prova que o processo não morreu — não informa nada.
+    progressoDaAnalise = {
+      total: execPlan.entries.filter((e) => e.willRun).length,
+      feitos: 0,
+      desde: Date.now(),
+    };
     await painel.atualizar({ erro: null });
     relatarPulados(execPlan);
 
@@ -347,11 +356,17 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
               {
                 on: (e) => {
                   if (e.type === "analyzer:start") {
-                    progresso.report({
-                      message: t(`analyzer.${e.id}.name` as MessageKey),
-                    });
+                    const nome = t(`analyzer.${e.id}.name` as MessageKey);
+                    if (progressoDaAnalise) {
+                      progressoDaAnalise.atual = nome;
+                      progressoDaAnalise.detalhe = undefined;
+                    }
+                    // A notificação ganha o mesmo "3 de 5" da barra: quem está
+                    // com o painel fechado só vê ela.
+                    progresso.report({ message: rotuloDoProgresso(nome) });
                     estadoDosCartoes.set(e.id, { estado: "rodando" });
                     painel.progresso(e.id, "rodando");
+                    void painel.atualizar();
                   }
                   // O analisador conta o que está fazendo ("baixando regras",
                   // o modelo escolhido). Ficava só no objeto de evento; agora
@@ -360,11 +375,26 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
                     const atual = estadoDosCartoes.get(e.id) ?? { estado: "rodando" as const };
                     estadoDosCartoes.set(e.id, { ...atual, detalhe: e.message });
                     painel.progresso(e.id, "rodando", { detalhe: e.message });
+                    if (progressoDaAnalise) {
+                      progressoDaAnalise.detalhe = e.message;
+                      void painel.atualizar();
+                    }
                   }
                   if (e.type === "analyzer:done" || e.type === "analyzer:error") {
                     const estado = e.type === "analyzer:done" ? "pronto" : "erro";
                     estadoDosCartoes.set(e.id, { estado });
                     painel.progresso(e.id, estado);
+                    // Terminou é terminou, com QUALQUER desfecho: uma barra que
+                    // só conta sucesso trava em 60% quando um analisador falha.
+                    if (progressoDaAnalise) {
+                      progressoDaAnalise.feitos += 1;
+                      progressoDaAnalise.atual = undefined;
+                      progressoDaAnalise.detalhe = undefined;
+                      progresso.report({
+                        increment: 100 / Math.max(1, progressoDaAnalise.total),
+                      });
+                      void painel.atualizar();
+                    }
                   }
                   // `not_selected` não é "pulado": ninguém pediu. Marcar o
                   // cartão faria a tela dizer que algo deu errado com um
@@ -399,6 +429,8 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
     // na que lança. Ver AUDITORIA.md#UX-24.
     rodando = false;
     abortarAnalise = undefined;
+    // O mesmo `finally` que desliga o botão desliga a barra: são o mesmo fato.
+    progressoDaAnalise = null;
     await painel.atualizar();
   }
 }
@@ -551,6 +583,13 @@ function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]):
       saida.appendLine(`[${o.id}] ${t(`analyzer.degraded.${d}` as MessageKey)}`);
     }
   }
+}
+
+/** "Vulnerabilidades de código · 2 de 5" — a notificação diz o mesmo que a barra. */
+function rotuloDoProgresso(nome: string): string {
+  const p = progressoDaAnalise;
+  if (!p?.total) return nome;
+  return `${nome} · ${t("panel.progress", { feitos: p.feitos + 1, total: p.total })}`;
 }
 
 function relatarPulados(execPlan: ExecutionPlan): void {
@@ -1207,6 +1246,15 @@ let rodando = false;
 /** Cancela a execução em curso — o botão do painel e a notificação. */
 let abortarAnalise: AbortController | undefined;
 
+/**
+ * Andamento da execução, para a barra do painel.
+ *
+ * Vive aqui pela MESMA razão de `rodando`: quem sabe quantos analisadores vão
+ * rodar e quantos já terminaram é quem conduz a execução, não a página. Ver
+ * UX-24.
+ */
+let progressoDaAnalise: ProgressoNaTela | null = null;
+
 function textosDoPainel(): TextosDoPainel {
   return {
     titulo: t("panel.signInTitle"),
@@ -1242,6 +1290,8 @@ function textosDoPainel(): TextosDoPainel {
     prAbrindo: t("panel.prOpening"),
     prVer: t("panel.prView"),
     prAberto: t("panel.prOpened"),
+    progresso: t("panel.progress"),
+    progressoAguarde: t("panel.progressWaiting"),
     corrigir: t("panel.fix"),
     diagnostico: t("panel.doctor"),
     sair: t("panel.signOut"),
@@ -1510,6 +1560,7 @@ function ganchosDoPainel(): GanchosDoPainel {
           ? selecao
           : (cfg().get<AnalyzerId[]>("analyzers.enabled") ?? ["sast", "sca"]),
         rodando,
+        progresso: progressoDaAnalise,
         resultado: ultimoResultado,
         correcoes: correcoesNaTela(),
         pr: prNaTela,

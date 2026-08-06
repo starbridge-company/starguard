@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "./config";
 import { podeCairParaLocal } from "./scan-transport";
+import { ScanUnavailable } from "./git";
 import { translate } from "./i18n/translate";
 import type { Locale } from "./i18n/config";
 
@@ -97,12 +98,25 @@ export async function comSocorroLocal<T>(
   try {
     return await remoto();
   } catch (e) {
-    if (!podeCairParaLocal(e) || !bin) throw e;
-    const r = await probeBinary(bin);
-    if (!r.present) throw e;
+    if (!podeCairParaLocal(e)) throw e;
+
+    // Falhou lá E não dá para fazer aqui: a pessoa precisa das DUAS metades.
+    //
+    // Com só a primeira — "não foi possível falar com o servidor: timeout" —
+    // o próximo passo fica escondido. Quem lê isso não tem como saber que
+    // existe um caminho local, nem que ele está a uma configuração de
+    // distância. A frase junta o que houve com o que resolve.
+    const r = bin ? await probeBinary(bin) : { present: false };
+    if (!r.present) {
+      throw new ScanUnavailable(
+        `${(e as Error).message}\n${translate(ctx.locale, "scan.noLocalFallback", {
+          bin: bin ?? "—",
+        })}`
+      );
+    }
 
     const motivo = (e as Error).message;
-    ctx.report?.(translate(ctx.locale, "scan.fellBackLocal", { bin }));
+    ctx.report?.(translate(ctx.locale, "scan.fellBackLocal", { bin: bin! }));
     // O motivo vai junto no canal de saída de quem estiver escutando: a frase
     // curta explica O QUE mudou, e esta explica POR QUÊ.
     ctx.report?.(motivo);

@@ -27,6 +27,7 @@ const TEXTOS = Object.fromEntries(
     "aplicarTudo", "descartar", "umAchado", "nAchados", "maisArquivos",
     "nadaMarcado", "filtrarTudo", "filtrarAjuda", "degradado", "requisitos",
     "requisitosAjuda", "pr", "prHint", "prBase", "prAbrindo", "prVer", "prAberto",
+    "progresso", "progressoAguarde",
   ].map((k) => [k, k])
 ) as unknown as TextosDoPainel;
 
@@ -228,5 +229,49 @@ describe("o JSON embutido não escapa do bloco `<script>`", () => {
     });
     // Só deve existir UM fechamento de script na página.
     expect(html.match(/<\/script>/g)?.length).toBe(1);
+  });
+});
+
+// ============================================================
+// A barra de progresso — pedida depois de uma análise de mais de um minuto
+// terminar sem que a tela dissesse nada sobre o andamento.
+// ============================================================
+describe("barra de progresso da análise", () => {
+  it("existe e é DETERMINADA", () => {
+    // O plano sabe quantos analisadores vão rodar antes de o primeiro começar.
+    // Uma listra indeterminada num trabalho que passa de um minuto só prova
+    // que o processo não morreu — não informa nada.
+    const html = pagina();
+    expect(html).toContain('class="progresso"');
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain("aria-valuenow=");
+  });
+
+  it("some quando não há execução em curso", () => {
+    // Barra parada em 100% depois que acabou é ruído.
+    expect(pagina()).toContain("if (!estado.rodando || !p || !p.total) return ''");
+  });
+
+  it("o cronômetro NÃO redesenha a página inteira", () => {
+    // Redesenhar a cada segundo apagaria o que a pessoa estivesse digitando na
+    // descrição do sistema.
+    const html = pagina();
+    expect(html).toContain("el.textContent = el.dataset.base");
+    expect(html).not.toMatch(/setInterval\(desenhar/);
+  });
+
+  it("o intervalo é encerrado quando a barra sai", () => {
+    // Um `setInterval` órfão continua acordando o webview para sempre.
+    expect(pagina()).toContain("clearInterval(relogio)");
+  });
+
+  it("fica logo abaixo do botão de analisar", () => {
+    // É onde o olho já está depois do clique — e não no fim da página, onde
+    // ninguém rolaria para procurar.
+    const html = pagina();
+    expect(html.indexOf("barraDeProgresso()")).toBeGreaterThan(-1);
+    expect(html.indexOf("html += barraDeProgresso();")).toBeGreaterThan(
+      html.indexOf("id=\"rodar\"")
+    );
   });
 });

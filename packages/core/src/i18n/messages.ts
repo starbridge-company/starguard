@@ -550,6 +550,7 @@ export const PT_BR = {
     "A análise não deu sinal de vida por tempo demais e foi encerrada (provável reinício do servidor durante o processamento).",
   "job.phaseFailed": "Falha na etapa.",
   "job.unexpected": "Falha inesperada na análise.",
+  "scan.noLocalFallback": "E não deu para rodar aqui: o {bin} não está nesta máquina. Aponte o caminho dele nas configurações do StarGuard, ou tente de novo — o servidor pode estar acordando.",
   "scan.fellBackLocal": "O servidor não respondeu — rodei com o {bin} desta máquina.",
   "scan.noRepo": "Nenhum repositório informado.",
   "scan.sastOff": "SAST desligado por configuração (SAST_ENGINE=none).",
@@ -953,6 +954,8 @@ export const PT_BR = {
   // o de entrar dizia "StarGuard" e o de pedir acesso dizia "Abrir uma pasta…".
   "panel.actionUseServer": "Rodar no servidor da minha conta…",
   "panel.actionConfigurePaths": "Apontar o caminho do executável…",
+  "panel.progress": "{feitos} de {total}",
+  "panel.progressWaiting": "Preparando…",
   "panel.signIn": "Entrar",
   "panel.requestAccess": "Solicitar acesso",
 
@@ -1648,6 +1651,7 @@ const EN: Record<MessageKey, string> = {
     "The analysis showed no sign of life for too long and was terminated (the server likely restarted mid-run).",
   "job.phaseFailed": "This step failed.",
   "job.unexpected": "Unexpected failure in the analysis.",
+  "scan.noLocalFallback": "And it could not run here either: {bin} is not on this machine. Point to its path in the StarGuard settings, or try again — the server may be waking up.",
   "scan.fellBackLocal": "The server did not answer — ran with this machine's {bin} instead.",
   "scan.noRepo": "No repository provided.",
   "scan.sastOff": "SAST disabled by configuration (SAST_ENGINE=none).",
@@ -2009,6 +2013,8 @@ const EN: Record<MessageKey, string> = {
 
   "panel.actionUseServer": "Run on my account's server…",
   "panel.actionConfigurePaths": "Point to the executable path…",
+  "panel.progress": "{feitos} of {total}",
+  "panel.progressWaiting": "Getting ready…",
   "panel.signIn": "Sign in",
   "panel.requestAccess": "Request access",
 
@@ -2685,6 +2691,7 @@ const ES: Record<MessageKey, string> = {
     "El análisis no dio señales de vida durante demasiado tiempo y se dio por terminado (probable reinicio del servidor durante el procesamiento).",
   "job.phaseFailed": "Falla en la etapa.",
   "job.unexpected": "Falla inesperada en el análisis.",
+  "scan.noLocalFallback": "Y tampoco se pudo ejecutar aquí: {bin} no está en esta máquina. Indica su ruta en la configuración de StarGuard, o inténtalo de nuevo — el servidor puede estar despertando.",
   "scan.fellBackLocal": "El servidor no respondió: se ejecutó con el {bin} de esta máquina.",
   "scan.noRepo": "No se indicó ningún repositorio.",
   "scan.sastOff": "SAST desactivado por configuración (SAST_ENGINE=none).",
@@ -3050,6 +3057,8 @@ const ES: Record<MessageKey, string> = {
 
   "panel.actionUseServer": "Ejecutar en el servidor de mi cuenta…",
   "panel.actionConfigurePaths": "Indicar la ruta del ejecutable…",
+  "panel.progress": "{feitos} de {total}",
+  "panel.progressWaiting": "Preparando…",
   "panel.signIn": "Entrar",
   "panel.requestAccess": "Solicitar acceso",
 

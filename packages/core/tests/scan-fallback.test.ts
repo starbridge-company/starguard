@@ -17,6 +17,7 @@
 // analisar mais devagar.
 // ============================================================
 import { describe, it, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   RemoteScanError,
   podeCairParaLocal,
@@ -142,4 +143,37 @@ describe("a mensagem de rede diz o que houve", () => {
     expect((erro as Error).message).toContain("nao-existe-mesmo-starguard.invalid");
     expect((erro as Error).message).not.toMatch(/fetch failed$/);
   }, 30_000);
+});
+
+// ============================================================
+// O SAST tem que TERMINAR.
+//
+// `--timeout 0` não quer dizer "rápido" nem "padrão": quer dizer **sem limite
+// algum**. Uma combinação patológica de regra e arquivo — expressão regular
+// que explode, arquivo gerado com uma linha de 200 kB — segura o processo pelo
+// tempo que precisar. No servidor isso vira uma requisição que nunca volta, e
+// foi o `timeout` que a extensão relatou.
+// ============================================================
+describe("argumentos do SAST", () => {
+  const fonte = readFileSync(
+    new URL("../src/analyzers/sast.ts", import.meta.url),
+    "utf8"
+  );
+
+  it("não roda mais SEM limite de tempo por regra", () => {
+    expect(fonte).not.toContain('"--timeout", "0"');
+  });
+
+  it("o teto padrão é o do próprio Semgrep, e é configurável", () => {
+    // 5 s por regra e por arquivo. Quem preferir esperar mais sobe o env em vez
+    // de editar código.
+    expect(fonte).toContain("SAST_RULE_TIMEOUT ?? 5");
+  });
+
+  it("o paralelismo é EXPLÍCITO", () => {
+    // O padrão varia entre compilações do Opengrep, e uma que caia para 1
+    // processo transforma um scan de um minuto num de dez.
+    expect(fonte).toContain('"--jobs"');
+    expect(fonte).toContain("cpus().length");
+  });
 });

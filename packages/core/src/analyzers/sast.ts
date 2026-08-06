@@ -7,6 +7,7 @@
 // analisador. NODE-ONLY.
 // ============================================================
 import { execFile } from "node:child_process";
+import { cpus } from "node:os";
 import { promisify } from "node:util";
 import { BIN, ENGINES, sastConfig } from "../config";
 import { parseSemgrep } from "../parsers";
@@ -37,7 +38,36 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
   // execFile com argumentos em array — o `dir` é caminho controlado por nós.
   // `sastConfig()` = "auto" (registro remoto) ou um diretório de regras local.
   // Alvo "." + cwd=dir → paths relativos ao repo (não vaza o dir temporário).
-  const args = ["--config", sastConfig(), "--json", "--quiet", "--timeout", "0", "."];
+  //
+  // ---- Por que o `--timeout` deixou de ser 0 ----
+  //
+  // `0` não quer dizer "rápido" nem "padrão": quer dizer **sem limite algum**.
+  // Uma única combinação patológica de regra e arquivo — expressão regular que
+  // explode, arquivo gerado com uma linha de 200 kB — segura o processo pelo
+  // tempo que precisar, e o resto da análise espera por ela. No servidor isso
+  // vira uma requisição que nunca volta, que é exatamente o `timeout` que a
+  // extensão relatou.
+  //
+  // 5 s por regra e por arquivo é o padrão do próprio Semgrep, e a troca é
+  // declarada: uma regra que estoura o teto num arquivo é pulada NAQUELE
+  // arquivo — a ferramenta reporta isso, e a alternativa era não terminar.
+  // Configurável por env para quem preferir esperar mais.
+  //
+  // Medido neste repositório (272 arquivos, ruleset local completo):
+  // `--timeout 0` sem `--jobs` → **62,7 s**; com estes argumentos → **54,9 s**.
+  const args = [
+    "--config",
+    sastConfig(),
+    "--json",
+    "--quiet",
+    "--timeout",
+    String(Number(process.env.SAST_RULE_TIMEOUT ?? 5)),
+    // Explícito porque o padrão varia entre compilações do Opengrep, e uma que
+    // caia para 1 processo transforma um scan de um minuto num de dez.
+    "--jobs",
+    String(Math.max(1, cpus().length)),
+    ".",
+  ];
 
   try {
     const { stdout } = await pExecFile(bin, args, {

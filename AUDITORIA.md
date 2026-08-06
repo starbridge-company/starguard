@@ -183,6 +183,68 @@ contrato do `jsonError` e idioma da exportação.
   em três arquivos, corrigir, revisar três diffs, aplicar tudo. ⚠️ **Não
   verificado no editor real** — ver PEND-33.
 
+### UX-27 · O SAST rodava sem limite de tempo, e a tela não dizia nada ✅
+**P1 · Esforço P**
+
+> ✅ **Corrigido em 06/08/2026.** Relatado depois do `BUG-25`: o erro agora era
+> legível — `"…(https://starguard-31l1.onrender.com): timeout"` — e vieram dois
+> pedidos junto: "era melhor que a análise demorasse menos" e "seria
+> interessante uma barra de progresso".
+
+- **`--timeout 0` não era "padrão", era SEM LIMITE.** Uma combinação
+  patológica de regra e arquivo segura o processo pelo tempo que precisar, e o
+  resto espera. No servidor isso vira uma requisição que nunca volta — o
+  `timeout` relatado. Passou para 5 s por regra e por arquivo, que é o padrão
+  do próprio Semgrep, configurável por `SAST_RULE_TIMEOUT`. E `--jobs`
+  explícito: o padrão varia entre compilações do Opengrep, e uma que caia para
+  1 processo transforma um scan de um minuto num de dez.
+- **A medição, e ela é a parte que importa.** Neste repositório (272 arquivos,
+  ruleset local completo): `--timeout 0` sem `--jobs` → **62,7 s**; com os
+  argumentos novos → **54,9 s**. E o ganho é **de graça**: **867 achados nos
+  dois**, com **zero** regras puladas por estouro de tempo. Sem isso medido, a
+  troca seria velocidade comprada com cobertura — que não vale a pena numa
+  ferramenta de segurança.
+- **Onde o tempo realmente está.** O empacotamento é 272 arquivos / 1,64 MB em
+  **0,2 s** — o cliente não é o gargalo, e mandar menos código não resolveria
+  nada. O custo é o scan em si, e ele é do tamanho do ruleset.
+- **Barra de progresso, determinada.** O plano sabe quantos analisadores vão
+  rodar antes de o primeiro começar; uma listra indeterminada num trabalho de
+  mais de um minuto só prova que o processo não morreu. A barra fica logo
+  abaixo do botão de analisar — onde o olho já está depois do clique — com o
+  nome do que está rodando, o que ele está fazendo, "3 de 5" e um cronômetro.
+  O contador avança com **qualquer** desfecho: uma barra que só conta sucesso
+  trava em 60% quando um analisador falha. A notificação recebeu o mesmo "3 de
+  5", para quem está com o painel fechado.
+- **O cronômetro não redesenha a página.** Um `setInterval` que toca só os
+  dígitos. Redesenhar a cada segundo apagaria o que a pessoa estivesse
+  digitando na descrição do sistema — o mesmo cuidado que `desenhar()` já toma
+  com o foco. E o intervalo é encerrado quando a barra sai, para não deixar um
+  temporizador órfão acordando o webview.
+- **A mensagem ganhou a segunda metade.** Quando o servidor falha **e** não dá
+  para rodar aqui, a frase agora junta o que houve com o que resolve: "e não
+  deu para rodar aqui: o opengrep não está nesta máquina. Aponte o caminho dele
+  nas configurações, ou tente de novo — o servidor pode estar acordando". Antes
+  vinha só a primeira metade, e o próximo passo ficava escondido.
+
+**Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Tempo, antes | `opengrep --timeout 0` sem `--jobs`, ruleset local | **62,7 s** |
+| Tempo, depois | `opengrep --timeout 5 --jobs 16` | **54,9 s** |
+| Cobertura preservada | contagem de `results` nos dois | **867 e 867**, `errors: 0` |
+| Onde está o custo | `empacotarParaScan` neste repo | SAST **272 arquivos / 1,64 MB em 0,2 s**; SCA 5 arquivos / 0,49 MB |
+| Argumentos do SAST | `packages/core/tests/scan-fallback.test.ts` | 3 asserções: sem `--timeout 0`, teto configurável, `--jobs` explícito |
+| Barra | `packages/vscode/tests/painel-html.test.ts` | 5 asserções: determinada com `role="progressbar"`, some ao terminar, cronômetro que não redesenha, intervalo encerrado, posição abaixo do botão |
+| Suíte | `npm test` | **707 testes** em 48 arquivos (eram 699) |
+| `npm run typecheck` / `lint` | tsc + eslint | limpo · 0 erros, 12 avisos pré-existentes |
+| Build + instalação | `build:packages` + `install:local` | **531,4 kB**; instalado como **v0.2.2**, com a **0.2.1 removida** |
+
+⚠️ **Não atacado:** o servidor roda o SAST com `--config auto`, que **baixa o
+ruleset de semgrep.dev a cada scan**. É provavelmente a maior parcela do tempo
+remoto, e não dá para mexer daqui — depende de configurar `SAST_RULES` no
+deploy. Ver `PEND-49`.
+
 ### BUG-25 · "fetch failed" derrubava a análise inteira, com o scanner ao lado ✅
 **P0 · Esforço P**
 
@@ -726,6 +788,8 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-46** | BUG-24 | A correção do caminho foi provada no motor, não na tela | O `BIN` preguiçoso está travado por 6 asserções e foi verificado por reprodução direta contra o `dist`, mas o percurso da interface não rodou: abrir a extensão numa máquina sem os binários no PATH, ver o cartão desabilitado com as duas saídas, clicar em "Apontar o caminho do executável…", preencher `starguard.semgrepPath` e ver o cartão **acender sem recarregar a janela** (o `onDidChangeConfiguration` já dispara `recarregarPlano`, mas isso não foi visto). Conferir também o caminho oposto: limpar o campo e o cartão voltar a apagar. Junta-se à PEND-33. |
 | **PEND-47** | BUG-25 | A queda para o local nunca aconteceu de verdade | As 10 asserções injetam o erro; o percurso real não rodou: servidor dormindo (ou `starguard.server` apontando para um host inválido), analisar, e ver o cartão dizer "o servidor não respondeu — rodei com o opengrep desta máquina" **e trazer achados**. Conferir também o caminho que NÃO deve cair: sessão expirada tem de falhar com a mensagem de sessão, não rodar local em silêncio. |
 | **PEND-48** | BUG-25 | `/api/health` levou mais de 45 s | Medido uma vez, contra `starguard-31l1.onrender.com`: `/api/health` não respondeu em 45 s enquanto `/login` respondeu em 2,7 s e `/api/scan` em 0,3 s logo depois. O mais provável é partida a frio da instância (a primeira requisição paga por todas), mas **não foi confirmado** — pode ser um endpoint que espera por banco ou por binário sem teto de tempo. Repetir com a instância comprovadamente acordada; se persistir, é o `/api/health` que precisa de timeout próprio. |
+| **PEND-49** | UX-27 | O servidor baixa o ruleset do SAST a cada scan | `sastConfig()` devolve `"auto"` quando `SAST_RULES` não está definido, e `auto` faz o Opengrep buscar o ruleset em semgrep.dev **a cada execução**. No deploy isso se soma ao tempo de scan em toda requisição e depende de rede e de CA confiável — é a explicação mais provável para o remoto estourar 90 s onde o local leva 55 s. A correção não é de código: é configurar `SAST_RULES` apontando para uma cópia do ruleset na imagem do servidor, e medir o antes/depois. Enquanto isso não for feito, o número de 54,9 s vale para o local, **não** para o remoto. |
+| **PEND-50** | UX-27 | A barra de progresso nunca foi vista rodando | As 5 asserções cobrem a marcação; o percurso não rodou: analisar com três analisadores e ver a barra encher em três passos, o cronômetro correr, o nome do analisador atual trocar, e a barra **sumir** ao terminar. Conferir o caso que motivou o cuidado do cronômetro: digitar na descrição do sistema COM a análise em curso e verificar que o texto não é engolido. Junta-se à PEND-33. |
 | **PEND-36** | ARQ-13 | Nenhum pacote foi publicado nem instalado de fora | `@starguard/core` e `@starguard/cli` compilam, e o `dist` do núcleo foi carregado em Node puro — mas sempre a partir do repositório, com o link do workspace. Um `npm pack` seguido de instalação limpa em outro diretório é o que provaria que o mapa de `exports` e o passo `add-extensions.mjs` cobrem tudo o que um consumidor externo importa. O mesmo vale para `vsce package` na extensão. |
 
 ### Histórico
