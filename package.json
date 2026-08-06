@@ -64,5 +64,8 @@
     "typescript": "^5.7.0",
     "vitest": "^4.1.10",
     "playwright": "^1.50.0"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.5"
   }
 }
