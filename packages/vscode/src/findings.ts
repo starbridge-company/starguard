@@ -136,3 +136,33 @@ export function achadosDe(run: AnalysisRun): Achado[] {
 export function ehDiagnostico(a: Achado): boolean {
   return a.analyzer !== "skills";
 }
+
+/**
+ * A identidade de um achado dentro da extensão.
+ *
+ * O mesmo achado atravessa três formatos: `Achado` (a lista e os
+ * diagnósticos), `FixableFinding` (o que o corretor recebe) e uma string solta
+ * no `arguments` da CodeAction. Esta chave é o que os costura — e é por ela que
+ * um achado corrigido é reencontrado para sair da tela.
+ *
+ * UMA função, com um parâmetro estrutural, e não uma por formato: enquanto
+ * eram duas, nada obrigava as duas a produzirem o mesmo texto. Bastava alguém
+ * mexer em uma para a correção passar a "aplicar" sem tirar nada da lista — sem
+ * erro nenhum, porque procurar uma chave que não existe devolve `undefined`,
+ * que aqui parece "não havia nada a remover".
+ *
+ * Os dois padrões existem porque os dois campos são opcionais de um lado:
+ * dependência não tem linha (o achado do Trivy aponta o manifesto inteiro) e
+ * `FixableFinding.ruleId` é opcional no contrato do núcleo. Sem eles a chave
+ * sairia com `undefined` no meio — e `undefined` de um lado contra o valor do
+ * outro é justamente a divergência silenciosa que esta função existe para
+ * impedir.
+ */
+export function chaveDoAchado(a: {
+  analyzer: AnalyzerId;
+  file: string;
+  line?: number;
+  ruleId?: string;
+}): string {
+  return `${a.analyzer}|${a.file}|${a.line ?? 0}|${a.ruleId ?? ""}`;
+}

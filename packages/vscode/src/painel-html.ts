@@ -68,9 +68,14 @@ export interface TextosDoPainel {
   resultado: string;
   semAchados: string;
   aindaNaoRodou: string;
-  usaIa: string;
-  noServidor: string;
   indisponivel: string;
+  // Pull Request: um só, com todas as correções prontas da rodada.
+  pr: string;
+  prHint: string;
+  prBase: string;
+  prAbrindo: string;
+  prVer: string;
+  prAberto: string;
   corrigir: string;
   diagnostico: string;
   sair: string;
@@ -206,15 +211,22 @@ export function htmlDoPainel(opts: {
     color: var(--vscode-button-foreground);
   }
   .cartao .nome { font-size: 13px; font-weight: 500; }
-  .cartao .sub { font-size: 11px; color: var(--vscode-descriptionForeground); }
-  .selos { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
-  .selo {
-    font-size: 10px; padding: 1px 6px; border-radius: 20px;
-    border: 1px solid var(--borda);
+  /* Marca de "tem explicação aqui". Discreta de propósito: ela avisa, não
+     compete com o nome do analisador. */
+  .cartao .ajuda {
+    margin-left: 5px; font-size: 11px; opacity: .6;
     color: var(--vscode-descriptionForeground);
   }
-  .selo.ia { border-color: var(--vscode-charts-purple, #a371f7); color: var(--vscode-charts-purple, #a371f7); }
-  .selo.serv { border-color: var(--vscode-charts-blue, #58a6ff); color: var(--vscode-charts-blue, #58a6ff); }
+  .cartao:hover .ajuda { opacity: 1; }
+  .cartao .sub { font-size: 11px; color: var(--vscode-descriptionForeground); }
+  /* A saída do cartão indisponível. O cartão inteiro está a .55 de opacidade;
+     o botão volta a 1 porque ele é a única coisa clicável ali. */
+  .cartao .saida {
+    margin-top: 6px; opacity: 1; font-size: 11px;
+    border-color: var(--vscode-focusBorder);
+  }
+  .cartao.off { pointer-events: auto; }
+  .cartao.off .saida { cursor: pointer; }
 
   /* Estado por analisador durante a execução. */
   .cartao .estado { font-size: 11px; }
@@ -367,6 +379,20 @@ export function htmlDoPainel(opts: {
   .correcao.erro { border-color: var(--vscode-charts-red, #f85149); }
   .correcao.aplicada { opacity: .6; }
 
+  /* ---- Pull Request ---- */
+  .pr { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--borda); }
+  .pr p { margin: 0 0 6px; font-size: 11px; line-height: 1.5; }
+  /* O aviso da branch é o único texto do bloco que muda o RESULTADO de clicar:
+     ganha a barra à esquerda para não ser lido como mais uma linha de ajuda. */
+  .pr .aviso-base {
+    padding-left: 8px; margin-bottom: 10px;
+    border-left: 2px solid var(--vscode-charts-yellow, #d29922);
+  }
+  .pr.ok {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; font-size: 12px;
+  }
+
   /* ---- Avisos de degradação ---- */
   .nota {
     margin-top: 8px; padding: 7px 9px; border-radius: 4px;
@@ -412,7 +438,7 @@ export function htmlDoPainel(opts: {
 (function () {
   const vscode = acquireVsCodeApi();
   const T = ${jsonSeguroEmScript(opts.textos)};
-  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, resultado: null, correcoes: [], erro: null };
+  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, resultado: null, correcoes: [], pr: { abrindo: false }, erro: null };
 
   const h = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -450,9 +476,10 @@ export function htmlDoPainel(opts: {
   function cartao(a) {
     const on = estado.selecionados.includes(a.id);
     const off = !a.disponivel;
-    const selos =
-      (a.usaIa ? '<span class="selo ia">' + h(T.usaIa) + '</span>' : '') +
-      (a.remoto ? '<span class="selo serv">' + h(T.noServidor) + '</span>' : '');
+    // Os selos "IA" e "servidor" saíram daqui. Eram duas etiquetas por cartão
+    // dizendo de ONDE vem a execução — informação de bastidor, num lugar onde
+    // a pergunta é "isto serve para mim?". O que a pessoa precisa saber sobre
+    // custo e velocidade está no tooltip, em "Quando usar".
     // O motivo da indisponibilidade OCUPA a linha de subtítulo: some da
     // execução, nunca da tela. Ver UX-15.
     const sub = off ? h(a.motivo || T.indisponivel)
@@ -477,10 +504,37 @@ export function htmlDoPainel(opts: {
       .map((u) => '<div class="aviso-usa">' + h(u.aviso) + '</div>')
       .join('');
 
-    return '<div class="cartao ' + (on ? 'on ' : '') + (off ? 'off' : '') + '" data-id="' + h(a.id) + '">' +
+    // "O que este analisador faz" vai no title do cartão inteiro, com uma
+    // linha por pergunta. Numa barra lateral de 300px é o único lugar onde
+    // quatro frases cabem sem empurrar o botão de analisar para fora da tela —
+    // e o tooltip nativo já é desenhado pelo editor, no tema do editor.
+    //
+    // A marca de informação existe só para avisar que há algo a ler ali:
+    // tooltip sem marca visível é descoberto por acidente, e o que ele explica
+    // é justamente o que decide se a pessoa marca a caixa.
+    //
+    // (Sem crase em comentário aqui dentro: este bloco mora num template
+    // literal, e uma crase solta FECHA a string da página inteira.)
+    const sobre = a.sobre ? ' title="' + h(a.sobre) + '"' : '';
+    const marcaAjuda = a.sobre ? '<span class="ajuda" aria-hidden="true">ⓘ</span>' : '';
+
+    // A SAÍDA do cartão indisponível.
+    //
+    // "O executável opengrep não foi encontrado neste computador" dizia o que
+    // houve e não o que fazer — e a saída existe, é uma configuração que
+    // ninguém acha sozinho numa lista de sete chaves. Ver UX-15.
+    const acao = off
+      ? (a.acoes || []).map((s) =>
+          '<button class="fantasma saida" data-comando="' + h(s.comando) + '">' +
+            h(s.rotulo) + '</button>'
+        ).join('')
+      : '';
+
+    return '<div class="cartao ' + (on ? 'on ' : '') + (off ? 'off' : '') + '" data-id="' + h(a.id) + '"' + sobre + '>' +
       '<div class="marca">' + (on ? '✓' : '') + '</div>' +
-      '<div class="linha entre"><span class="nome">' + h(a.nome) + '</span><span class="estado">' + estadoTxt + '</span></div>' +
-      '<div><div class="sub">' + sub + '</div>' + (selos ? '<div class="selos">' + selos + '</div>' : '') + '</div>' +
+      '<div class="linha entre"><span class="nome">' + h(a.nome) + marcaAjuda + '</span><span class="estado">' + estadoTxt + '</span></div>' +
+      '<div><div class="sub">' + sub + '</div></div>' +
+      acao +
       avisoUsa +
     '</div>';
   }
@@ -613,6 +667,41 @@ export function htmlDoPainel(opts: {
         ? '<button style="width:100%;margin-top:8px" data-acao="aplicarTudo">' +
             h(fmt(T.aplicarTudo, { n: prontas.length })) + '</button>'
         : '') +
+      blocoDePr(lista) +
+    '</div>';
+  }
+
+  /**
+   * O Pull Request da rodada.
+   *
+   * Entram as correções PRONTAS e as JÁ APLICADAS: aplicar grava no disco da
+   * pessoa e abrir o PR leva a mesma mudança para o repositório — são dois
+   * destinos, não duas decisões excludentes. Quem já aplicou e depois quer o PR
+   * não deveria ter de gerar tudo de novo.
+   *
+   * O aviso da branch fica ACIMA do botão, não depois: o PR parte da branch
+   * padrão do repositório remoto, e quem tem trabalho local não enviado precisa
+   * saber disso antes de clicar, não no relato do que aconteceu.
+   */
+  function blocoDePr(lista) {
+    const levaveis = lista.filter((c) => c.estado === 'pronta' || c.estado === 'aplicada');
+    const pr = estado.pr || {};
+
+    if (pr.numero && pr.url) {
+      return '<div class="pr ok">' +
+        '<span>' + h(fmt(T.prAberto, { n: pr.numero })) + '</span>' +
+        '<button class="fantasma" data-acao="verPr">' + h(T.prVer) + '</button>' +
+      '</div>';
+    }
+    if (!levaveis.length) return '';
+
+    return '<div class="pr">' +
+      '<p class="muted">' + h(T.prHint) + '</p>' +
+      '<p class="muted aviso-base">' + h(T.prBase) + '</p>' +
+      (pr.erro ? '<div class="aviso">' + h(pr.erro) + '</div>' : '') +
+      '<button style="width:100%" data-acao="abrirPr"' + (pr.abrindo ? ' disabled' : '') + '>' +
+        h(pr.abrindo ? T.prAbrindo : fmt(T.pr, { n: levaveis.length })) +
+      '</button>' +
     '</div>';
   }
 
@@ -720,6 +809,14 @@ export function htmlDoPainel(opts: {
   }
 
   document.addEventListener('click', (e) => {
+    // A SAÍDA do cartão indisponível vem antes do cartão: clicar nela é
+    // resolver o impedimento, e não tentar marcar um cartão que não marca.
+    const comando = e.target.closest('[data-comando]');
+    if (comando) {
+      e.stopPropagation();
+      vscode.postMessage({ tipo: 'acaoCartao', comando: comando.dataset.comando });
+      return;
+    }
     // A CAIXA vem antes do resto: clicar nela é marcar, não abrir o arquivo.
     const caixa = e.target.closest('[data-marca]');
     if (caixa) {

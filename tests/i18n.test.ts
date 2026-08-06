@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { MESSAGES, PT_BR, type MessageKey } from "@/lib/i18n/messages";
 import { LOCALES, LOCALE_LABEL, LOCALE_AI_NAME, normalizeLocale } from "@/lib/i18n/config";
 import { translate } from "@/lib/i18n/translate";
+import { ANALYZER_IDS } from "@/types";
 
 // O português é a referência e os outros idiomas caíam nele em silêncio — ou
 // seja, uma chave nova só em pt-BR passava despercebida até alguém trocar o
@@ -117,6 +118,59 @@ describe("dicionários · paridade de chaves (PEND-23)", () => {
   });
 });
 
+// A explicação de cada analisador — o pop-up do painel, o tooltip da extensão
+// e a seção do README saem TODOS daqui.
+//
+// A paridade de idiomas o tipo já garante. O que ele NÃO garante é a paridade
+// por ANALISADOR: acrescentar o sexto (o passo 3 do roteiro em CLAUDE.md pede
+// `name` e `desc`, e nada além) compila, roda e só aparece na tela como
+// `analyzer.novo.purpose` cru dentro do balão — que é onde ninguém está
+// olhando quando abre um analisador novo pela primeira vez.
+describe("analisadores · explicação completa nos três idiomas", () => {
+  const CAMPOS = ["purpose", "when", "delivers", "fix"] as const;
+
+  it("todo analisador do registro responde às quatro perguntas", () => {
+    const faltando: string[] = [];
+    for (const id of ANALYZER_IDS) {
+      for (const campo of CAMPOS) {
+        const chave = `analyzer.${id}.${campo}` as MessageKey;
+        for (const locale of LOCALES) {
+          if (!MESSAGES[locale][chave]?.trim()) faltando.push(`${locale}.${chave}`);
+        }
+      }
+    }
+    expect(faltando, `sem explicação: ${faltando.join(", ")}`).toEqual([]);
+  });
+
+  it("os rótulos das quatro perguntas existem nos três idiomas", () => {
+    for (const campo of CAMPOS) {
+      for (const locale of LOCALES) {
+        expect(
+          MESSAGES[locale][`about.${campo}` as MessageKey]?.trim(),
+          `${locale}.about.${campo} vazio`
+        ).toBeTruthy();
+      }
+    }
+  });
+
+  it("nenhuma explicação ficou em português nos outros idiomas", () => {
+    // O teste geral de cópia perdoa frase curta (< 30 caracteres) porque
+    // rótulo curto coincide de forma legítima entre idiomas. Estas aqui são
+    // todas frases inteiras: coincidir é cópia, não coincidência — inclusive
+    // as curtas, como `analyzer.skills.fix`.
+    const copiadas: string[] = [];
+    for (const id of ANALYZER_IDS) {
+      for (const campo of CAMPOS) {
+        const chave = `analyzer.${id}.${campo}` as MessageKey;
+        for (const locale of OUTROS) {
+          if (MESSAGES[locale][chave] === PT_BR[chave]) copiadas.push(`${locale}.${chave}`);
+        }
+      }
+    }
+    expect(copiadas, `não traduzido: ${copiadas.join(", ")}`).toEqual([]);
+  });
+});
+
 // Uma chave inventada aparece na tela como texto cru e denuncia a falta. Isso
 // só ajuda se ninguém deixar literal solto no JSX. A lista abaixo é TODA a
 // interface: a varredura do FEAT-04 fechou as telas que o PEND-23 tinha
@@ -134,6 +188,7 @@ describe("interface inteira · sem literal solto no JSX", () => {
     "app/admin/analyses/page.tsx",
     "app/report/[id]/page.tsx",
     "app/results/[id]/page.tsx",
+    "components/AnalyzerPicker.tsx",
     "components/AppShell.tsx",
     "components/BatchFixModal.tsx",
     "components/CodeDiff.tsx",

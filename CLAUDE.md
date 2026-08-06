@@ -187,6 +187,37 @@ npm run cli -- doctor   # o binário do terminal, direto do repositório
 
 Antes de dar qualquer coisa por pronta: `npm run typecheck && npm run lint && npm test`.
 
+### Mexeu em `packages/vscode/`? Suba a alteração na MESMA tarefa
+
+Alterar a extensão e parar no `npm test` **não entrega nada**. O que está
+instalado no editor continua sendo o bundle anterior: quem abrir a barra
+lateral para conferir vê a versão velha e conclui que a mudança não funcionou.
+Testes verdes e um `.vsix` velho instalado é o pior dos dois mundos — parece
+pronto e não está.
+
+Toda mudança na extensão termina com estes dois comandos, nesta ordem:
+
+```bash
+npm run build:packages                      # o NÚCLEO primeiro: o bundle da extensão lê o dist dele
+npm run install:local -w starguard-vscode   # empacota o .vsix e SUBSTITUI a instalação da máquina
+```
+
+Depois avise que a janela precisa de **Developer: Reload Window** — o extension
+host carrega o bundle uma vez e não o relê sozinho.
+
+Duas armadilhas que já custaram tempo aqui:
+
+- **A ordem não é opcional.** `install:local` roda o esbuild sobre o `dist` do
+  núcleo, não sobre o `src`. Pular o `build:packages` empacota a extensão com a
+  versão anterior do motor, e o sintoma é uma mudança no núcleo que "não fez
+  efeito nenhum".
+- **Não use `code --install-extension --force` à mão.** O `--force` não remove
+  a versão anterior; cada instalação deixa a sua pasta em `~/.vscode/extensions`
+  e o editor MESCLA as contribuições de todas — o painel aparece duplicado e
+  parece bug da extensão. É por isso que existe `scripts/instalar-local.mjs`,
+  que desinstala, instala e só então limpa as pastas órfãs. Ver o cabeçalho do
+  script.
+
 ## Onde as coisas estão
 
 ```

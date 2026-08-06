@@ -61,6 +61,14 @@
       {
         "command": "starguard.enableAccountAi",
         "title": "StarGuard: usar a IA da minha conta"
+      },
+      {
+        "command": "starguard.configurarCaminhos",
+        "title": "StarGuard: configurar o caminho dos scanners"
+      },
+      {
+        "command": "starguard.openPullRequest",
+        "title": "StarGuard: abrir Pull Request com as correções"
       }
     ],
     "views": {
@@ -140,6 +148,11 @@
           "type": "string",
           "default": "https://starguard-31l1.onrender.com/login",
           "description": "Página para onde 'Solicitar acesso' leva quem ainda não tem conta."
+        },
+        "starguard.sastRules": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Diretório de regras do Opengrep/Semgrep. Vazio usa `auto`, que BAIXA o ruleset de semgrep.dev a cada análise — o que falha em máquina sem saída para a internet ou atrás de proxy com CA própria. Aponte para uma cópia local para rodar offline."
         }
       }
     },

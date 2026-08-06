@@ -42,7 +42,7 @@ export {
   BIN,
   ENGINES,
   FIX_AGENT,
-  SAST_CONFIG,
+  sastConfig,
   aiFor,
   aiForFix,
   aiHttp,

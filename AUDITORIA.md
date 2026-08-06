@@ -183,6 +183,153 @@ contrato do `jsonError` e idioma da exportação.
   em três arquivos, corrigir, revisar três diffs, aplicar tudo. ⚠️ **Não
   verificado no editor real** — ver PEND-33.
 
+### BUG-24 · A configuração de caminho dos scanners nunca valeu nada ✅
+**P0 · Esforço P**
+
+> ✅ **Corrigido em 06/08/2026.** Relatado como "a extensão não está
+> conseguindo fazer análise, está quebrando ou encontrando nada". Não era a
+> extensão: era o núcleo lendo configuração cedo demais.
+
+- **O defeito.** `packages/core/src/config.ts` montava `BIN` como objeto
+  literal — `process.env.OPENGREP_BIN || "opengrep"` — avaliado **na carga do
+  módulo**. `extension.ts` importa o núcleo na primeira linha, então isso
+  acontece durante a ativação do editor. As configurações
+  `starguard.semgrepPath` e `starguard.trivyPath` só são lidas depois, em
+  `aplicarConfiguracao()`, que escreve em `process.env`: **tarde demais**. O
+  mesmo valia para `SAST_CONFIG`.
+- **O sintoma, que engana.** O painel diz "o executável opengrep não foi
+  encontrado neste computador". A pessoa aponta o caminho na configuração — que
+  é exatamente a saída que a mensagem sugere — e **nada muda**. Sem erro, sem
+  log, sem nada no canal de saída: a configuração não existia para o motor.
+- **Não é caso de borda.** Acontece em toda máquina onde o binário não está no
+  PATH do processo que abriu o editor. **Medido nesta máquina:** `opengrep.exe`
+  e `trivy.exe` estão em `C:\Users\Nelson\bin`, e esse diretório **não está no
+  PATH persistido** (nem `User` nem `Machine`) — está só na sessão do Git Bash.
+  O extension host nunca o enxergou. No Windows isso é a regra, não a exceção.
+- **Corrigido:** `BIN` virou getters e `SAST_CONFIG` virou `sastConfig()`, os
+  dois lendo `process.env` **no momento do uso**. Seis asserções novas em
+  `packages/core/tests/config.test.ts`, incluindo a que trava a ordem exata do
+  bug (importar, só então definir a variável) e a que garante que **apagar** a
+  configuração volta ao padrão — sem isso, apontar um binário errado uma vez
+  seria irreversível sem reiniciar o editor.
+- **A saída que faltava na tela.** Motivo sem saída é meio caminho, e é o
+  mesmo `UX-15`: o cartão indisponível agora oferece as **duas** respostas
+  legítimas para binário faltando — *rodar no servidor da conta* (zero
+  instalação, a promessa central do produto) e *apontar o caminho do
+  executável* (para quem tem o binário e prefere que o código não saia da
+  máquina). Escolher uma pela pessoa seria decidir por ela se o código dela
+  pode viajar. O comando vindo da página passa por **allowlist** do lado da
+  extensão: a ponte de mensagens é o limite de confiança, e do outro lado dela
+  há título de regra e texto de modelo.
+- **Ruleset local.** Configuração nova `starguard.sastRules`. Sem ela o
+  Opengrep usa `auto` e **baixa** o ruleset de semgrep.dev a cada análise —
+  numa máquina sem saída ou atrás de proxy com CA própria isso falha no meio da
+  análise, como erro de rede em vez de configuração faltando. É a outra metade
+  do "está quebrando".
+
+**Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| O bug, antes | `node` importando o `dist` e definindo `OPENGREP_BIN` depois | `BIN` seguia `{"opengrep":"opengrep"}` — a configuração **ignorada** |
+| O bug, depois | mesmo roteiro, com o núcleo reconstruído | `BIN.opengrep` → `C:/Users/Nelson/bin/opengrep.exe`; `sastConfig()` → o diretório local |
+| PATH da máquina | `[Environment]::GetEnvironmentVariable('PATH', 'User'/'Machine')` | `C:\Users\Nelson\bin` **ausente nos dois** — só na sessão do Git Bash |
+| Disponibilidade | `npm run cli -- doctor` com os caminhos definidos | `✔ SAST 1.25.0` · `✔ SCA 0.72.0` (antes: `✖` nos dois) |
+| Análise de verdade | `npm run cli -- scan . --only sca` | **20 achados** (9 high, 11 medium) em `package.json` |
+| Detecção do repositório | `openWorkspace().origin` neste repo | `starbridge-company/starguard`, `isPrivateRepo` → `false` |
+| Suíte | `npm test` | **689 testes** em 47 arquivos (eram 677 em 46) |
+| `npm run typecheck` / `lint` | tsc + eslint | limpo · 0 erros, 12 avisos pré-existentes |
+| Build + instalação | `build:packages` + `install:local` | `dist/extension.js` **525,1 kB**; `.vsix` 164,77 kB instalado |
+
+⚠️ **Não exercitado:** o painel do editor com o caminho configurado pela tela
+de configurações — a correção foi provada no motor, não na interface. Ver
+`PEND-46`.
+
+### UX-26 · A extensão travava em três lugares, e não sabia abrir PR ✅
+**P1 · Esforço M**
+
+> ✅ **Corrigido em 06/08/2026.** O `UX-24` corrigiu o mecanismo pelo qual o
+> botão "Analisando…" ficava preso — e não corrigiu o botão. Ele continuava
+> travando, por outra causa, no mesmo lugar.
+
+- **A causa que sobrou: o webview morto.** `PainelStarGuard` nunca escutou
+  `onDidDispose`. Com `retainContextWhenHidden: false`, esconder a barra
+  lateral **destrói** o webview, e a extensão seguia segurando o objeto morto —
+  o `postMessage` seguinte rejeita. Essa rejeição subia por `atualizar()`, que
+  é esperado no meio de `analisar()`: a execução morria ali, com `rodando`
+  preso em `true`, e a partir daí **todo** clique em Analisar caía no
+  `if (rodando) return` sem fazer nada, até recarregar a janela. Três defesas
+  agora: soltar a referência no dispose, `postar()` que nunca lança, e
+  `rodando = true` movido para **dentro** do `try` que tem o `finally` (estava
+  fora, com dois `await` entre a atribuição e o `try` — o `finally` já estava
+  certo, só não cobria o trecho onde o erro acontecia).
+- **O mesmo defeito na outra metade da tela.** `corrigirLote` abria o workspace
+  **fora** do `try`: falhar ali deixava todas as propostas em "gerando…" para
+  sempre, sem erro escrito em lugar nenhum e sem botão que resolvesse. E o
+  `finally` não normalizava sobras — qualquer morte no meio do laço deixava
+  relógio girando. Agora nenhuma proposta pode sobrar em "gerando".
+- **A lâmpada falhava calada.** `corrigir()` abria o workspace e chamava
+  `propose` **antes** do `try/finally`: exceção nos dois vazava o workspace e
+  subia para o registrador do comando, onde o VS Code a transforma em nada
+  visível. Quem clicou via o progresso sumir e mais nada.
+- **Pull Request — não existia.** O núcleo já tinha `openPullRequestBatch`
+  (usado pelo painel web); a extensão não tinha comando nenhum. Agora o bloco
+  de correções abre **UM** PR com tudo que estiver pronto **ou já aplicado** —
+  aplicar grava no disco e o PR leva ao repositório, são dois destinos e não
+  duas decisões excludentes. O token vem do provedor de GitHub **do editor**
+  (`getSession("github", ["repo"])`): pedir um Personal Access Token à parte
+  seria inventar mais um segredo para guardar, que é justamente o que esta
+  extensão evita. O aviso de que o PR parte da branch padrão do **remoto** fica
+  acima do botão, não no relato do que aconteceu.
+- **Rodar um analisador apagava o resto.** O painel era remontado só com os da
+  execução atual: analisar só o SAST depois de uma análise completa apagava as
+  dependências da tela **enquanto o painel Problemas continuava mostrando as
+  duas coisas**. A mesma extensão dizia duas verdades sobre o mesmo projeto. A
+  lista agora acumula por analisador, igual às coleções de diagnóstico sempre
+  fizeram.
+- **BUG-06 entre rodadas.** Achado corrigido continuava na lista, marcável de
+  novo — a segunda correção partiria do arquivo já reescrito e desfaria a
+  primeira, com as duas dadas como aplicadas. `retirarAchados` tira da lista e
+  das coleções. E a chave que costura achado/diagnóstico/corretor existia
+  **duas vezes**, uma por formato: divergirem não daria erro nenhum, só
+  `undefined`, que ali parece "não havia nada a remover". Virou uma função só
+  em `findings.ts`, que é puro e tem teste.
+- **Dois botões com o texto errado.** O de entrar recebia o **título**
+  ("StarGuard") por causa de uma condicional que nunca foi verdadeira; o de
+  solicitar acesso dizia "Abrir uma pasta…". Cada um tem a sua chave agora.
+- **Achado de skill vindo do editor não abria.** O clique procurava o caminho
+  em `skillsEscolhidas`, que está vazia justamente no caso mais comum — validar
+  o prompt aberto no editor. Passou a usar `arquivosDeSkill()`.
+- **Miudezas:** o conflito de arquivo reportava "arquivo não encontrado" em vez
+  do motivo real; `starguard.clear` deixava propostas e PR apontando para
+  achados que já não existiam; correção de vários arquivos aplicava sem dizer
+  quantos não apareceram no diff.
+- **Os selos "IA" e "servidor" saíram do cartão.** Duas etiquetas por cartão
+  dizendo de onde vem a execução, num lugar em que a pergunta é "isto serve
+  para mim?". O que importa sobre custo e velocidade está no tooltip novo, em
+  "Quando usar".
+
+**Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **677 testes** em 46 arquivos, todos passando (eram 650 antes) |
+| Travamentos | `packages/vscode/tests/config.test.ts` | 6 asserções sobre o mecanismo exato: `rodando = true` dentro do try, `onDidDispose`, `postar()` que engole, sobra de "gerando", workspace no try, PR só desliga no finally |
+| Chave do achado | `packages/vscode/tests/findings.test.ts` | 4 asserções: mesma chave dos dois lados, sem `undefined` para dependência sem linha nem `ruleId` ausente, colisão entre achados distintos |
+| Pull Request | `config.test.ts` + `painel-html.test.ts` | 10 asserções: um PR e não um por achado, token do editor, dedup por arquivo, aviso antes do botão, botão desabilitado enquanto abre |
+| Resultado acumulado | `config.test.ts` | 5 asserções: acúmulo por analisador, `montarResultado()` sem run, cartões só da execução, `retirarAchados`, `clear` completo |
+| Selos removidos | `config.test.ts` + `painel-html.test.ts` | 3 asserções: nem chave no código, nem classe no HTML |
+| Idioma | tipo + `tests/i18n.test.ts` | 16 chaves novas nos **três** idiomas; 2 órfãs removidas |
+| `npm run typecheck` | tsc do app + dos três pacotes | limpo |
+| `npm run lint` | eslint | 0 erros; 12 avisos, todos **pré-existentes** em `lib/` |
+| Build | `npm run build:packages` | `dist/extension.js` **522,5 kB** (era 504,0 — o octokit entrou no bundle) |
+| Bundle carrega | `findings.test.ts` | `require()` do dist devolve `activate`/`deactivate` com o octokit dentro |
+| Instalação | `npm run install:local -w starguard-vscode` | `.vsix` 163,82 kB, instalado como `starbridge.starguard-vscode-0.2.0` |
+
+⚠️ **Não exercitado:** o PR de ponta a ponta contra um repositório real —
+`getSession("github")`, `openPullRequestBatch` e o retorno com número e URL não
+foram rodados contra o GitHub. Ver `PEND-44`.
+
 ### UX-25 · Não dava para saber que a Modelagem alimenta as Regras de negócio ✅
 **P2 · Esforço P**
 
@@ -530,6 +677,9 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-41** | SEC-11 | O proxy de IA nunca foi chamado por um cliente real | A rota, a cota e o registro de consumo estão testados, mas o percurso completo — extensão logada → consentimento → chamada com Bearer → resposta do modelo → linha em `ai_usage` — **não rodou**. Depende da PEND-37 (o login ponta a ponta), e junta-se a ela. |
 | **PEND-42** | ARQ-04 | A fila nunca processou um job de verdade | `FOR UPDATE SKIP LOCKED`, o backoff e a retomada de worker morto estão escritos; o que rodou contra Postgres real foi só o OAuth. Falta subir a app, criar uma análise e ver o worker pegá-la — e, principalmente, matar o processo no meio para conferir que outro a retoma. É a promessa central do ARQ-04 e é a que continua sem prova. |
 | **PEND-43** | SEC-13 | O hook nunca segurou um commit real | Instalação, remoção, recusa de hook de terceiro e `core.hooksPath` têm teste. O que não foi visto: `git commit` de verdade com achado grave, com `starguard.hookBlocks=true`, num repositório com semgrep configurado. |
+| **PEND-44** | UX-26 | O Pull Request da extensão nunca foi aberto de verdade | A montagem está coberta por 10 asserções (um PR e não um por achado, dedup por arquivo, mudança vazia que não entra, motivo dito quando falta `origin`), mas **nada disso tocou o GitHub**. O que continua sem prova: `vscode.authentication.getSession("github", ["repo"])` devolvendo token com escopo de escrita dentro do extension host, `openPullRequestBatch` criando branch/blobs/árvore/commit com esse token, e o retorno com número e URL chegando ao painel. Percurso: abrir um repositório com `origin` no GitHub, analisar, marcar dois achados **no mesmo arquivo**, corrigir, aplicar e clicar em Abrir Pull Request — o PR deve sair com **um commit** e o arquivo aparecendo **uma vez**. Vale conferir também o caminho triste: repositório sem `origin`, e recusar a autorização do GitHub. |
+| **PEND-45** | UX-26 | Os três travamentos foram corrigidos por leitura, não reproduzidos | O mecanismo de cada um está identificado no código e travado por asserção, mas nenhum foi **provocado** no editor: esconder a barra lateral no meio de uma análise (o webview descartado), fazer `openWorkspace` falhar durante o lote, e forçar exceção no `propose` da lâmpada. Os três são reproduzíveis à mão e valem mais que a asserção de texto que os cobre hoje. Junta-se à PEND-33. |
+| **PEND-46** | BUG-24 | A correção do caminho foi provada no motor, não na tela | O `BIN` preguiçoso está travado por 6 asserções e foi verificado por reprodução direta contra o `dist`, mas o percurso da interface não rodou: abrir a extensão numa máquina sem os binários no PATH, ver o cartão desabilitado com as duas saídas, clicar em "Apontar o caminho do executável…", preencher `starguard.semgrepPath` e ver o cartão **acender sem recarregar a janela** (o `onDidChangeConfiguration` já dispara `recarregarPlano`, mas isso não foi visto). Conferir também o caminho oposto: limpar o campo e o cartão voltar a apagar. Junta-se à PEND-33. |
 | **PEND-36** | ARQ-13 | Nenhum pacote foi publicado nem instalado de fora | `@starguard/core` e `@starguard/cli` compilam, e o `dist` do núcleo foi carregado em Node puro — mas sempre a partir do repositório, com o link do workspace. Um `npm pack` seguido de instalação limpa em outro diretório é o que provaria que o mapa de `exports` e o passo `add-extensions.mjs` cobrem tudo o que um consumidor externo importa. O mesmo vale para `vsce package` na extensão. |
 
 ### Histórico

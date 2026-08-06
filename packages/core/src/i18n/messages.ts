@@ -788,6 +788,62 @@ export const PT_BR = {
   "analyzer.skills.desc":
     "Analisa skills em busca de prompt injection, exfiltração e backdoor.",
 
+  // ---- O que cada analisador faz, em linguagem de quem NÃO é da área ----
+  // Quatro perguntas iguais para todos os cinco, na mesma ordem. A `desc` acima
+  // é a linha do cartão e continua sendo uma frase só; isto aqui é o pop-up, o
+  // parágrafo do README e o tooltip do editor — a explicação que decide se a
+  // pessoa marca ou não marca a caixa.
+  //
+  // "O que aponta como correção" é a pergunta que faltava: dois analisadores
+  // corrigem código, um manda trocar um número de versão e a modelagem NÃO
+  // corrige nada — e essa diferença nunca estava escrita em lugar nenhum.
+  "about.purpose": "Para que serve",
+  "about.when": "Quando usar",
+  "about.delivers": "O que entrega",
+  "about.fix": "O que aponta como correção",
+
+  "analyzer.threat.purpose":
+    "Você descreve o sistema em texto e ela responde o que pode dar errado ali.",
+  "analyzer.threat.when":
+    "Antes de existir código, ou quando você precisa saber o que exigir de quem vai construir.",
+  "analyzer.threat.delivers":
+    "Uma lista de ameaças e uma lista de requisitos de segurança — a régua do projeto.",
+  "analyzer.threat.fix":
+    "Nada no código: ela não corrige. Ela diz o que o sistema deveria garantir.",
+
+  "analyzer.sast.purpose":
+    "Lê o código à procura de trechos escritos de um jeito reconhecidamente inseguro.",
+  "analyzer.sast.when": "Sempre que houver código. É rápido e não usa IA.",
+  "analyzer.sast.delivers":
+    "Trechos perigosos com arquivo e linha: senha escrita no meio do código, consulta ao banco montada com texto de fora, comando do sistema montado do mesmo jeito.",
+  "analyzer.sast.fix": "O trecho a reescrever, com a sugestão pronta para aplicar.",
+
+  "analyzer.sca.purpose":
+    "Confere as bibliotecas de terceiros que o projeto usa contra falhas já descobertas e publicadas.",
+  "analyzer.sca.when":
+    "Sempre que houver lista de dependências. É rápido, não usa IA e costuma ser o que rende resultado no primeiro dia.",
+  "analyzer.sca.delivers":
+    "Quais pacotes têm problema conhecido, quão grave é cada um e em que versão já foi resolvido.",
+  "analyzer.sca.fix":
+    "A versão para onde subir. Aqui a correção é trocar um número — o seu código não muda.",
+
+  "analyzer.business.purpose":
+    "Lê o código e responde o que já está errado no que ele faz, não em como ele foi escrito.",
+  "analyzer.business.when":
+    "Quando o código existe e você quer o que o scanner não enxerga. Fica melhor com a descrição do sistema preenchida.",
+  "analyzer.business.delivers":
+    "Um cliente conseguindo ver o pedido de outro, tela de administrador aberta a qualquer pessoa logada, preço aceito do navegador em vez de conferido no banco.",
+  "analyzer.business.fix":
+    "O trecho a mudar, com a sugestão pronta — e dá para aplicar pelo próprio StarGuard.",
+
+  "analyzer.skills.purpose":
+    "Lê as instruções escritas para agentes de IA à procura de armadilha embutida no texto.",
+  "analyzer.skills.when":
+    "Quando o projeto tem skill, prompt ou agente — principalmente os que vieram de fora.",
+  "analyzer.skills.delivers":
+    "Instrução que desvia o agente do que foi pedido, que manda dado para fora ou que deixa uma porta aberta.",
+  "analyzer.skills.fix": "O trecho da instrução a remover ou reescrever.",
+
   // Por que um analisador ficou de fora. Nunca some da lista em silêncio: a
   // tela, o terminal e o editor mostram o item desabilitado COM o motivo.
   "analyzer.reason.not_selected": "Não selecionado nesta execução.",
@@ -847,8 +903,6 @@ export const PT_BR = {
   "panel.result": "Resultado",
   "panel.noFindings": "nada encontrado",
   "panel.notRunYet": "Escolha os analisadores e clique em Analisar.",
-  "panel.usesAi": "IA",
-  "panel.onServer": "servidor",
   "panel.unavailable": "indisponível",
   "panel.fix": "Corrigir",
   "panel.doctor": "Diagnóstico",
@@ -894,6 +948,45 @@ export const PT_BR = {
   "panel.uses": "Fica melhor junto de: {list}",
   "panel.cancelled": "Análise cancelada.",
 
+  // O portão. Estes dois botões vinham de chaves emprestadas de outra tela —
+  // o de entrar dizia "StarGuard" e o de pedir acesso dizia "Abrir uma pasta…".
+  "panel.actionUseServer": "Rodar no servidor da minha conta…",
+  "panel.actionConfigurePaths": "Apontar o caminho do executável…",
+  "panel.signIn": "Entrar",
+  "panel.requestAccess": "Solicitar acesso",
+
+  // ---- Pull Request a partir da extensão ----
+  // Um PR só com TUDO que foi marcado, e não um por achado: quem recebe cinco
+  // PRs do robô no mesmo dia fecha os cinco sem ler. O agrupamento por arquivo
+  // já acontece na geração; aqui só se junta o resultado.
+  "panel.pr": "Abrir Pull Request ({n})",
+  "panel.prHint":
+    "Leva as correções prontas para um Pull Request único, com um commit só. Nada é enviado antes de você clicar.",
+  "panel.prOpening": "Abrindo o Pull Request…",
+  "panel.prOpened": "Pull Request #{n} aberto.",
+  "panel.prView": "Ver no GitHub",
+  "panel.prNothing": "Nenhuma correção pronta para levar ao Pull Request.",
+  "panel.prNoRepo":
+    "Este projeto não tem um repositório do GitHub em «origin». O Pull Request precisa de um.",
+  "panel.prNoToken":
+    "Sem autorização do GitHub. Entre na conta do GitHub do editor para abrir o Pull Request.",
+  "panel.prFailed": "Não foi possível abrir o Pull Request: {erro}",
+  // O PR sai da branch padrão do repositório REMOTO, não do que está no disco.
+  // Quem tem trabalho local não enviado precisa saber disso ANTES de clicar.
+  "panel.prBase":
+    "O Pull Request parte da branch padrão do repositório remoto. Alterações locais que não foram enviadas não entram nele.",
+  "panel.prBody":
+    "Correções de segurança propostas automaticamente pelo StarGuard, a partir da extensão do VS Code.",
+  "panel.prReview":
+    "O conteúdo foi gerado por IA e precisa de revisão humana antes do merge.",
+
+  // Duas propostas para o MESMO arquivo. A segunda partiria do conteúdo antigo
+  // e apagaria a primeira — é o BUG-06. Recusar e DIZER por quê.
+  "panel.fixConflict":
+    "Outra correção desta rodada já reescreveu este arquivo. Analise de novo para gerar a próxima.",
+  // O achado sumiu da lista porque foi corrigido, não porque a análise falhou.
+  "panel.fixCleared": "{n} achado(s) corrigido(s) saíram da lista.",
+
   "tree.state.unavailable": "indisponível",
   "tree.state.running": "analisando…",
   "tree.state.clean": "nada encontrado",
@@ -924,6 +1017,7 @@ export const PT_BR = {
   "select.unavailable": "Indisponível",
   "select.needsRepo": "Precisa de repositório",
   "select.fixes": "Corrige o que encontra",
+  "select.about": "O que faz o analisador {name}",
   "select.empty": "Escolha ao menos um analisador para começar.",
   "select.loading": "Verificando o que está disponível…",
   "select.notRunHere": "Não foi executado nesta análise.",
@@ -1774,6 +1868,54 @@ const EN: Record<MessageKey, string> = {
   "analyzer.skills.desc":
     "Analyzes skills for prompt injection, data exfiltration and backdoors.",
 
+  // ---- What each analyzer does, in plain language ----
+  "about.purpose": "What it is for",
+  "about.when": "When to use it",
+  "about.delivers": "What you get",
+  "about.fix": "What it points at as the fix",
+
+  "analyzer.threat.purpose":
+    "You describe the system in plain text and it answers what could go wrong there.",
+  "analyzer.threat.when":
+    "Before any code exists, or when you need to know what to demand from whoever builds it.",
+  "analyzer.threat.delivers":
+    "A list of threats and a list of security requirements — the yardstick for the project.",
+  "analyzer.threat.fix":
+    "Nothing in the code: it does not fix. It states what the system ought to guarantee.",
+
+  "analyzer.sast.purpose":
+    "Reads the code looking for snippets written in a way known to be unsafe.",
+  "analyzer.sast.when": "Whenever there is code. It is fast and uses no AI.",
+  "analyzer.sast.delivers":
+    "Dangerous snippets with file and line: a password typed into the code, a database query assembled from outside text, a system command assembled the same way.",
+  "analyzer.sast.fix": "The snippet to rewrite, with the suggestion ready to apply.",
+
+  "analyzer.sca.purpose":
+    "Checks the third-party libraries the project uses against flaws already discovered and published.",
+  "analyzer.sca.when":
+    "Whenever there is a dependency list. It is fast, uses no AI, and is usually what pays off on day one.",
+  "analyzer.sca.delivers":
+    "Which packages carry a known problem, how serious each one is, and the version where it was already solved.",
+  "analyzer.sca.fix":
+    "The version to move up to. Here the fix is changing a number — your code stays as it is.",
+
+  "analyzer.business.purpose":
+    "Reads the code and answers what is already wrong in what it does, not in how it was written.",
+  "analyzer.business.when":
+    "When the code exists and you want what the scanner cannot see. It works better with the system description filled in.",
+  "analyzer.business.delivers":
+    "One customer able to see another customer's order, an admin screen open to anyone signed in, a price taken from the browser instead of checked against the database.",
+  "analyzer.business.fix":
+    "The snippet to change, with the suggestion ready — and StarGuard itself can apply it.",
+
+  "analyzer.skills.purpose":
+    "Reads instructions written for AI agents looking for a trap planted in the text.",
+  "analyzer.skills.when":
+    "When the project has skills, prompts or agents — above all the ones that came from elsewhere.",
+  "analyzer.skills.delivers":
+    "An instruction that steers the agent away from what was asked, that ships data out, or that leaves a door open.",
+  "analyzer.skills.fix": "The part of the instruction to remove or rewrite.",
+
   "analyzer.reason.not_selected": "Not selected for this run.",
   "analyzer.reason.no_workspace": "Needs code: provide a repository or a directory.",
   "analyzer.reason.no_input": "The input this analyzer consumes was not provided.",
@@ -1821,8 +1963,6 @@ const EN: Record<MessageKey, string> = {
   "panel.result": "Result",
   "panel.noFindings": "nothing found",
   "panel.notRunYet": "Pick the analyzers and click Analyze.",
-  "panel.usesAi": "AI",
-  "panel.onServer": "server",
   "panel.unavailable": "unavailable",
   "panel.fix": "Fix",
   "panel.doctor": "Diagnostics",
@@ -1865,6 +2005,34 @@ const EN: Record<MessageKey, string> = {
   "panel.uses": "Better together with: {list}",
   "panel.cancelled": "Analysis cancelled.",
 
+  "panel.actionUseServer": "Run on my account's server…",
+  "panel.actionConfigurePaths": "Point to the executable path…",
+  "panel.signIn": "Sign in",
+  "panel.requestAccess": "Request access",
+
+  "panel.pr": "Open Pull Request ({n})",
+  "panel.prHint":
+    "Takes the ready fixes into a single Pull Request, in one commit. Nothing is sent before you click.",
+  "panel.prOpening": "Opening the Pull Request…",
+  "panel.prOpened": "Pull Request #{n} opened.",
+  "panel.prView": "View on GitHub",
+  "panel.prNothing": "No fix is ready to go into a Pull Request.",
+  "panel.prNoRepo":
+    "This project has no GitHub repository on «origin». The Pull Request needs one.",
+  "panel.prNoToken":
+    "No GitHub authorization. Sign in to the editor's GitHub account to open the Pull Request.",
+  "panel.prFailed": "Could not open the Pull Request: {erro}",
+  "panel.prBase":
+    "The Pull Request branches off the remote repository's default branch. Local changes you have not pushed do not go into it.",
+  "panel.prBody":
+    "Security fixes proposed automatically by StarGuard, from the VS Code extension.",
+  "panel.prReview":
+    "The content was generated by AI and needs human review before merging.",
+
+  "panel.fixConflict":
+    "Another fix in this round already rewrote this file. Analyze again to generate the next one.",
+  "panel.fixCleared": "{n} fixed finding(s) left the list.",
+
   "tree.state.unavailable": "unavailable",
   "tree.state.running": "analyzing…",
   "tree.state.clean": "nothing found",
@@ -1891,6 +2059,7 @@ const EN: Record<MessageKey, string> = {
   "select.unavailable": "Unavailable",
   "select.needsRepo": "Needs a repository",
   "select.fixes": "Fixes what it finds",
+  "select.about": "What the {name} analyzer does",
   "select.empty": "Pick at least one analyzer to start.",
   "select.loading": "Checking what is available…",
   "select.notRunHere": "Not run in this analysis.",
@@ -2739,6 +2908,54 @@ const ES: Record<MessageKey, string> = {
   "analyzer.skills.desc":
     "Analiza skills en busca de prompt injection, exfiltración y backdoors.",
 
+  // ---- Qué hace cada analizador, en lenguaje llano ----
+  "about.purpose": "Para qué sirve",
+  "about.when": "Cuándo usarlo",
+  "about.delivers": "Qué entrega",
+  "about.fix": "Qué señala como corrección",
+
+  "analyzer.threat.purpose":
+    "Describes el sistema en texto y él responde qué puede salir mal ahí.",
+  "analyzer.threat.when":
+    "Antes de que exista código, o cuando necesitas saber qué exigirle a quien lo va a construir.",
+  "analyzer.threat.delivers":
+    "Una lista de amenazas y una lista de requisitos de seguridad: la vara de medir del proyecto.",
+  "analyzer.threat.fix":
+    "Nada en el código: no corrige. Dice lo que el sistema debería garantizar.",
+
+  "analyzer.sast.purpose":
+    "Lee el código en busca de fragmentos escritos de una forma reconocidamente insegura.",
+  "analyzer.sast.when": "Siempre que haya código. Es rápido y no usa IA.",
+  "analyzer.sast.delivers":
+    "Fragmentos peligrosos con archivo y línea: una contraseña escrita dentro del código, una consulta a la base armada con texto de fuera, un comando del sistema armado igual.",
+  "analyzer.sast.fix": "El fragmento a reescribir, con la sugerencia lista para aplicar.",
+
+  "analyzer.sca.purpose":
+    "Revisa las bibliotecas de terceros que usa el proyecto frente a fallos ya descubiertos y publicados.",
+  "analyzer.sca.when":
+    "Siempre que haya lista de dependencias. Es rápido, no usa IA y suele ser lo que rinde desde el primer día.",
+  "analyzer.sca.delivers":
+    "Qué paquetes tienen un problema conocido, qué tan grave es cada uno y en qué versión ya se resolvió.",
+  "analyzer.sca.fix":
+    "La versión a la que subir. Aquí corregir es cambiar un número: tu código no se toca.",
+
+  "analyzer.business.purpose":
+    "Lee el código y responde qué está ya mal en lo que hace, no en cómo fue escrito.",
+  "analyzer.business.when":
+    "Cuando el código existe y quieres lo que el escáner no ve. Rinde más con la descripción del sistema completada.",
+  "analyzer.business.delivers":
+    "Un cliente que alcanza a ver el pedido de otro, una pantalla de administración abierta a cualquiera con sesión iniciada, un precio aceptado del navegador en vez de verificado en la base.",
+  "analyzer.business.fix":
+    "El fragmento a cambiar, con la sugerencia lista — y el propio StarGuard puede aplicarla.",
+
+  "analyzer.skills.purpose":
+    "Lee las instrucciones escritas para agentes de IA en busca de una trampa incrustada en el texto.",
+  "analyzer.skills.when":
+    "Cuando el proyecto tiene skills, prompts o agentes, sobre todo los que vinieron de fuera.",
+  "analyzer.skills.delivers":
+    "Una instrucción que desvía al agente de lo pedido, que manda datos afuera o que deja una puerta abierta.",
+  "analyzer.skills.fix": "La parte de la instrucción a quitar o reescribir.",
+
   "analyzer.reason.not_selected": "No seleccionado en esta ejecución.",
   "analyzer.reason.no_workspace": "Necesita código: indica un repositorio o un directorio.",
   "analyzer.reason.no_input": "Falta la entrada que consume este analizador.",
@@ -2786,8 +3003,6 @@ const ES: Record<MessageKey, string> = {
   "panel.result": "Resultado",
   "panel.noFindings": "nada encontrado",
   "panel.notRunYet": "Elige los analizadores y pulsa Analizar.",
-  "panel.usesAi": "IA",
-  "panel.onServer": "servidor",
   "panel.unavailable": "no disponible",
   "panel.fix": "Corregir",
   "panel.doctor": "Diagnóstico",
@@ -2830,6 +3045,34 @@ const ES: Record<MessageKey, string> = {
   "panel.uses": "Funciona mejor junto a: {list}",
   "panel.cancelled": "Análisis cancelado.",
 
+  "panel.actionUseServer": "Ejecutar en el servidor de mi cuenta…",
+  "panel.actionConfigurePaths": "Indicar la ruta del ejecutable…",
+  "panel.signIn": "Entrar",
+  "panel.requestAccess": "Solicitar acceso",
+
+  "panel.pr": "Abrir Pull Request ({n})",
+  "panel.prHint":
+    "Lleva las correcciones listas a un único Pull Request, con un solo commit. No se envía nada antes de que hagas clic.",
+  "panel.prOpening": "Abriendo el Pull Request…",
+  "panel.prOpened": "Pull Request #{n} abierto.",
+  "panel.prView": "Ver en GitHub",
+  "panel.prNothing": "Ninguna corrección está lista para ir a un Pull Request.",
+  "panel.prNoRepo":
+    "Este proyecto no tiene un repositorio de GitHub en «origin». El Pull Request necesita uno.",
+  "panel.prNoToken":
+    "Sin autorización de GitHub. Inicia sesión en la cuenta de GitHub del editor para abrir el Pull Request.",
+  "panel.prFailed": "No se pudo abrir el Pull Request: {erro}",
+  "panel.prBase":
+    "El Pull Request parte de la rama por defecto del repositorio remoto. Los cambios locales sin enviar no entran en él.",
+  "panel.prBody":
+    "Correcciones de seguridad propuestas automáticamente por StarGuard, desde la extensión de VS Code.",
+  "panel.prReview":
+    "El contenido fue generado por IA y necesita revisión humana antes del merge.",
+
+  "panel.fixConflict":
+    "Otra corrección de esta ronda ya reescribió este archivo. Analiza de nuevo para generar la siguiente.",
+  "panel.fixCleared": "{n} hallazgo(s) corregido(s) salieron de la lista.",
+
   "tree.state.unavailable": "no disponible",
   "tree.state.running": "analizando…",
   "tree.state.clean": "nada encontrado",
@@ -2856,6 +3099,7 @@ const ES: Record<MessageKey, string> = {
   "select.unavailable": "No disponible",
   "select.needsRepo": "Necesita un repositorio",
   "select.fixes": "Corrige lo que encuentra",
+  "select.about": "Qué hace el analizador {name}",
   "select.empty": "Elige al menos un analizador para empezar.",
   "select.loading": "Comprobando qué está disponible…",
   "select.notRunHere": "No se ejecutó en este análisis.",

@@ -95,6 +95,69 @@ Quando um binário/lib não existe, a etapa degrada com mensagem clara em vez de
 
 > **Dogfooding:** rode as Fases 2 e 3 do próprio StarGuard sobre este repositório em CI.
 
+## O que cada analisador faz
+
+Cinco analisadores independentes. Nenhum é pré-requisito de outro: dá para
+marcar um, três ou todos. As mesmas quatro perguntas para os cinco, para que
+dê para compará-los lado a lado — e a última é a que mais separa um do outro.
+
+> Este texto é o mesmo que aparece no pop-up do painel e no tooltip da
+> extensão: ele vive em `packages/core/src/i18n/messages.ts`, nos três idiomas.
+> Corrigir uma frase aqui é corrigir nos três produtos.
+
+### 🗺️ Modelagem de ameaças · `threat`
+
+- **Para que serve:** você descreve o sistema em texto e ela responde o que pode dar errado ali.
+- **Quando usar:** antes de existir código, ou quando você precisa saber o que exigir de quem vai construir.
+- **O que entrega:** uma lista de ameaças e uma lista de requisitos de segurança — a régua do projeto.
+- **O que aponta como correção:** nada no código. Ela não corrige: ela diz o que o sistema deveria garantir.
+
+### 🔎 Vulnerabilidades de código · `sast`
+
+- **Para que serve:** lê o código à procura de trechos escritos de um jeito reconhecidamente inseguro.
+- **Quando usar:** sempre que houver código. É rápido e não usa IA.
+- **O que entrega:** trechos perigosos com arquivo e linha — senha escrita no meio do código, consulta ao banco montada com texto de fora, comando do sistema montado do mesmo jeito.
+- **O que aponta como correção:** o trecho a reescrever, com a sugestão pronta para aplicar.
+
+### 📦 Dependências vulneráveis · `sca`
+
+- **Para que serve:** confere as bibliotecas de terceiros que o projeto usa contra falhas já descobertas e publicadas.
+- **Quando usar:** sempre que houver lista de dependências. É rápido, não usa IA e costuma ser o que rende resultado no primeiro dia.
+- **O que entrega:** quais pacotes têm problema conhecido, quão grave é cada um e em que versão já foi resolvido.
+- **O que aponta como correção:** a versão para onde subir. Aqui a correção é trocar um número — o seu código não muda.
+
+### 🛡️ Regras de negócio · `business`
+
+- **Para que serve:** lê o código e responde o que já está errado no que ele faz, não em como ele foi escrito.
+- **Quando usar:** quando o código existe e você quer o que o scanner não enxerga. Fica melhor com a descrição do sistema preenchida.
+- **O que entrega:** um cliente conseguindo ver o pedido de outro, tela de administrador aberta a qualquer pessoa logada, preço aceito do navegador em vez de conferido no banco.
+- **O que aponta como correção:** o trecho a mudar, com a sugestão pronta — e dá para aplicar pelo próprio StarGuard.
+
+### 🧩 Skills e prompts · `skills`
+
+- **Para que serve:** lê as instruções escritas para agentes de IA à procura de armadilha embutida no texto.
+- **Quando usar:** quando o projeto tem skill, prompt ou agente — principalmente os que vieram de fora.
+- **O que entrega:** instrução que desvia o agente do que foi pedido, que manda dado para fora ou que deixa uma porta aberta.
+- **O que aponta como correção:** o trecho da instrução a remover ou reescrever.
+
+### Modelagem de ameaças × Regras de negócio
+
+As duas são pedidas juntas com frequência, e a diferença cabe numa linha:
+
+> **A Modelagem escreve a régua. As Regras de negócio medem o código com ela.**
+
+Uma olha para o **futuro** (o que pode dar errado) e produz exigências; a outra
+olha para o **presente** (o que está errado) e produz consertos. A ligação é de
+mão única e **opcional**: `business` declara `uses: ["threat", "sast", "sca"]`
+como **enriquecimento**, nunca como pré-requisito — pedir só regras de negócio
+não arrasta ninguém para dentro da execução. Sem a modelagem no plano ela roda
+igual, só sem requisitos declarados para conferir um a um, e a degradação
+aparece escrita no cartão, no terminal e no editor.
+
+Com as duas juntas o ciclo fecha: cada requisito vira **cumprido**, **violado**
+(com arquivo, linha e correção) ou **não deu para verificar** — e este último
+caso é listado na tela em vez de ser omitido.
+
 ## Um motor, três interfaces
 
 O StarGuard é um **orquestrador central** com **analisadores independentes**.

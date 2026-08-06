@@ -8,7 +8,7 @@
 // ============================================================
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { BIN, ENGINES, SAST_CONFIG } from "../config";
+import { BIN, ENGINES, sastConfig } from "../config";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
 import { probeBinary } from "../binaries";
@@ -35,9 +35,9 @@ export async function runSast(dir: string): Promise<Vulnerability[]> {
 
   const bin = engine === "semgrep" ? BIN.semgrep : BIN.opengrep;
   // execFile com argumentos em array — o `dir` é caminho controlado por nós.
-  // SAST_CONFIG = "auto" (registro remoto) ou um diretório de regras local.
+  // `sastConfig()` = "auto" (registro remoto) ou um diretório de regras local.
   // Alvo "." + cwd=dir → paths relativos ao repo (não vaza o dir temporário).
-  const args = ["--config", SAST_CONFIG, "--json", "--quiet", "--timeout", "0", "."];
+  const args = ["--config", sastConfig(), "--json", "--quiet", "--timeout", "0", "."];
 
   try {
     const { stdout } = await pExecFile(bin, args, {

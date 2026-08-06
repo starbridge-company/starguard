@@ -26,7 +26,7 @@ const TEXTOS = Object.fromEntries(
     "estadoSemMudanca", "estadoErro", "estadoCancelada", "verDiff", "aplicar",
     "aplicarTudo", "descartar", "umAchado", "nAchados", "maisArquivos",
     "nadaMarcado", "filtrarTudo", "filtrarAjuda", "degradado", "requisitos",
-    "requisitosAjuda",
+    "requisitosAjuda", "pr", "prHint", "prBase", "prAbrindo", "prVer", "prAberto",
   ].map((k) => [k, k])
 ) as unknown as TextosDoPainel;
 
@@ -150,6 +150,54 @@ describe("o botão de analisar não fica preso (UX-24)", () => {
 
   it("o estado de execução chega pelo estado completo", () => {
     expect(pagina()).toContain("rodando: false");
+  });
+});
+
+describe("o cartão não carrega mais os selos de IA e de servidor", () => {
+  it("nenhum selo é desenhado no cartão", () => {
+    // Duas etiquetas por cartão dizendo de ONDE vem a execução, num lugar em
+    // que a pergunta é "isto serve para mim?". O que importa sobre custo e
+    // velocidade está no tooltip do cartão, em "Quando usar".
+    const html = pagina();
+    expect(html).not.toContain('class="selo');
+    expect(html).not.toContain('class="selos"');
+  });
+
+  it("a explicação de cada analisador continua chegando pelo tooltip", () => {
+    // O que substituiu os selos. Se isto sair, o cartão fica com uma linha de
+    // subtítulo e nada mais.
+    expect(pagina()).toContain("a.sobre");
+  });
+});
+
+describe("Pull Request a partir do painel", () => {
+  it("existe o botão que abre UM PR com o que está pronto", () => {
+    expect(pagina()).toContain('data-acao="abrirPr"');
+  });
+
+  it("entram no PR tanto as prontas quanto as JÁ APLICADAS", () => {
+    // Aplicar grava no disco de quem clicou; o PR leva a mesma mudança para o
+    // repositório. São dois destinos, não duas decisões excludentes — quem já
+    // aplicou e depois quer o PR não deveria ter de gerar tudo de novo.
+    expect(pagina()).toMatch(/estado === 'pronta' \|\| c\.estado === 'aplicada'/);
+  });
+
+  it("o aviso da branch aparece ANTES do botão, não depois", () => {
+    // O PR parte da branch padrão do repositório REMOTO. Quem tem trabalho
+    // local não enviado precisa saber disso antes de clicar; depois vira
+    // relato de estrago.
+    const html = pagina();
+    expect(html.indexOf("prBase")).toBeGreaterThan(-1);
+    expect(html.indexOf("prBase")).toBeLessThan(html.indexOf('data-acao="abrirPr"'));
+  });
+
+  it("o botão desabilita enquanto o PR está sendo aberto", () => {
+    // Dois cliques abririam dois PRs no mesmo repositório.
+    expect(pagina()).toContain("pr.abrindo ?");
+  });
+
+  it("com o PR aberto, a tela oferece o link em vez do botão", () => {
+    expect(pagina()).toContain('data-acao="verPr"');
   });
 });
 

@@ -34,7 +34,7 @@ import type {
   PlanEntry,
   Workspace,
 } from "@starguard/core/contracts";
-import { achadosDe, ehDiagnostico, type Achado } from "./findings.js";
+import { achadosDe, chaveDoAchado, ehDiagnostico, type Achado } from "./findings.js";
 import { groupByFile, proposeForFile } from "@starguard/core/fix/batch";
 import { normPath } from "@starguard/core/dedup";
 import { StarGuardAuthProvider, definirLog, pedirLogin, sessaoAtual } from "./auth.js";
@@ -48,6 +48,7 @@ import {
   type CartaoDeAnalisador,
   type CorrecaoNaTela,
   type GanchosDoPainel,
+  type PrNaTela,
   type ResultadoNaTela,
 } from "./painel.js";
 import {
@@ -82,11 +83,27 @@ function t(k: MessageKey, v?: Record<string, string | number>): string {
 function aplicarConfiguracao(): void {
   const semgrep = cfg().get<string>("semgrepPath")?.trim();
   const trivy = cfg().get<string>("trivyPath")?.trim();
-  if (semgrep) {
-    process.env.SEMGREP_BIN = semgrep;
-    process.env.OPENGREP_BIN = semgrep;
-  }
-  if (trivy) process.env.TRIVY_BIN = trivy;
+  const regras = cfg().get<string>("sastRules")?.trim();
+
+  // APAGAR quando a configuração está vazia, e não só gravar quando tem valor.
+  //
+  // `process.env` do extension host vive enquanto o editor viver: sem isto,
+  // limpar o campo na tela de configurações não desfazia nada — o caminho
+  // velho continuava valendo até reiniciar o VS Code, e quem apontou um
+  // binário errado não tinha como voltar atrás sem fechar o editor.
+  const definir = (nome: string, valor?: string) => {
+    if (valor) process.env[nome] = valor;
+    else delete process.env[nome];
+  };
+
+  definir("SEMGREP_BIN", semgrep);
+  definir("OPENGREP_BIN", semgrep);
+  definir("TRIVY_BIN", trivy);
+  // Sem regras locais, o Opengrep usa "auto" e BAIXA o ruleset de semgrep.dev.
+  // Numa máquina sem saída para a internet — ou atrás de proxy com CA própria —
+  // isso falha no meio da análise, e o sintoma é um erro de rede no lugar de
+  // "falta configurar". Quem já tem as regras no disco aponta aqui.
+  definir("SAST_RULES", regras);
 }
 
 /** Chave do consentimento, no estado global da extensão. */
@@ -194,9 +211,11 @@ const SEVERIDADE: Record<string, vscode.DiagnosticSeverity> = {
   info: vscode.DiagnosticSeverity.Hint,
 };
 
-function chaveDe(a: Achado): string {
-  return `${a.analyzer}|${a.file}|${a.line ?? 0}|${a.ruleId}`;
-}
+// A chave mora em `findings.ts`, que é puro e tem teste. Aqui só o apelido —
+// `Achado` e `FixableFinding` satisfazem os dois o mesmo parâmetro estrutural,
+// e é isso que garante que a correção reencontre o que corrigiu.
+const chaveDe = chaveDoAchado;
+const chaveDoFinding = chaveDoAchado;
 
 function publicar(id: AnalyzerId, achados: Achado[], root: string): void {
   const colecao = colecoes.get(id)!;
@@ -279,18 +298,30 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
   });
 
   ultimoPlano = execPlan;
-  estadoDosCartoes.clear();
+  // Só o estado dos cartões DESTA execução é zerado. Quem não foi selecionado
+  // mantém o ✔ e a contagem da execução anterior — que é o que a lista abaixo
+  // continua mostrando.
+  for (const id of select) estadoDosCartoes.delete(id);
   for (const e of execPlan.entries) {
     if (!e.willRun && e.reason !== "not_selected") {
       estadoDosCartoes.set(e.id, { estado: "pulado" });
     }
   }
-  rodando = true;
-  abortarAnalise = new AbortController();
-  await painel.atualizar({ erro: null });
-  relatarPulados(execPlan);
 
+  // `rodando = true` entra DENTRO do try, e não antes dele.
+  //
+  // Estava fora, com dois `await` entre a atribuição e o `try`. Qualquer um dos
+  // dois falhando deixava `rodando` preso em `true` — e a partir daí todo
+  // clique em Analisar caía no `if (rodando) return` lá em cima e não fazia
+  // nada, com o botão parado em "Analisando…" até recarregar a janela. O
+  // `finally` já existia e estava certo; ele só não cobria o trecho onde o erro
+  // acontecia. Ver AUDITORIA.md#UX-24.
   try {
+    rodando = true;
+    abortarAnalise = new AbortController();
+    await painel.atualizar({ erro: null });
+    relatarPulados(execPlan);
+
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -466,6 +497,32 @@ function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]):
     return !!o && o.status !== "skipped";
   });
 
+  // A LISTA do painel segue a mesma regra das coleções de diagnóstico: só o
+  // que rodou é substituído.
+  //
+  // Antes o painel era remontado apenas com os analisadores da execução atual.
+  // Rodar só o SAST depois de uma análise completa apagava as dependências da
+  // tela — enquanto o painel Problemas continuava mostrando as duas coisas. A
+  // mesma extensão dizia duas verdades diferentes sobre o mesmo projeto, e a
+  // independência que o cabeçalho deste arquivo promete valia só para metade
+  // dela.
+  for (const id of rodaram) {
+    achadosPorAnalisador.set(id, achados.filter((a) => a.analyzer === id));
+    avisosPorAnalisador.set(
+      id,
+      (run.outcomes[id]?.degraded ?? []).map((d) => t(`analyzer.degraded.${d}` as MessageKey))
+    );
+  }
+  if (rodaram.includes("threat")) {
+    const modelo = run.outcomes.threat?.status === "done"
+      ? (run.outcomes.threat.result as ThreatModel | undefined)
+      : undefined;
+    requisitosGuardados = (modelo?.requirements ?? []).map((r) => ({
+      id: r.id,
+      texto: r.text,
+    }));
+  }
+
   // A contagem do cartão sai do que a LISTA mostra: qualquer outra conta faria
   // o cartão dizer 3 e o grupo abaixo dele mostrar 2.
   for (const id of rodaram) {
@@ -480,7 +537,7 @@ function aplicarResultado(run: AnalysisRun, root: string, select: AnalyzerId[]):
     });
   }
 
-  ultimoResultado = montarResultado(run, achados, rodaram);
+  ultimoResultado = montarResultado();
   void painel.atualizar({ resultado: ultimoResultado });
 
   for (const o of Object.values(run.outcomes)) {
@@ -582,19 +639,26 @@ async function corrigir(chave: string): Promise<void> {
   aplicarConfiguracao();
   let ws: Workspace | undefined;
 
-  const proposta = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: t("fix.generating") },
-    async () => {
-      ws = await openWorkspace({ type: "local", path: root });
-      return fixer.propose(paraFinding(achado), {
-        workspace: ws,
-        locale: locale(),
-        repoUrl: ws?.origin?.url,
-      });
-    }
-  );
-
+  // O `try` começa ANTES de abrir o workspace, não depois de propor.
+  //
+  // Estava depois: `openWorkspace` e `propose` rodavam fora dele, e uma falha
+  // em qualquer um dos dois escapava sem passar pelo `finally` — o workspace
+  // ficava aberto e a exceção subia para o registrador do comando, onde o VS
+  // Code a transforma em nada visível. Quem clicou na lâmpada via o progresso
+  // sumir e mais nada acontecer.
   try {
+    const proposta = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: t("fix.generating") },
+      async () => {
+        ws = await openWorkspace({ type: "local", path: root });
+        return fixer.propose(paraFinding(achado), {
+          workspace: ws,
+          locale: locale(),
+          repoUrl: ws?.origin?.url,
+        });
+      }
+    );
+
     if (proposta.noChange) {
       void vscode.window.showWarningMessage(t("fix.noChange"));
       return;
@@ -606,8 +670,16 @@ async function corrigir(chave: string): Promise<void> {
     const principal = proposta.changes[0]!;
     await mostrarDiff(principal);
 
+    // Uma proposta pode tocar mais de um arquivo, e o diff mostra só o
+    // primeiro. Aplicar sem dizer isso grava arquivo que ninguém revisou —
+    // o oposto do que a confirmação existe para garantir.
+    const extras = proposta.changes.length - 1;
+    const explicacao = extras > 0
+      ? `${proposta.explanation}\n\n${t("panel.fixAlsoFiles", { n: extras })}`
+      : proposta.explanation;
+
     const escolha = await vscode.window.showInformationMessage(
-      proposta.explanation,
+      explicacao,
       { modal: false },
       t("fix.apply"),
       t("common.cancel")
@@ -616,6 +688,10 @@ async function corrigir(chave: string): Promise<void> {
 
     await fixer.apply(proposta, ws!);
     void vscode.window.showInformationMessage(t("fix.applied"));
+    // O achado corrigido sai da lista e do painel Problemas. Deixá-lo ali
+    // oferecendo "Corrigir" de novo faria a segunda correção partir do arquivo
+    // já reescrito e desfazer a primeira — o BUG-06 pela porta da lâmpada.
+    retirarAchados([chave]);
 
     for (const seg of proposta.followUp ?? []) {
       // O aviso do lockfile precisa aparecer: a correção edita o manifesto e
@@ -624,8 +700,61 @@ async function corrigir(chave: string): Promise<void> {
         t(seg.commandKey, { cmd: seg.command ?? "", manifest: principal.file, lockfile: "" })
       );
     }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    saida.appendLine(`[fix] ${achado.file}: ${msg}`);
+    void vscode.window.showErrorMessage(`StarGuard · ${msg.split("\n")[0]}`);
   } finally {
     await ws?.dispose();
+  }
+}
+
+/**
+ * Tira da tela e do painel Problemas os achados que acabaram de ser corrigidos.
+ *
+ * Não é cosmético: um achado corrigido que continua na lista continua marcável,
+ * e a próxima correção partiria de um arquivo que já mudou — a segunda gravação
+ * desfaz a primeira, com a tela dizendo que as duas foram aplicadas. É o BUG-06
+ * outra vez, agora entre RODADAS em vez de dentro de uma.
+ *
+ * Some da lista, não do disco: quem quiser conferir roda a análise de novo, e
+ * a mensagem de "aplicado" já diz isso.
+ */
+function retirarAchados(chaves: string[]): void {
+  const fora = new Set(chaves);
+  if (!fora.size) return;
+
+  let saiu = 0;
+  for (const [id, lista] of achadosPorAnalisador) {
+    const restam = lista.filter((a) => !fora.has(chaveDe(a)));
+    saiu += lista.length - restam.length;
+    achadosPorAnalisador.set(id, restam);
+    // O cartão conta o que a lista mostra. Sem isto ele continuaria dizendo 7
+    // com seis linhas embaixo.
+    const cartao = estadoDosCartoes.get(id);
+    if (cartao && id !== "threat") {
+      estadoDosCartoes.set(id, { ...cartao, achados: restam.length });
+    }
+  }
+  for (const k of fora) achadosPorChave.delete(k);
+  if (!saiu) return;
+
+  republicarDiagnosticos();
+  ultimoResultado = montarResultado();
+  void painel.atualizar({ resultado: ultimoResultado });
+  // A partir de dois, e não sempre: numa correção pela lâmpada a linha some
+  // exatamente onde a pessoa clicou, e um aviso a mais em cima do "correção
+  // aplicada" seriam duas notificações para uma ação só. Num lote de doze, a
+  // frase é a única explicação de por que a lista encolheu.
+  if (saiu > 1) void vscode.window.showInformationMessage(t("panel.fixCleared", { n: saiu }));
+}
+
+/** Reescreve as coleções a partir do que sobrou — o editor precisa concordar. */
+function republicarDiagnosticos(): void {
+  const root = raiz();
+  if (!root) return;
+  for (const [id, lista] of achadosPorAnalisador) {
+    publicar(id, lista.filter(ehDiagnostico), root);
   }
 }
 
@@ -663,6 +792,8 @@ interface PropostaGuardada {
   chave: string;
   arquivo: string;
   achados: number;
+  /** Os achados que esta proposta cobre — saem da lista quando ela é aplicada. */
+  chavesDeAchado: string[];
   /** De quem é o corretor. Guardado, e não deduzido do caminho na hora. */
   analyzer: AnalyzerId;
   estado: CorrecaoNaTela["estado"];
@@ -673,6 +804,8 @@ interface PropostaGuardada {
 /** As propostas da rodada atual, por arquivo. Nada aqui foi gravado em disco. */
 const propostas = new Map<string, PropostaGuardada>();
 let abortarCorrecao: AbortController | undefined;
+/** O PR da rodada. Um só, com tudo o que estiver pronto. */
+let prNaTela: PrNaTela = { abrindo: false };
 
 function correcoesNaTela(): CorrecaoNaTela[] {
   return [...propostas.values()].map((p) => ({
@@ -741,19 +874,31 @@ async function corrigirLote(chaves: string[]): Promise<void> {
   aplicarConfiguracao();
   abortarCorrecao = new AbortController();
   propostas.clear();
+  prNaTela = { abrindo: false };
   for (const g of grupos) {
     propostas.set(g.chave, {
       chave: g.chave,
       arquivo: g.arquivo,
       achados: g.achados.length,
+      // As chaves dos achados que esta proposta cobre. Guardadas porque, depois
+      // de aplicar, são exatamente as linhas que precisam sair da lista.
+      chavesDeAchado: g.achados.map((f) => chaveDoFinding(f)),
       analyzer: g.achados[0]!.analyzer,
       estado: "gerando",
     });
   }
   await painel.atualizar();
 
-  const ws = await openWorkspace({ type: "local", path: root });
+  // `openWorkspace` DENTRO do try, e as sobras normalizadas no finally.
+  //
+  // Estava fora: se abrir o workspace falhasse, a função saía com todas as
+  // propostas em "gerando…" e o `abortarCorrecao` ainda montado. O bloco de
+  // correções ficava com um relógio girando para sempre, sem erro nenhum
+  // escrito em lugar nenhum e sem botão que resolvesse. É o mesmo defeito do
+  // botão de Analisar, na outra metade da tela.
+  let ws: Workspace | undefined;
   try {
+    ws = await openWorkspace({ type: "local", path: root });
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -786,7 +931,7 @@ async function corrigirLote(chaves: string[]): Promise<void> {
               fixer,
               { file: g.arquivo, findings: g.achados },
               {
-                workspace: ws,
+                workspace: ws!,
                 locale: locale(),
                 repoUrl: ws?.origin?.url,
                 signal: abortarCorrecao?.signal,
@@ -804,9 +949,22 @@ async function corrigirLote(chaves: string[]): Promise<void> {
         }
       }
     );
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+    saida.appendLine(`[fix] ${msg}`);
+    void vscode.window.showErrorMessage(`StarGuard · ${msg}`);
   } finally {
     abortarCorrecao = undefined;
     await ws?.dispose();
+    // NENHUMA proposta pode sobrar em "gerando…".
+    //
+    // Esse estado significa "estou trabalhando nisso", e ninguém está mais.
+    // Quando o laço morre no meio — erro fora do `try` de dentro, cancelamento,
+    // workspace que não abriu — o que resta vira relógio eterno. Aqui a sobra
+    // vira "cancelada", que é o que de fato aconteceu com ela.
+    for (const p of propostas.values()) {
+      if (p.estado === "gerando") p.estado = "cancelada";
+    }
     await painel.atualizar();
   }
 }
@@ -836,9 +994,11 @@ async function aplicarCorrecoes(chaves: string[]): Promise<void> {
   const root = raiz();
   if (!root) return;
 
-  const ws = await openWorkspace({ type: "local", path: root });
-  if (!ws) return;
+  let ws: Workspace | undefined;
+  const corrigidos: string[] = [];
   try {
+    ws = await openWorkspace({ type: "local", path: root });
+    if (!ws) return;
     const escritos = new Set<string>();
     let total = 0;
     for (const k of chaves) {
@@ -854,15 +1014,140 @@ async function aplicarCorrecoes(chaves: string[]): Promise<void> {
       );
       if (conflito) {
         g.estado = "erro";
-        g.erro = t("fix.cannot.noFile");
+        // Era `fix.cannot.noFile` — "arquivo não encontrado". O arquivo existe;
+        // o que houve foi outra proposta ter chegado primeiro. Motivo errado na
+        // tela manda a pessoa procurar um problema que não é o dela.
+        g.erro = t("panel.fixConflict");
         continue;
       }
       total += await aplicarProposta(g, ws);
+      if (g.estado === "aplicada") corrigidos.push(...g.chavesDeAchado);
       for (const c of g.proposta.changes) escritos.add(normPath(c.file));
     }
     if (total) void vscode.window.showInformationMessage(t("panel.fixApplied", { n: total }));
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+    saida.appendLine(`[fix] ${msg}`);
+    void vscode.window.showErrorMessage(`StarGuard · ${msg}`);
   } finally {
-    await ws.dispose();
+    await ws?.dispose();
+    // Os achados gravados saem da lista. A proposta CONTINUA no bloco de
+    // correções, marcada como aplicada: é dela que o Pull Request sai depois.
+    retirarAchados(corrigidos);
+    await painel.atualizar();
+  }
+}
+
+// ------------------------------------------------------------
+// Pull Request — um só, com tudo o que a rodada produziu
+// ------------------------------------------------------------
+
+/**
+ * Abre UM Pull Request com todas as correções prontas ou já aplicadas.
+ *
+ * Um e não um por achado: quem recebe cinco PRs do robô no mesmo dia fecha os
+ * cinco sem ler. A consolidação por arquivo já aconteceu na geração
+ * (`groupByFile`), e `openPullRequestBatch` ainda deduplica por caminho — se o
+ * mesmo arquivo aparecer duas vezes, o último conteúdo vence, e ele é o que já
+ * acumula a correção anterior.
+ *
+ * O token vem do provedor de GitHub DO EDITOR, não de configuração nossa. Quem
+ * usa VS Code já está autenticado no GitHub para push e para o Copilot; pedir
+ * um Personal Access Token à parte seria inventar um segredo a mais para
+ * guardar, e guardar segredo é justamente o que esta extensão evita fazer.
+ *
+ * `createIfNone: true` porque abrir PR É a hora de pedir a autorização: quem
+ * clicou está pedindo para escrever no repositório.
+ */
+async function abrirPr(): Promise<void> {
+  if (prNaTela.abrindo) return;
+
+  const levaveis = [...propostas.values()].filter(
+    (p) => (p.estado === "pronta" || p.estado === "aplicada") && p.proposta
+  );
+  if (!levaveis.length) {
+    void vscode.window.showWarningMessage(t("panel.prNothing"));
+    return;
+  }
+
+  const root = raiz();
+  if (!root) return;
+
+  let ws: Workspace | undefined;
+  prNaTela = { abrindo: true };
+  await painel.atualizar();
+
+  try {
+    ws = await openWorkspace({ type: "local", path: root });
+    const repoUrl = ws?.origin?.url;
+    if (!repoUrl) {
+      // Sem `origin` no GitHub não há para onde mandar. Dito com todas as
+      // letras, e não como falha genérica de rede lá na frente.
+      prNaTela = { abrindo: false, erro: t("panel.prNoRepo") };
+      return;
+    }
+
+    const sessao = await vscode.authentication.getSession("github", ["repo"], {
+      createIfNone: true,
+    });
+    if (!sessao) {
+      prNaTela = { abrindo: false, erro: t("panel.prNoToken") };
+      return;
+    }
+
+    // Um conteúdo por arquivo. A ordem preserva a última versão, que é a que
+    // acumula as correções anteriores do mesmo arquivo.
+    const porArquivo = new Map<string, string>();
+    const explicacoes: string[] = [];
+    for (const p of levaveis) {
+      for (const c of p.proposta!.changes) {
+        if (c.fixedCode === c.originalCode) continue;
+        porArquivo.set(normPath(c.file), c.fixedCode);
+      }
+      explicacoes.push(`- **${p.arquivo}** — ${p.proposta!.explanation}`);
+    }
+    if (!porArquivo.size) {
+      prNaTela = { abrindo: false, erro: t("panel.prNothing") };
+      return;
+    }
+
+    const { openPullRequestBatch } = await import("@starguard/core/git");
+    const pr = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: t("panel.prOpening") },
+      () =>
+        openPullRequestBatch({
+          repoUrl,
+          files: [...porArquivo.entries()].map(([file, fixedCode]) => ({ file, fixedCode })),
+          title: `fix(security): ${porArquivo.size} arquivo(s) corrigido(s) pelo StarGuard`,
+          body: [
+            t("panel.prBody"),
+            "",
+            ...explicacoes,
+            "",
+            `> ${t("panel.prReview")}`,
+            `> ${t("panel.prBase")}`,
+          ].join("\n"),
+          token: sessao.accessToken,
+        })
+    );
+
+    prNaTela = { abrindo: false, numero: pr.number, url: pr.url };
+    saida.appendLine(`[pr] #${pr.number} ${pr.url}`);
+    const ver = t("panel.prView");
+    const escolha = await vscode.window.showInformationMessage(
+      t("panel.prOpened", { n: pr.number }),
+      ver
+    );
+    if (escolha === ver) await vscode.env.openExternal(vscode.Uri.parse(pr.url));
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+    saida.appendLine(`[pr] ${msg}`);
+    prNaTela = { abrindo: false, erro: t("panel.prFailed", { erro: msg }) };
+  } finally {
+    await ws?.dispose();
+    // O `finally` é o ÚNICO lugar que desliga `abrindo`, pela mesma razão que
+    // vale para o botão de Analisar: todo caminho de saída passa por ele.
+    if (prNaTela.abrindo) prNaTela = { abrindo: false };
     await painel.atualizar();
   }
 }
@@ -876,17 +1161,25 @@ const ORDEM_SEV: Record<string, number> = {
   critical: 0, high: 1, medium: 2, low: 3, info: 4,
 };
 
-/** Quais analisadores custam IA. Vira selo no cartão, antes de rodar. */
-const CUSTA_IA: Record<string, boolean> = {
-  threat: true, business: true, sast: false, sca: false, skills: false,
-};
-
 /** Último plano montado: é dele que saem disponibilidade e motivo. */
 let ultimoPlano: ExecutionPlan | undefined;
 /** Seleção corrente, preservada entre aberturas do painel. */
 let selecao: AnalyzerId[] = [];
 /** Último resultado, para o painel redesenhar sem reanalisar. */
 let ultimoResultado: ResultadoNaTela | null = null;
+
+/**
+ * Achados VIVOS, por analisador — a fonte da lista do painel.
+ *
+ * Por analisador e não numa lista só porque a substituição é por analisador:
+ * é o mesmo contrato das coleções de diagnóstico, e é o que faz "analisar só o
+ * SAST" deixar as dependências da execução anterior de pé.
+ */
+const achadosPorAnalisador = new Map<AnalyzerId, Achado[]>();
+/** Frases de degradação, também por analisador, pelo mesmo motivo. */
+const avisosPorAnalisador = new Map<AnalyzerId, string[]>();
+/** Requisitos da última modelagem que rodou. Sobrevivem a execuções sem ela. */
+let requisitosGuardados: { id: string; texto: string }[] = [];
 
 /**
  * Estado de cada cartão durante e depois da execução.
@@ -917,9 +1210,13 @@ let abortarAnalise: AbortController | undefined;
 function textosDoPainel(): TextosDoPainel {
   return {
     titulo: t("panel.signInTitle"),
-    entrar: t("oauth.approve") === "" ? "" : t("panel.signInTitle"),
+    // Os dois botões do portão vinham de chaves emprestadas de outra tela: o de
+    // entrar recebia o TÍTULO ("StarGuard") por causa de uma condicional que
+    // nunca foi verdadeira, e o de pedir acesso dizia "Abrir uma pasta…" — que
+    // não é nem de longe o que ele faz. Agora cada um tem a sua chave.
+    entrar: t("panel.signIn"),
     entrarSub: t("panel.signInSub"),
-    solicitar: t("tree.action.openFolder"),
+    solicitar: t("panel.requestAccess"),
     analisadores: t("panel.analyzers"),
     selecionarTudo: t("panel.selectAll"),
     limpar: t("panel.clearSel"),
@@ -938,9 +1235,13 @@ function textosDoPainel(): TextosDoPainel {
     resultado: t("panel.result"),
     semAchados: t("panel.noFindings"),
     aindaNaoRodou: t("panel.notRunYet"),
-    usaIa: t("panel.usesAi"),
-    noServidor: t("panel.onServer"),
     indisponivel: t("panel.unavailable"),
+    pr: t("panel.pr"),
+    prHint: t("panel.prHint"),
+    prBase: t("panel.prBase"),
+    prAbrindo: t("panel.prOpening"),
+    prVer: t("panel.prView"),
+    prAberto: t("panel.prOpened"),
     corrigir: t("panel.fix"),
     diagnostico: t("panel.doctor"),
     sair: t("panel.signOut"),
@@ -992,8 +1293,69 @@ async function recarregarPlano(): Promise<void> {
   });
 }
 
+/** As quatro perguntas, na mesma ordem para os cinco analisadores. */
+const SOBRE = ["purpose", "when", "delivers", "fix"] as const;
+
+/**
+ * "Para que serve / quando usar / o que entrega / o que corrige" — uma linha
+ * por pergunta, no idioma da pessoa.
+ *
+ * Texto puro, sem marcação: vira `title` no cartão do painel e `detail` no
+ * seletor rápido, e nenhum dos dois interpreta HTML. É o MESMO dicionário que
+ * o painel web usa no pop-up — três produtos, uma redação só, e quem corrigir
+ * uma frase corrige nos três.
+ */
+function sobreOAnalisador(id: AnalyzerId): string {
+  return SOBRE.map(
+    (campo) =>
+      `${t(`about.${campo}` as MessageKey)}: ${t(`analyzer.${id}.${campo}` as MessageKey)}`
+  ).join("\n");
+}
+
+/**
+ * Comandos que o painel pode disparar. **Allowlist, não lista de conveniência.**
+ *
+ * O webview manda o id do comando de volta pela ponte de mensagens, e a ponte
+ * é o limite de confiança desta extensão: a página exibe título de regra do
+ * Opengrep, nome de pacote do Trivy e texto escrito por um modelo. Aceitar
+ * qualquer id daí seria deixar o conteúdo analisado executar comando do editor.
+ * Os dois abaixo são os únicos que a tela precisa.
+ */
+const SAIDAS: { comando: string; chave: MessageKey }[] = [
+  { comando: "starguard.enableAccountAi", chave: "panel.actionUseServer" },
+  { comando: "starguard.configurarCaminhos", chave: "panel.actionConfigurePaths" },
+];
+
+/**
+ * As SAÍDAS para um analisador indisponível.
+ *
+ * Dizer "o executável opengrep não foi encontrado" e parar aí é meio caminho:
+ * a pessoa fica sabendo o que houve e não o que fazer. É a mesma exigência do
+ * UX-15 levada até o fim — nunca deixar "não dá para procurar" sem dizer como
+ * passa a dar.
+ *
+ * Para o binário faltando são DUAS saídas de verdade, e a ordem importa:
+ *
+ * 1. **Rodar no servidor da conta.** É a promessa central do produto — "nada
+ *    precisa ser instalado" — e resolve com um clique, sem download nenhum.
+ *    Só aparece enquanto o transporte remoto está desligado, porque é isso que
+ *    ele liga.
+ * 2. **Apontar o caminho.** Para quem já tem o binário no disco e prefere que
+ *    o código não saia da máquina. Esta era a saída que a mensagem sugeria e
+ *    que, até agora, não funcionava: a configuração era lida DEPOIS de o núcleo
+ *    já ter congelado o valor. Ver o cabeçalho de `packages/core/src/config.ts`.
+ */
+function saidasPara(reason?: string): { rotulo: string; comando: string }[] {
+  if (reason === "no_ai_key") {
+    return [{ rotulo: t("tree.action.useAccountAi"), comando: "starguard.enableAccountAi" }];
+  }
+  if (reason !== "binary_missing") return [];
+  return SAIDAS.filter(
+    (s) => s.comando !== "starguard.enableAccountAi" || !usingRemoteScan()
+  ).map((s) => ({ rotulo: t(s.chave), comando: s.comando }));
+}
+
 function cartoes(): CartaoDeAnalisador[] {
-  const remoto = usingRemoteScan();
   return ANALYZER_IDS.map((id) => {
     const e = ultimoPlano?.entries.find((x) => x.id === id);
     // `not_selected` não é indisponibilidade: o plano de sondagem não pediu
@@ -1018,10 +1380,10 @@ function cartoes(): CartaoDeAnalisador[] {
       id,
       nome: t(`analyzer.${id}.name` as MessageKey),
       desc: t(`analyzer.${id}.desc` as MessageKey),
+      sobre: sobreOAnalisador(id),
       disponivel,
       motivo: e && !disponivel ? descreverMotivo(e) : undefined,
-      usaIa: !!CUSTA_IA[id],
-      remoto: remoto && (id === "sast" || id === "sca"),
+      acoes: disponivel ? undefined : saidasPara(e?.reason),
       estado: estado?.estado,
       achados: estado?.achados,
       detalhe: estado?.detalhe,
@@ -1030,11 +1392,19 @@ function cartoes(): CartaoDeAnalisador[] {
   });
 }
 
-function montarResultado(
-  run: AnalysisRun,
-  achados: Achado[],
-  rodaram: AnalyzerId[]
-): ResultadoNaTela {
+/**
+ * A tela de resultado, montada do que está ACUMULADO — não de uma execução.
+ *
+ * Recebe zero argumentos de propósito: enquanto ela lia um `AnalysisRun`, o
+ * painel só sabia falar da última execução, e "analisar só o SAST" apagava
+ * tudo o mais. A fonte agora é `achadosPorAnalisador`, que cada execução
+ * atualiza APENAS nas chaves que rodaram — exatamente como as coleções de
+ * diagnóstico sempre fizeram.
+ */
+function montarResultado(): ResultadoNaTela {
+  const rodaram = [...achadosPorAnalisador.keys()];
+  const achados = rodaram.flatMap((id) => achadosPorAnalisador.get(id) ?? []);
+
   const contagem: Record<string, number> = {};
   for (const a of achados) contagem[a.severity] = (contagem[a.severity] ?? 0) + 1;
 
@@ -1044,25 +1414,12 @@ function montarResultado(
   // A degradação sai do canal de saída e vem para a tela: "rodou sem o
   // analisador X" é informação sobre o RESULTADO, e quem lê o resultado está
   // olhando o painel. Repetida por analisador, sem duplicar a frase.
-  const avisos = [
-    ...new Set(
-      Object.values(run.outcomes)
-        .filter((o) => o.status === "done")
-        .flatMap((o) => o.degraded)
-        .map((d) => t(`analyzer.degraded.${d}` as MessageKey))
-    ),
-  ];
+  const avisos = [...new Set([...avisosPorAnalisador.values()].flat())];
 
   // Os requisitos que a modelagem extraiu. Sem contador e fora da lista de
   // achados de propósito: são o CONTRATO que as regras de negócio conferem, e
   // não problemas encontrados — é a lição do UX-22.
-  const modelo = run.outcomes.threat?.status === "done"
-    ? (run.outcomes.threat.result as ThreatModel | undefined)
-    : undefined;
-  const requisitos = (modelo?.requirements ?? []).map((r) => ({
-    id: r.id,
-    texto: r.text,
-  }));
+  const requisitos = requisitosGuardados;
 
   return {
     contagem,
@@ -1155,6 +1512,7 @@ function ganchosDoPainel(): GanchosDoPainel {
         rodando,
         resultado: ultimoResultado,
         correcoes: correcoesNaTela(),
+        pr: prNaTela,
       };
     },
 
@@ -1199,8 +1557,14 @@ function ganchosDoPainel(): GanchosDoPainel {
       // O achado de skill não aponta um caminho do projeto: `file` é o NOME da
       // skill. O caminho de verdade é o que a pessoa escolheu no painel — sem
       // isto, clicar tentava abrir `<raiz>/prompts.md` e falhava em silêncio.
+      //
+      // `arquivosDeSkill()` e não `skillsEscolhidas`: quando ninguém escolheu
+      // arquivo nenhum, a entrada do analisador é o documento ABERTO NO EDITOR
+      // (ver `entradaDeSkills`), e a lista de escolhidos está vazia. Era o caso
+      // mais comum — validar o prompt que se está escrevendo — e justamente o
+      // único em que clicar no achado não fazia absolutamente nada.
       if (a.analyzer === "skills") {
-        const caminho = skillsEscolhidas.find((c) => nomeDe(c) === a.file);
+        const caminho = arquivosDeSkill().find((s) => s.nome === a.file)?.caminho;
         if (!caminho) return;
         await vscode.window.showTextDocument(vscode.Uri.file(caminho), {
           selection: new vscode.Range(linha, 0, linha, 0),
@@ -1279,7 +1643,31 @@ function ganchosDoPainel(): GanchosDoPainel {
     aoDescartarCorrecoes: async () => {
       // Nada foi gravado: descartar é esquecer, não desfazer.
       propostas.clear();
+      // O PR sai junto: ele é a saída DESTAS propostas, e um "PR #12 aberto"
+      // pendurado sobre uma lista vazia não diz respeito a nada que esteja
+      // na tela.
+      prNaTela = { abrindo: false };
       await painel.atualizar();
+    },
+
+    aoAbrirPr: async () => {
+      await abrirPr();
+    },
+
+    aoVerPr: async () => {
+      if (prNaTela.url) await vscode.env.openExternal(vscode.Uri.parse(prNaTela.url));
+    },
+
+    aoAgirNoCartao: async (comando) => {
+      // A allowlist é conferida AQUI, no lado da extensão, e não confiando no
+      // que a página mandou: a ponte de mensagens é o limite de confiança, e
+      // do outro lado dela há texto de repositório de terceiros.
+      const permitido = SAIDAS.some((s) => s.comando === comando);
+      if (!permitido) {
+        saida.appendLine(`[painel] comando recusado: ${comando}`);
+        return;
+      }
+      await vscode.commands.executeCommand(comando);
     },
   };
 }
@@ -1312,6 +1700,9 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     ])
   );
   painel = new PainelStarGuard(ctx.extensionUri, ganchosDoPainel());
+  // Falha de gancho vai para o MESMO canal da análise: quem relata um problema
+  // não deveria ter de adivinhar qual dos canais abrir.
+  painel.aoFalhar = (linha) => saida.appendLine(linha);
 
   // O log do login vai para o MESMO canal da análise. Um segundo canal só
   // para autenticação obrigaria quem relata um problema a saber de antemão
@@ -1377,6 +1768,16 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     vscode.commands.registerCommand("starguard.clear", () => {
       for (const c of colecoes.values()) c.clear();
       achadosPorChave.clear();
+      // Limpar é limpar TUDO o que descende dos achados. As propostas ficavam
+      // para trás apontando para achados que já não existiam: o bloco de
+      // correções continuava oferecendo "Aplicar" e o botão de PR continuava
+      // contando arquivos, sobre uma lista de resultado vazia.
+      achadosPorAnalisador.clear();
+      avisosPorAnalisador.clear();
+      requisitosGuardados = [];
+      estadoDosCartoes.clear();
+      propostas.clear();
+      prNaTela = { abrindo: false };
       ultimoResultado = null;
       void painel.atualizar({ resultado: null });
     }),
@@ -1396,7 +1797,25 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       await vscode.env.openExternal(vscode.Uri.parse(urlDeAcesso()));
     }),
 
+    // A saída oferecida pelo cartão quando o executável não está no PATH.
+    //
+    // Abre a tela de configurações JÁ FILTRADA: mandar a pessoa procurar
+    // `starguard.semgrepPath` no meio de todas as configurações do editor é
+    // oferecer uma saída que ela não vai encontrar.
+    vscode.commands.registerCommand("starguard.configurarCaminhos", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "starguard.semgrepPath"
+      );
+    }),
+
     vscode.commands.registerCommand("starguard.signIn", comandoEntrar),
+
+    // O PR também pela paleta: quem tem o painel fechado precisa de um caminho.
+    vscode.commands.registerCommand("starguard.openPullRequest", async () => {
+      painel.revelar();
+      await abrirPr();
+    }),
 
     vscode.commands.registerCommand("starguard.signOut", async () => {
       // O editor cuida da confirmação e chama `removeSession` do provider.

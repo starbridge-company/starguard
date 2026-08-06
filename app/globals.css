@@ -2026,6 +2026,29 @@ img {
   line-height: 1.4;
 }
 
+/* O pop-up "o que este analisador faz". Quatro blocos rótulo + frase; tudo em
+   <span> porque o balão do InfoTip é um <span>, e `display:block` faz o
+   empilhamento sem trocar a tag. */
+.analyzer-about {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.analyzer-about-row > strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.analyzer-about-row > span {
+  display: block;
+  line-height: 1.45;
+}
+
 .analyzer-detail {
   font-size: 0.72rem;
   color: var(--text-muted);

@@ -51,6 +51,39 @@ const ICON: Record<AnalyzerId, typeof IconPlan> = {
   skills: IconSkills,
 };
 
+/** As quatro perguntas, na mesma ordem para os cinco analisadores. */
+const SOBRE = ["purpose", "when", "delivers", "fix"] as const;
+
+/**
+ * O conteúdo do pop-up "o que este analisador faz".
+ *
+ * A `desc` do cartão é uma frase e cabe numa linha; ela diz o QUE o analisador
+ * olha, e não responde a pergunta que decide a marcação da caixa — "isso serve
+ * para mim, e o que eu recebo no fim?".
+ *
+ * As quatro perguntas são as mesmas para todos justamente para poderem ser
+ * comparadas lado a lado. A última ("o que aponta como correção") é a que
+ * estava faltando na tela: dois analisadores reescrevem código, o de
+ * dependências manda subir uma versão e a modelagem de ameaças não corrige
+ * nada — é uma diferença de produto, e não estava escrita em lugar nenhum.
+ *
+ * Tudo em <span>: o balão do InfoTip é um <span>, e um <div> aqui dentro seria
+ * aninhamento inválido.
+ */
+function SobreOAnalisador({ id }: { id: AnalyzerId }) {
+  const t = useT();
+  return (
+    <span className="analyzer-about">
+      {SOBRE.map((campo) => (
+        <span key={campo} className="analyzer-about-row">
+          <strong>{t(`about.${campo}` as MessageKey)}</strong>
+          <span>{t(`analyzer.${id}.${campo}` as MessageKey)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export default function AnalyzerPicker({
   value,
   onChange,
@@ -177,6 +210,16 @@ export default function AnalyzerPicker({
               <span className="analyzer-body">
                 <span className="analyzer-name">
                   {t(a.nameKey as MessageKey)}
+                  {/* Explicação longa em pop-up, não no cartão: cinco cartões
+                      com quatro parágrafos cada viram uma parede de texto na
+                      Tela 1, e a escolha é justamente o que essa tela vende. */}
+                  <InfoTip
+                    size="md"
+                    side="bottom"
+                    title={t(a.nameKey as MessageKey)}
+                    content={<SobreOAnalisador id={a.id} />}
+                    label={t("select.about", { name: t(a.nameKey as MessageKey) })}
+                  />
                   {a.fixable && (
                     <InfoTip content={t("select.fixes")}>
                       <span className="analyzer-badge" aria-label={t("select.fixes")}>

@@ -23,12 +23,31 @@ export interface CartaoDeAnalisador {
   desc: string;
   disponivel: boolean;
   motivo?: string;
-  usaIa: boolean;
-  remoto: boolean;
+  /**
+   * O que fazer a respeito. Motivo sem saída é meio caminho: a pessoa fica
+   * sabendo o que houve e não o que resolve. Ver UX-15.
+   *
+   * Lista porque o binário faltando tem DUAS respostas legítimas: rodar no
+   * servidor da conta (zero instalação) ou apontar o caminho do que já está no
+   * disco. Escolher uma pela pessoa seria decidir se o código dela pode sair
+   * da máquina.
+   */
+  acoes?: { rotulo: string; comando: string }[];
   estado?: "ocioso" | "rodando" | "pronto" | "erro" | "pulado";
   achados?: number;
   /** Mensagem do próprio analisador enquanto roda ("baixando regras…"). */
   detalhe?: string;
+  /**
+   * "Para que serve / quando usar / o que entrega / o que corrige", já montado
+   * e já traduzido, uma pergunta por linha.
+   *
+   * Vai para o `title` do cartão, e não para dentro dele: a barra lateral tem
+   * uns 300px e cinco cartões com quatro parágrafos cada empurrariam o botão
+   * de analisar para fora da tela. Tooltip nativo custa zero pixel e não
+   * precisa de balão próprio — que num webview seria script a mais para uma
+   * coisa que o editor já sabe desenhar.
+   */
+  sobre?: string;
   /**
    * Analisadores que ENRIQUECEM este, com a frase que explica o que se perde
    * sem cada um. Não é pré-requisito: o painel mostra o aviso e roda mesmo
@@ -78,6 +97,23 @@ export interface CorrecaoNaTela {
   erro?: string;
 }
 
+/**
+ * O Pull Request da rodada de correções.
+ *
+ * Um só, com TUDO que estiver pronto — e não um por achado. Quem recebe cinco
+ * PRs do robô no mesmo dia fecha os cinco sem ler; o agrupamento por arquivo já
+ * aconteceu na geração, aqui só se junta o resultado.
+ *
+ * `abrindo` mora aqui e não no webview pelo mesmo motivo de `rodando`: quem
+ * sabe que a chamada ao GitHub terminou é quem a fez. Ver UX-24.
+ */
+export interface PrNaTela {
+  abrindo: boolean;
+  numero?: number;
+  url?: string;
+  erro?: string;
+}
+
 export interface GanchosDoPainel {
   textos: () => TextosDoPainel;
   /** Cartões e conta — recalculado a cada abertura e a cada mudança. */
@@ -98,6 +134,7 @@ export interface GanchosDoPainel {
     rodando: boolean;
     resultado?: ResultadoNaTela | null;
     correcoes: CorrecaoNaTela[];
+    pr: PrNaTela;
   }>;
   aoEntrar: () => Promise<void>;
   aoSair: () => Promise<void>;
@@ -117,6 +154,12 @@ export interface GanchosDoPainel {
   aoAplicarCorrecao: (chave: string) => Promise<void>;
   aoAplicarTudo: () => Promise<void>;
   aoDescartarCorrecoes: () => Promise<void>;
+  /** Um PR só, com todas as correções prontas da rodada. */
+  aoAbrirPr: () => Promise<void>;
+  /** Abre no navegador o PR que acabou de sair. */
+  aoVerPr: () => Promise<void>;
+  /** A saída oferecida por um cartão indisponível. Passa por allowlist. */
+  aoAgirNoCartao: (comando: string) => Promise<void>;
 }
 
 export class PainelStarGuard implements vscode.WebviewViewProvider {
@@ -130,6 +173,24 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    // ------------------------------------------------------------
+    // Soltar a referência quando o editor descarta o webview.
+    //
+    // Esta linha é a raiz do "Analisando… para sempre". Com
+    // `retainContextWhenHidden: false`, esconder a barra lateral DESTRÓI o
+    // webview — e sem este `onDidDispose` a extensão continuava segurando o
+    // objeto morto. O `postMessage` seguinte rejeitava, a rejeição subia por
+    // `atualizar()`, e `atualizar()` é esperado no meio de `analisar()`: a
+    // execução morria ali, com `rodando` preso em `true`. A partir daí todo
+    // clique em Analisar caía no `if (rodando) return` e não acontecia nada
+    // até recarregar a janela.
+    //
+    // Duas defesas, não uma: esta, que evita falar com um webview morto, e o
+    // `catch` de `postar()`, para o caso de a morte acontecer no meio do envio.
+    // ------------------------------------------------------------
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+    });
     view.webview.options = {
       enableScripts: true,
       // Nenhum recurso local é carregado: o painel é uma página só, com o CSS
@@ -145,7 +206,26 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
       textos: this.ganchos.textos(),
     });
 
+    // Todo clique do painel entra por aqui, e uma exceção num gancho vira
+    // rejeição não tratada: o editor não mostra nada e o clique simplesmente
+    // não faz efeito. Quem clicou fica sem saber se esperou pouco ou se
+    // quebrou. O `catch` transforma o silêncio em mensagem.
     view.webview.onDidReceiveMessage(async (m: { tipo: string } & Record<string, unknown>) => {
+      try {
+        await this.despachar(m);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.aoFalhar?.(`[painel:${m.tipo}] ${msg}`);
+        void vscode.window.showErrorMessage(`StarGuard · ${msg.split("\n")[0]}`);
+      }
+    });
+  }
+
+  /** Log de falha do painel — ligado pela extensão ao canal de saída. */
+  public aoFalhar?: (linha: string) => void;
+
+  private async despachar(m: { tipo: string } & Record<string, unknown>): Promise<void> {
+    {
       switch (m.tipo) {
         case "pronto":
           await this.atualizar();
@@ -204,15 +284,55 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
         case "descartarCorrecoes":
           await this.ganchos.aoDescartarCorrecoes();
           break;
+        case "abrirPr":
+          await this.ganchos.aoAbrirPr();
+          break;
+        case "verPr":
+          await this.ganchos.aoVerPr();
+          break;
+        case "acaoCartao":
+          await this.ganchos.aoAgirNoCartao(m.comando as string);
+          break;
       }
-    });
+    }
   }
 
-  /** Reconstrói o estado inteiro e manda para a página. */
+  /**
+   * Manda uma mensagem para a página sem NUNCA lançar.
+   *
+   * Desenhar a tela não pode derrubar quem estava fazendo o trabalho. O
+   * `postMessage` de um webview que acabou de ser descartado rejeita, e essa
+   * rejeição já subiu por `atualizar()` até o meio de uma análise, deixando o
+   * botão preso em "Analisando…". Falhar em pintar a tela é um problema
+   * pequeno; falhar em terminar a análise é o problema grande.
+   */
+  private async postar(msg: Record<string, unknown>): Promise<void> {
+    const view = this.view;
+    if (!view) return;
+    try {
+      await view.webview.postMessage(msg);
+    } catch {
+      /* webview descartado no meio do envio — a próxima abertura redesenha. */
+    }
+  }
+
+  /**
+   * Reconstrói o estado inteiro e manda para a página.
+   *
+   * O `try` cobre `ganchos.estado()`, que monta o plano do orquestrador e
+   * consulta a sessão: as duas coisas fazem E/S e podem falhar. Antes essa
+   * falha viajava para quem chamou — e quem chama é, entre outros, o `finally`
+   * que desliga o botão de Analisar.
+   */
   async atualizar(extra?: { resultado?: ResultadoNaTela | null; erro?: string | null }): Promise<void> {
     if (!this.view) return;
-    const base = await this.ganchos.estado();
-    await this.view.webview.postMessage({ tipo: "estado", estado: { ...base, ...extra } });
+    let base;
+    try {
+      base = await this.ganchos.estado();
+    } catch {
+      return;
+    }
+    await this.postar({ tipo: "estado", estado: { ...base, ...extra } });
   }
 
   /**
@@ -226,7 +346,7 @@ export class PainelStarGuard implements vscode.WebviewViewProvider {
     estado: string,
     extra: { achados?: number; detalhe?: string } = {}
   ): void {
-    void this.view?.webview.postMessage({ tipo: "progresso", id, estado, ...extra });
+    void this.postar({ tipo: "progresso", id, estado, ...extra });
   }
 
   /** Traz o painel para a frente — usado quando um comando precisa dele. */

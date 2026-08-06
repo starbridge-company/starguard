@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { achadosDe, ehDiagnostico } from "../src/findings";
+import { achadosDe, chaveDoAchado, ehDiagnostico } from "../src/findings";
 import type { AnalysisRun, AnalyzerOutcome } from "@starguard/core/contracts";
 import type { DependencyVuln, Vulnerability } from "@starguard/core/types";
 
@@ -230,6 +230,62 @@ function vscodeDublado() {
     commands: {},
   };
 }
+
+// ============================================================
+// A chave do achado — o que costura a lista, o diagnóstico e o corretor.
+//
+// Ela existia DUAS vezes: uma sobre `Achado` e outra sobre `FixableFinding`.
+// Nada obrigava as duas a produzirem o mesmo texto, e a divergência não daria
+// erro nenhum — procurar uma chave que não existe devolve `undefined`, que no
+// caminho da correção parece "não havia nada a remover". O resultado seria uma
+// correção que grava no disco e deixa o achado corrigido na tela, marcável de
+// novo: a segunda gravação partindo do arquivo já reescrito desfaz a primeira,
+// com as duas dadas como aplicadas. É o BUG-06 entre rodadas.
+// ============================================================
+describe("chave do achado (BUG-06 entre rodadas)", () => {
+  const achado = {
+    analyzer: "sast" as const,
+    file: "src/app.ts",
+    line: 10,
+    ruleId: "regra",
+  };
+
+  it("a mesma chave sai do achado da lista e do que vai ao corretor", () => {
+    // `paraFinding` copia os quatro campos; o que este teste trava é que os
+    // dois caminhos continuem passando pela MESMA função.
+    const daLista = chaveDoAchado(achado);
+    const doCorretor = chaveDoAchado({
+      id: "V-1",
+      analyzer: achado.analyzer,
+      ruleId: achado.ruleId,
+      title: "título",
+      severity: "high",
+      file: achado.file,
+      line: achado.line,
+      description: "",
+    });
+    expect(doCorretor).toBe(daLista);
+  });
+
+  it("dependência sem linha não produz `undefined` no meio da chave", () => {
+    // O achado do Trivy aponta o manifesto inteiro e não tem linha.
+    const k = chaveDoAchado({ analyzer: "sca", file: "package.json", ruleId: "CVE-1" });
+    expect(k).not.toContain("undefined");
+    expect(k).toBe("sca|package.json|0|CVE-1");
+  });
+
+  it("`ruleId` ausente no contrato do núcleo também não vira `undefined`", () => {
+    // `FixableFinding.ruleId` é opcional. Sem o padrão, o mesmo achado teria
+    // uma chave de um lado e outra do outro.
+    expect(chaveDoAchado({ analyzer: "sast", file: "a.ts", line: 1 })).toBe("sast|a.ts|1|");
+  });
+
+  it("achados diferentes no mesmo arquivo têm chaves diferentes", () => {
+    expect(chaveDoAchado({ ...achado, line: 11 })).not.toBe(chaveDoAchado(achado));
+    expect(chaveDoAchado({ ...achado, ruleId: "outra" })).not.toBe(chaveDoAchado(achado));
+    expect(chaveDoAchado({ ...achado, analyzer: "business" })).not.toBe(chaveDoAchado(achado));
+  });
+});
 
 describe.skipIf(!existsSync(DIST))("bundle da extensão", () => {
   it("carrega como CommonJS e expõe activate/deactivate", () => {

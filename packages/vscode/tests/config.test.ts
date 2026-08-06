@@ -156,8 +156,16 @@ describe("nada precisa ser instalado na máquina de quem usa", () => {
     expect(fonte).toContain("setScanTransport({ kind: \"remote\"");
   });
 
-  it("o cartão anuncia quando o analisador roda no servidor", () => {
-    expect(fonte).toContain("remoto: remoto && (id === \"sast\" || id === \"sca\")");
+  // O cartão ANUNCIAVA "servidor" e "IA" em dois selos. Saíram: eram
+  // informação de bastidor num lugar onde a pergunta é "isto serve para mim?",
+  // e o que importa sobre custo e velocidade está no tooltip do cartão, em
+  // "Quando usar". O que NÃO pode sair é o transporte em si — este arquivo
+  // continua cobrindo isso nos outros casos.
+  it("o cartão não carrega mais os selos de IA e de servidor", () => {
+    const fonteHtmlAqui = readFileSync(join(aqui, "..", "src", "painel-html.ts"), "utf8");
+    expect(fonte).not.toContain("panel.usesAi");
+    expect(fonte).not.toContain("panel.onServer");
+    expect(fonteHtmlAqui).not.toContain('class="selo');
   });
 
   it("a disponibilidade é recalculada com o transporte já ligado", () => {
@@ -208,5 +216,190 @@ describe("metadados exigidos para publicar", () => {
     // na descrição é o que separa "ferramenta corporativa" de "não funciona".
     const d = (manifesto as unknown as { description: string }).description;
     expect(d.toLowerCase()).toMatch(/conta|account/);
+  });
+});
+
+// ============================================================
+// Nada na extensão pode ficar "carregando para sempre".
+//
+// Três lugares giram um relógio: o botão Analisar, o bloco de correções e o
+// botão de Pull Request. Os três compartilham o mesmo desenho — uma variável
+// do lado da EXTENSÃO diz se ainda está acontecendo, e o `finally` é o único
+// que a desliga. O desenho só vale se o `finally` COBRIR o trecho onde o erro
+// pode acontecer, e era exatamente aí que estava o furo.
+//
+// Testes por texto do código-fonte porque o resto deste arquivo já é assim:
+// o extension host não existe em vitest, e `src/extension.ts` importa
+// `vscode` na primeira linha.
+// ============================================================
+describe("nada fica carregando para sempre", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+  const fontePainel = readFileSync(join(aqui, "..", "src", "painel.ts"), "utf8");
+
+  it("`rodando = true` está DENTRO do try que tem o finally", () => {
+    // Estava fora, com dois `await` entre a atribuição e o `try`. Qualquer um
+    // deles falhando deixava `rodando` preso em `true`, e a partir daí todo
+    // clique em Analisar caía no `if (rodando) return` — botão parado em
+    // "Analisando…" até recarregar a janela.
+    expect(fonte).toMatch(/try \{\s*\n\s*rodando = true;/);
+  });
+
+  it("o painel solta a referência quando o editor descarta o webview", () => {
+    // A causa concreta: com `retainContextWhenHidden: false`, esconder a barra
+    // lateral DESTRÓI o webview. Sem soltar a referência, o `postMessage`
+    // seguinte rejeita — e essa rejeição subia por `atualizar()` até o meio de
+    // `analisar()`, que morria com `rodando` em `true`.
+    expect(fontePainel).toContain("view.onDidDispose(");
+    expect(fontePainel).toMatch(/if \(this\.view === view\) this\.view = undefined;/);
+  });
+
+  it("desenhar a tela nunca derruba quem está fazendo o trabalho", () => {
+    // Falhar em pintar a tela é um problema pequeno; falhar em terminar a
+    // análise é o problema grande.
+    expect(fontePainel).toMatch(/private async postar\(/);
+    expect(fontePainel).toMatch(/await view\.webview\.postMessage\(msg\);\s*\n\s*\} catch \{/);
+  });
+
+  it("nenhuma proposta sobra em «gerando» quando o lote morre no meio", () => {
+    // Esse estado significa "estou trabalhando nisso", e ninguém está mais.
+    expect(fonte).toMatch(/if \(p\.estado === "gerando"\) p\.estado = "cancelada";/);
+  });
+
+  it("abrir o workspace do lote acontece dentro do try", () => {
+    // Fora dele, uma falha ao abrir saía com todas as propostas em "gerando…"
+    // e sem erro escrito em lugar nenhum.
+    expect(fonte).toMatch(/let ws: Workspace \| undefined;\s*\n\s*try \{\s*\n\s*ws = await openWorkspace/);
+  });
+
+  it("o botão de PR só desliga no finally", () => {
+    expect(fonte).toMatch(/if \(prNaTela\.abrindo\) prNaTela = \{ abrindo: false \};/);
+  });
+});
+
+// ============================================================
+// Rodar UM analisador não pode apagar o resultado dos outros.
+// ============================================================
+describe("o painel e o painel Problemas contam a mesma história", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("a lista da tela é acumulada POR ANALISADOR, como as coleções", () => {
+    // Antes, o painel era remontado só com os analisadores da execução atual:
+    // rodar só o SAST depois de uma análise completa apagava as dependências
+    // da tela enquanto o painel Problemas continuava mostrando as duas coisas.
+    expect(fonte).toContain("const achadosPorAnalisador = new Map<AnalyzerId, Achado[]>()");
+    expect(fonte).toMatch(/achadosPorAnalisador\.set\(id, achados\.filter/);
+  });
+
+  it("montarResultado não recebe mais uma execução", () => {
+    // Enquanto lia um `AnalysisRun`, ela só sabia falar da última execução.
+    expect(fonte).toContain("function montarResultado(): ResultadoNaTela");
+  });
+
+  it("só o estado dos cartões DESTA execução é zerado", () => {
+    expect(fonte).toContain("for (const id of select) estadoDosCartoes.delete(id);");
+  });
+
+  it("o achado corrigido sai da lista E das coleções", () => {
+    // Deixá-lo ali oferecendo "Corrigir" de novo faria a segunda correção
+    // partir do arquivo já reescrito e desfazer a primeira — BUG-06 entre
+    // rodadas.
+    expect(fonte).toContain("function retirarAchados(");
+    expect(fonte).toContain("republicarDiagnosticos()");
+  });
+
+  it("limpar leva junto as propostas e o PR", () => {
+    // Sobravam apontando para achados que já não existiam: o bloco continuava
+    // oferecendo "Aplicar" sobre uma lista de resultado vazia.
+    expect(fonte).toMatch(/achadosPorChave\.clear\(\);[\s\S]{0,600}propostas\.clear\(\);/);
+  });
+});
+
+// ============================================================
+// Pull Request — a saída que faltava na extensão.
+// ============================================================
+describe("Pull Request a partir da extensão", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("é UM PR com todas as correções, não um por achado", () => {
+    // Quem recebe cinco PRs do robô no mesmo dia fecha os cinco sem ler.
+    expect(fonte).toContain("openPullRequestBatch");
+    expect(fonte).not.toContain("openPullRequest(");
+  });
+
+  it("o token vem do provedor de GitHub DO EDITOR", () => {
+    // Pedir um Personal Access Token à parte seria inventar mais um segredo
+    // para guardar — e guardar segredo é o que esta extensão evita fazer.
+    expect(fonte).toMatch(/getSession\("github", \["repo"\]/);
+  });
+
+  it("um arquivo só entra uma vez, com a última versão", () => {
+    // Duas correções no mesmo arquivo: a segunda já acumula a primeira.
+    expect(fonte).toMatch(/porArquivo\.set\(normPath\(c\.file\), c\.fixedCode\)/);
+  });
+
+  it("sem repositório do GitHub, o motivo é dito com todas as letras", () => {
+    expect(fonte).toContain("panel.prNoRepo");
+  });
+
+  it("mudança que não muda nada não vai para o PR", () => {
+    expect(fonte).toMatch(/if \(c\.fixedCode === c\.originalCode\) continue;/);
+  });
+});
+
+// ============================================================
+// O motivo NUNCA fica sem saída — UX-15 levado até o fim.
+//
+// O caso que motivou: "o executável opengrep não foi encontrado neste
+// computador" no cartão, e nada mais. A saída existia (uma configuração) e não
+// funcionava — `packages/core/src/config.ts` congelava o valor na carga do
+// módulo, antes de `aplicarConfiguracao()` escrever em `process.env`. Quem
+// apontava o caminho não via diferença nenhuma.
+// ============================================================
+describe("cartão indisponível oferece a saída", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+  const fonteHtml = readFileSync(join(aqui, "..", "src", "painel-html.ts"), "utf8");
+
+  it("binário faltando oferece as DUAS respostas legítimas", () => {
+    // Rodar no servidor (zero instalação) ou apontar o que já está no disco.
+    // Escolher uma pela pessoa seria decidir se o código dela pode sair da
+    // máquina.
+    expect(fonte).toContain("starguard.configurarCaminhos");
+    expect(fonte).toContain("panel.actionUseServer");
+    expect(fonte).toMatch(/if \(reason !== "binary_missing"\) return \[\];/);
+  });
+
+  it("a de servidor some quando o transporte remoto já está ligado", () => {
+    expect(fonte).toMatch(/!usingRemoteScan\(\)/);
+  });
+
+  it("a página desenha o botão da saída", () => {
+    expect(fonteHtml).toContain("data-comando=");
+    expect(fonteHtml).toContain("'acaoCartao'");
+  });
+
+  it("o comando vindo da página passa por ALLOWLIST", () => {
+    // A ponte de mensagens é o limite de confiança: do outro lado dela há
+    // título de regra do Opengrep, nome de pacote do Trivy e texto de modelo.
+    // Aceitar qualquer id daí seria deixar o conteúdo analisado executar
+    // comando do editor.
+    expect(fonte).toMatch(/const permitido = SAIDAS\.some/);
+    expect(fonte).toMatch(/if \(!permitido\)/);
+  });
+
+  it("a configuração de caminho é APAGADA quando o campo fica vazio", () => {
+    // `process.env` do extension host vive enquanto o editor viver: sem isto,
+    // apontar um binário errado uma vez seria irreversível sem reiniciar.
+    expect(fonte).toMatch(/else delete process\.env\[nome\];/);
+  });
+
+  it("o ruleset local do SAST tem configuração própria", () => {
+    // Sem ela, "auto" baixa o ruleset de semgrep.dev a cada análise e falha em
+    // máquina sem saída para a internet — como erro de rede, não como
+    // configuração faltando.
+    expect(fonte).toContain('definir("SAST_RULES", regras)');
+    const manifestoProps = (
+      manifesto.contributes as { configuration: { properties: Record<string, unknown> } }
+    ).configuration.properties;
+    expect(manifestoProps["starguard.sastRules"]).toBeDefined();
   });
 });

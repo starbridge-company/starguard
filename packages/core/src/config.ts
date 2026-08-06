@@ -143,16 +143,57 @@ export const FIX_AGENT = {
   timeoutMs: Number(process.env.FIX_AGENT_TIMEOUT_MS || 270_000),
 };
 
+// ------------------------------------------------------------
+// Onde estão os executáveis.
+//
+// LIDO A CADA ACESSO, e não uma vez na carga do módulo. Isto não é preferência
+// de estilo — era um bug, e um bug que fazia a extensão do VS Code parecer
+// simplesmente quebrada.
+//
+// O que acontecia: `extension.ts` importa o núcleo na primeira linha, então
+// este módulo é avaliado durante a ATIVAÇÃO. As configurações
+// `starguard.semgrepPath` e `starguard.trivyPath` só são lidas depois, em
+// `aplicarConfiguracao()`, que escreve em `process.env` — tarde demais. O
+// objeto já estava montado com `"opengrep"` e `"trivy"` puros.
+//
+// O efeito para quem usa: o painel diz "o executável opengrep não foi
+// encontrado neste computador", a pessoa aponta o caminho na configuração
+// (que é exatamente a saída que a mensagem sugere), e **nada muda**. Não há
+// erro, não há log: a configuração simplesmente não existia para o motor.
+//
+// Acontece em toda máquina onde o binário não está no PATH do processo que
+// abriu o editor — que no Windows é a regra, não a exceção: quem instala em
+// `C:\Users\<você>\bin` e acrescenta ao PATH de uma sessão de terminal não
+// mudou o PATH que o VS Code herdou.
+//
+// `get` e não função para não tocar em nenhuma das dezenas de chamadas
+// `BIN.trivy` espalhadas pelos analisadores — e getters em literal são
+// enumeráveis, então `JSON.stringify(BIN)` continua funcionando.
+// ------------------------------------------------------------
 export const BIN = {
-  semgrep: process.env.SEMGREP_BIN || "semgrep",
-  opengrep: process.env.OPENGREP_BIN || "opengrep",
-  trivy: process.env.TRIVY_BIN || "trivy",
+  get semgrep(): string {
+    return process.env.SEMGREP_BIN || "semgrep";
+  },
+  get opengrep(): string {
+    return process.env.OPENGREP_BIN || "opengrep";
+  },
+  get trivy(): string {
+    return process.env.TRIVY_BIN || "trivy";
+  },
 };
 
 // Ruleset do SAST (Opengrep/Semgrep). "auto" baixa regras do registro remoto
 // (semgrep.dev) — exige rede + CA confiável. Aponte SAST_RULES para um diretório
 // de regras local para rodar offline, sem depender de rede/SSL.
-export const SAST_CONFIG = process.env.SAST_RULES || "auto";
+//
+// Função, e não `const`, pelo MESMO motivo do `BIN` acima: quem configura isso
+// depois da carga do módulo — o VS Code — não teria efeito nenhum. E aqui o
+// sintoma é pior que "não encontrado": com "auto" o Opengrep tenta baixar
+// regras da rede, e numa máquina sem saída ou atrás de proxy com CA própria
+// ele FALHA no meio da análise, em vez de dizer que falta configuração.
+export function sastConfig(): string {
+  return process.env.SAST_RULES || "auto";
+}
 
 // Resumo legível para exibir no header/relatório ("como está configurado agora").
 export function engineSummary() {
