@@ -1172,6 +1172,16 @@ async function abrirPr(): Promise<void> {
 
     prNaTela = { abrindo: false, numero: pr.number, url: pr.url };
     saida.appendLine(`[pr] #${pr.number} ${pr.url}`);
+
+    // A TELA é atualizada AQUI, antes da notificação.
+    //
+    // `showInformationMessage` com botão só resolve quando alguém clica ou
+    // dispensa — e ninguém é obrigado a fazer isso. Deixar o redesenho para o
+    // `finally` significava que o painel continuava mostrando "Abrindo…" com o
+    // Pull Request já criado no GitHub, até a notificação ser respondida. O
+    // sintoma é o mesmo do botão de Analisar preso: estado gravado, tela velha.
+    await painel.atualizar();
+
     const ver = t("panel.prView");
     const escolha = await vscode.window.showInformationMessage(
       t("panel.prOpened", { n: pr.number }),

@@ -206,10 +206,21 @@ export async function callRemoteScan(
     return j.result ?? null;
   }
 
-  const corpo = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    error?: string;
-  };
+  // O corpo é lido como TEXTO e só depois interpretado como JSON.
+  //
+  // Toda recusa NOSSA responde `{error: "..."}`, e é esse texto que a pessoa
+  // vê. Quando ele não vem, a recusa foi de outra coisa no caminho — um proxy,
+  // uma CDN, um portal de rede — e aí a página devolvida é HTML, que o
+  // `res.json()` engolia num `catch` vazio. O resultado era a tela dizer só
+  // "Falha no scan remoto (403)": um número sem autor, que não distingue "o
+  // StarGuard recusou" de "algo entre você e ele recusou". Ver UX-27.
+  const bruto = await res.text().catch(() => "");
+  let corpo: { message?: string; error?: string } = {};
+  try {
+    corpo = JSON.parse(bruto) as typeof corpo;
+  } catch {
+    corpo = {};
+  }
   const msg = corpo.message || corpo.error;
 
   if (res.status === 401) {
@@ -226,5 +237,39 @@ export async function callRemoteScan(
     // resposta certa é avisar, não tentar de novo.
     throw new RemoteScanError(msg || "O scanner não está disponível no servidor.", "unavailable");
   }
-  throw new RemoteScanError(msg || `Falha no scan remoto (${res.status}).`, "failed");
+  // Recusa que NÃO é nossa é "não cheguei lá", não "fui recusado".
+  //
+  // Toda resposta do StarGuard é JSON com `error`. Sem isso, quem respondeu foi
+  // outra coisa no caminho — e o pedido nunca chegou ao app. Tratar como
+  // `unreachable` é o que autoriza o socorro local: com o `opengrep` instalado
+  // a um palmo, deixar de analisar por causa de um 403 de CDN é o pior desfecho
+  // possível. A troca continua sendo DECLARADA na tela, com o motivo junto.
+  //
+  // Um 403 NOSSO (com corpo JSON) continua sendo `failed` e sobe: aí é
+  // permissão de verdade, e contornar esconderia o que precisa ser resolvido.
+  throw new RemoteScanError(
+    msg || `Falha no scan remoto (${res.status}). ${pistaDaResposta(res, bruto)}`,
+    msg ? "failed" : "unreachable"
+  );
+}
+
+/**
+ * Quem recusou, quando não foi o StarGuard.
+ *
+ * Três dados, e cada um responde a uma pergunta: o `content-type` diz se veio
+ * página em vez de resposta de API; o `server`/`cf-ray` identifica o
+ * intermediário (e o `cf-ray` é o que o suporte da Cloudflare pede para achar
+ * o bloqueio no painel deles); o começo do corpo costuma trazer o motivo em
+ * letras garrafais.
+ *
+ * Cortado em 120 caracteres e sem quebras de linha: isto vai para uma
+ * notificação do editor e para o canal de saída, não para um relatório.
+ */
+function pistaDaResposta(res: Response, corpo: string): string {
+  const partes = [
+    res.headers.get("content-type")?.split(";")[0],
+    res.headers.get("cf-ray") ? `cf-ray ${res.headers.get("cf-ray")}` : res.headers.get("server"),
+    corpo.replace(/\s+/g, " ").trim().slice(0, 120),
+  ].filter(Boolean);
+  return partes.length ? `[${partes.join(" · ")}]` : "";
 }

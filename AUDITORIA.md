@@ -463,7 +463,72 @@ foram rodados contra o GitHub. Ver `PEND-44`.
   nomes são os mesmos no painel, no terminal e na documentação — trocá-los para
   explicar uma relação sairia mais caro que explicá-la onde a dúvida aparece.
 
+### UX-26 · As ações ficavam DEPOIS de dezenas de achados ✅
+**P2 · Esforço P**
+
+> ✅ **Corrigido em 06/08/2026.** Marcar tudo, corrigir os selecionados,
+> aplicar tudo e abrir Pull Request subiram para uma barra única **acima** da
+> lista, grudada no topo.
+
+- **Hoje era:** a barra de lote ficava no rodapé da lista e o botão de PR mais
+  abaixo ainda, dentro do bloco de correções. Numa varredura real são dezenas
+  de linhas: marcar um achado no topo e rolar até o fim para encontrar o botão
+  que age sobre ele é o comando longe do objeto.
+- **A ordem agora é a do fluxo:** placar (que também filtra) → o que dá para
+  FAZER → contexto da execução → a lista. `position: sticky; top: 0` mantém as
+  ações à vista enquanto se percorre os achados.
+- **Sem duplicar:** "Aplicar tudo" e "Abrir PR" saíram do bloco de baixo. Dois
+  botões fazendo a mesma coisa em lugares diferentes é o erro que o modal do
+  painel web já documentou. Travado em teste (cada `data-acao` aparece **uma**
+  vez na página).
+
+### UX-27 · Botão de PR preso, e um 403 sem autor ✅⚠️
+**P1 · Esforço P**
+
+> ✅ **O botão de PR foi corrigido em 06/08/2026.** ⚠️ **O 403 do scan remoto
+> continua sem causa provada** — o que entrou foi o instrumento para a próxima
+> execução dizer quem recusou, mais o socorro local.
+
+- **O PR abria e o botão continuava girando.** Mesma família do UX-24, num
+  lugar novo: o estado de sucesso era gravado e a tela só era redesenhada no
+  `finally` — que só roda **depois** de `showInformationMessage`, e essa
+  promessa só resolve quando alguém clica ou dispensa a notificação. Quem
+  ignorasse a notificação ficava com "Abrindo…" na tela e o Pull Request já
+  criado no GitHub. Agora o painel é atualizado **antes** da notificação.
+- **O 403 só no `sast`, com o `sca` passando.** O que foi **descartado com
+  medida**, não por dedução:
+
+  | Hipótese | Como foi testada | Resultado |
+  |---|---|---|
+  | Recusa do próprio StarGuard | Todo 403 do app responde `{error}`, e a tela mostrou o texto genérico | **descartada** — o corpo não era nosso JSON |
+  | WAF por conteúdo | POST com SQLi/XSS/`eval` no corpo | 401 do app |
+  | WAF por conteúdo real | POST com **6,43 MB** do código deste repositório | 401 do app |
+  | Tamanho | POSTs de 1, 4, 8 e **12 MB** | 401 do app nos quatro |
+  | Bearer recusado na borda (SEC-15) | POST com `Authorization` inválido | 401, não 403 — o deploy tem a correção |
+
+- **O que entrou no lugar do palpite:** a resposta passou a ser lida como
+  TEXTO antes de virar JSON, e quando não é nossa a mensagem carrega
+  `content-type`, `cf-ray` e o começo do corpo. "Falha no scan remoto (403)"
+  era um número sem autor.
+- **E o socorro:** recusa **sem corpo nosso** passou a ser classificada como
+  `unreachable` — o pedido nunca chegou ao app —, o que autoriza o
+  `podeCairParaLocal` e faz o `opengrep` da máquina assumir, com a troca
+  declarada na tela. Um 403 **nosso** (com JSON) continua `failed` e sobe: aí é
+  permissão de verdade, e contornar esconderia o que precisa ser resolvido.
+- **Pendência declarada:** ver `PEND-44`.
+
 **Como foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Suíte | `npm test` | **714 testes** em 48 arquivos (eram 647 em 46) |
+| Diagnóstico do 403 | `packages/core/tests/scan-fallback.test.ts` | 6 asserções: recusa nossa mostra o texto do servidor, recusa de intermediário diz `content-type`/`cf-ray`/corpo, a pista é curta, e só a de intermediário autoriza o socorro local |
+| Ordem das ações | `packages/vscode/tests/painel-html.test.ts` | 3 asserções: a barra vem **antes** da lista, gruda no topo, e cada ação tem **um** botão |
+| Sondagem do servidor | 8 requisições a `/api/scan` em produção | nenhuma reproduziu o 403 (tabela acima) |
+| Build | `npm run build:packages` + `install:local` | `dist/extension.js` **533,2 kB**, `.vsix` 167,19 KB, **v0.2.3** instalada |
+
+<details>
+<summary><strong>Como o UX-24/UX-25 foi validado</strong></summary>
 
 | O que | Como | Resultado **medido** |
 |---|---|---|
@@ -476,6 +541,8 @@ foram rodados contra o GitHub. Ver `PEND-44`.
 | `npm run typecheck` | tsc do app + dos três pacotes | limpo |
 | `npm run lint` | eslint | 0 erros; 12 avisos, todos **pré-existentes** em `lib/` |
 | Build | `npm run build:packages` | `dist/extension.js` **504,0 kB** (era 480,1) |
+
+</details>
 
 <details>
 <summary><strong>Como o UX-23 foi validado</strong></summary>
@@ -782,6 +849,7 @@ que consomem o limite global de 100/min, e o app fica intransitável. Corrigir
 | **PEND-40** | SEC-12 | **O GitHub App nunca existiu** | Todo o caminho do webhook — assinatura, fila, clone do SHA, análise do diff, PR do bot — está escrito e coberto por 12 asserções, mas **nenhum App foi criado no GitHub**. Não há `GITHUB_APP_ID`, chave privada nem `GITHUB_WEBHOOK_SECRET` configurados, então a rota responde 503 hoje. Criar o App exige ser owner da organização: é o passo que só você pode dar. Depois dele, o percurso a exercitar é abrir um PR num repositório de teste e ver o `starguard[bot]` responder. |
 | **PEND-41** | SEC-11 | O proxy de IA nunca foi chamado por um cliente real | A rota, a cota e o registro de consumo estão testados, mas o percurso completo — extensão logada → consentimento → chamada com Bearer → resposta do modelo → linha em `ai_usage` — **não rodou**. Depende da PEND-37 (o login ponta a ponta), e junta-se a ela. |
 | **PEND-42** | ARQ-04 | A fila nunca processou um job de verdade | `FOR UPDATE SKIP LOCKED`, o backoff e a retomada de worker morto estão escritos; o que rodou contra Postgres real foi só o OAuth. Falta subir a app, criar uma análise e ver o worker pegá-la — e, principalmente, matar o processo no meio para conferir que outro a retoma. É a promessa central do ARQ-04 e é a que continua sem prova. |
+| **PEND-44** | UX-27 | **O 403 do scan remoto no `sast` não tem causa provada** | O `sca` passa e o `sast` não, com o mesmo token, no mesmo endereço. Oito requisições de sondagem contra a produção **não reproduziram**: conteúdo com cara de ataque, 6,43 MB de código real, corpos de 1/4/8/12 MB e `Authorization` inválido devolveram todos o 401 do próprio app. O que se sabe pela mensagem: o corpo do 403 **não era JSON nosso**, então quem recusou está entre o cliente e o app (a produção fica atrás de Cloudflare). A instrumentação entregue faz a próxima ocorrência dizer `content-type`, `cf-ray` e o começo do corpo — **pedir ao usuário essa linha do canal de saída é o próximo passo**, e com o `cf-ray` em mãos o bloqueio é localizável no painel da Cloudflare. Enquanto isso o socorro local assume, então a análise acontece. |
 | **PEND-43** | SEC-13 | O hook nunca segurou um commit real | Instalação, remoção, recusa de hook de terceiro e `core.hooksPath` têm teste. O que não foi visto: `git commit` de verdade com achado grave, com `starguard.hookBlocks=true`, num repositório com semgrep configurado. |
 | **PEND-44** | UX-26 | O Pull Request da extensão nunca foi aberto de verdade | A montagem está coberta por 10 asserções (um PR e não um por achado, dedup por arquivo, mudança vazia que não entra, motivo dito quando falta `origin`), mas **nada disso tocou o GitHub**. O que continua sem prova: `vscode.authentication.getSession("github", ["repo"])` devolvendo token com escopo de escrita dentro do extension host, `openPullRequestBatch` criando branch/blobs/árvore/commit com esse token, e o retorno com número e URL chegando ao painel. Percurso: abrir um repositório com `origin` no GitHub, analisar, marcar dois achados **no mesmo arquivo**, corrigir, aplicar e clicar em Abrir Pull Request — o PR deve sair com **um commit** e o arquivo aparecendo **uma vez**. Vale conferir também o caminho triste: repositório sem `origin`, e recusar a autorização do GitHub. |
 | **PEND-45** | UX-26 | Os três travamentos foram corrigidos por leitura, não reproduzidos | O mecanismo de cada um está identificado no código e travado por asserção, mas nenhum foi **provocado** no editor: esconder a barra lateral no meio de uma análise (o webview descartado), fazer `openWorkspace` falhar durante o lote, e forçar exceção no `propose` da lâmpada. Os três são reproduzíveis à mão e valem mais que a asserção de texto que os cobre hoje. Junta-se à PEND-33. |

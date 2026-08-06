@@ -139,6 +139,33 @@ describe("correção em lote (UX-24)", () => {
   });
 });
 
+describe("as ações ficam ACIMA dos achados (UX-26)", () => {
+  it("a barra de ações é desenhada antes da lista", () => {
+    // Marcar um achado no topo e ter de rolar até o fim da lista para achar o
+    // botão que age sobre ele é o comando longe do objeto. A ordem no código
+    // é a ordem na tela.
+    const html = pagina();
+    expect(html.indexOf("barraDeAcoes()")).toBeGreaterThan(-1);
+    expect(html.indexOf("barraDeAcoes()")).toBeLessThan(
+      html.indexOf("grupos(estado.resultado)")
+    );
+  });
+
+  it("a barra gruda no topo, não no rodapé", () => {
+    expect(pagina()).toContain(".barra-acoes");
+    expect(pagina()).not.toContain(".barra-lote");
+  });
+
+  it("cada ação tem UM botão só — nada duplicado embaixo", () => {
+    // Dois botões fazendo a mesma coisa em lugares diferentes já custou caro
+    // no modal do painel web.
+    const html = pagina();
+    for (const acao of ['data-acao="aplicarTudo"', 'data-acao="abrirPr"', 'data-acao="corrigirLote"']) {
+      expect(html.split(acao).length - 1, acao).toBe(1);
+    }
+  });
+});
+
 describe("o botão de analisar não fica preso (UX-24)", () => {
   it("o evento de PROGRESSO não decide mais se a execução acabou", () => {
     // Teste por texto porque é o formato do arquivo — a página é uma string.

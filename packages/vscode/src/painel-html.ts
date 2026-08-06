@@ -351,13 +351,17 @@ export function htmlDoPainel(opts: {
      title, senão a ausência parece defeito da ferramenta (UX-15). */
   .caixa.off { opacity: .35; cursor: not-allowed; border-style: dashed; }
 
-  .barra-lote {
-    position: sticky; bottom: 0; z-index: 2;
-    margin-top: 10px; padding-top: 8px;
+  /* Grudada no TOPO da lista: o que se pode fazer acompanha a rolagem, em vez
+     de ficar no fim de dezenas de achados. */
+  .barra-acoes {
+    position: sticky; top: 0; z-index: 2;
+    margin-bottom: 10px; padding: 8px 0;
     background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-    border-top: 1px solid var(--borda);
+    border-bottom: 1px solid var(--borda);
   }
-  .barra-lote button { width: 100%; }
+  .barra-acoes button { width: 100%; }
+  .barra-acoes .fantasma { width: auto; }
+  .barra-acoes .pr { margin-top: 8px; }
 
   /* ---- Filtro por gravidade ---- */
   .chip.filtro { cursor: pointer; user-select: none; }
@@ -636,23 +640,50 @@ export function htmlDoPainel(opts: {
     return html;
   }
 
-  /** A barra de correção em lote. Só existe quando há o que corrigir. */
-  function barraDeLote() {
+  /**
+   * A barra de AÇÕES, acima da lista de achados.
+   *
+   * Ela ficava embaixo, depois de todos os achados. Numa varredura real são
+   * dezenas de linhas: marcar um achado no topo e ter de rolar até o fim para
+   * encontrar o botão que age sobre ele é o comando longe do objeto. Aqui em
+   * cima, o que se pode FAZER está sempre à vista, e a lista é o detalhe.
+   *
+   * As três ações moram juntas porque são um fluxo só, na ordem em que
+   * acontecem: marcar → corrigir → aplicar/abrir PR. Cada uma só aparece
+   * quando existe: sem proposta pronta não há o que aplicar, e sem nada
+   * levável não há PR a abrir.
+   *
+   * Grudada no topo (sticky): a barra acompanha a rolagem da lista em vez de
+   * sumir junto com ela.
+   */
+  function barraDeAcoes() {
     const podem = achadosVisiveis().filter((a) => a.corrigivel);
-    if (!podem.length) return '';
-    const marcadosVisiveis = podem.filter((a) => marcados.has(a.chave)).length;
-    const todos = marcadosVisiveis === podem.length;
+    const lista = estado.correcoes || [];
+    const prontas = lista.filter((c) => c.estado === 'pronta');
+    const pr = blocoDePr(lista);
+    if (!podem.length && !prontas.length && !pr) return '';
 
-    return '<div class="barra-lote">' +
-      '<div class="linha entre" style="margin-bottom:6px">' +
-        '<span class="muted">' + h(fmt(T.nAchados, { n: podem.length })) + '</span>' +
-        '<button class="fantasma" data-acao="' + (todos ? 'desmarcarTudo' : 'marcarTudo') + '">' +
-          h(todos ? T.desmarcar : T.marcarTudo) + '</button>' +
-      '</div>' +
-      '<button data-acao="corrigirLote"' + (marcadosVisiveis ? '' : ' disabled') + '>' +
-        h(marcadosVisiveis ? fmt(T.corrigirSelecionados, { n: marcadosVisiveis }) : T.nadaMarcado) +
-      '</button>' +
-    '</div>';
+    let html = '<div class="barra-acoes">';
+
+    if (podem.length) {
+      const marcadosVisiveis = podem.filter((a) => marcados.has(a.chave)).length;
+      const todos = marcadosVisiveis === podem.length;
+      html += '<div class="linha entre" style="margin-bottom:6px">' +
+          '<span class="muted">' + h(fmt(T.nAchados, { n: podem.length })) + '</span>' +
+          '<button class="fantasma" data-acao="' + (todos ? 'desmarcarTudo' : 'marcarTudo') + '">' +
+            h(todos ? T.desmarcar : T.marcarTudo) + '</button>' +
+        '</div>' +
+        '<button data-acao="corrigirLote"' + (marcadosVisiveis ? '' : ' disabled') + '>' +
+          h(marcadosVisiveis ? fmt(T.corrigirSelecionados, { n: marcadosVisiveis }) : T.nadaMarcado) +
+        '</button>';
+    }
+
+    if (prontas.length) {
+      html += '<button style="margin-top:6px" data-acao="aplicarTudo">' +
+        h(fmt(T.aplicarTudo, { n: prontas.length })) + '</button>';
+    }
+
+    return html + pr + '</div>';
   }
 
   /**
@@ -726,12 +757,10 @@ export function htmlDoPainel(opts: {
         ? '<p class="muted">' + h(fmt(T.gerandoCorrecoes, { done: lista.length - gerando, total: lista.length })) + '</p>'
         : '<p class="muted">' + h(T.correcoesAjuda) + '</p>') +
       itens +
-      (prontas.length
-        ? '<button style="width:100%;margin-top:8px" data-acao="aplicarTudo">' +
-            h(fmt(T.aplicarTudo, { n: prontas.length })) + '</button>'
-        : '') +
-      blocoDePr(lista) +
     '</div>';
+    // Sem "Aplicar tudo" e sem o botão de PR aqui: os dois subiram para a
+    // barra de ações. Dois botões fazendo a mesma coisa em lugares diferentes
+    // é o erro que o modal do painel web já documentou.
   }
 
   /**
@@ -838,10 +867,13 @@ export function htmlDoPainel(opts: {
 
     html += '<div style="margin-top:16px"><h2>' + h(T.resultado) + '</h2>';
     if (estado.resultado) {
+      // Ordem: placar (que também filtra) → o que DÁ PARA FAZER → o contexto
+      // da execução → a lista. O comando fica junto do resumo, não no fim de
+      // uma lista de dezenas de achados.
       html += placar(estado.resultado) +
+        barraDeAcoes() +
         contexto(estado.resultado) +
-        grupos(estado.resultado) +
-        barraDeLote();
+        grupos(estado.resultado);
     } else {
       html += '<div class="vazio">' + h(T.aindaNaoRodou) + '</div>';
     }

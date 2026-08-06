@@ -177,3 +177,78 @@ describe("argumentos do SAST", () => {
     expect(fonte).toContain("cpus().length");
   });
 });
+
+describe("403 sem autor não chega mais à tela (UX-27)", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+    setScanTransport({ kind: "local" });
+  });
+
+  const transporte = {
+    kind: "remote" as const,
+    baseUrl: "https://exemplo.invalido",
+    getToken: async () => "tok",
+  };
+
+  const responder = (status: number, corpo: string, headers: Record<string, string>) => {
+    globalThis.fetch = (async () =>
+      new Response(corpo, { status, headers })) as typeof globalThis.fetch;
+  };
+
+  const chamar = async () => {
+    const { callRemoteScan } = await import("../src/scan-transport");
+    return callRemoteScan(transporte, { analyzer: "sast", files: [], locale: "pt-BR" });
+  };
+
+  it("recusa NOSSA continua mostrando o texto do servidor", async () => {
+    responder(403, JSON.stringify({ error: "Esta rota aceita apenas token de aplicativo." }), {
+      "content-type": "application/json",
+    });
+    await expect(chamar()).rejects.toThrow("Esta rota aceita apenas token de aplicativo.");
+  });
+
+  it("recusa de INTERMEDIÁRIO diz quem foi", async () => {
+    // Era aqui que a tela mostrava só "Falha no scan remoto (403)": um número
+    // sem autor, que não distingue o StarGuard recusando de uma CDN no meio.
+    responder(403, "<!DOCTYPE html><html><body>Attention Required! Cloudflare</body></html>", {
+      "content-type": "text/html; charset=UTF-8",
+      "cf-ray": "abc123-GRU",
+    });
+    const erro = await chamar().catch((e) => e as Error);
+    expect(erro.message).toContain("403");
+    expect(erro.message).toContain("text/html");
+    expect(erro.message).toContain("cf-ray abc123-GRU");
+    expect(erro.message).toContain("Cloudflare");
+  });
+
+  it("a pista é CURTA — vai para uma notificação, não para um relatório", async () => {
+    responder(403, "x".repeat(5000), { "content-type": "text/html" });
+    const erro = await chamar().catch((e) => e as Error);
+    expect(erro.message.length).toBeLessThan(300);
+  });
+
+  it("recusa de intermediário AUTORIZA o socorro local", async () => {
+    // Com o opengrep instalado a um palmo, deixar de analisar por causa de um
+    // 403 de CDN é o pior desfecho possível — e o pedido nunca chegou ao app.
+    responder(403, "<html>Cloudflare</html>", { "content-type": "text/html" });
+    const erro = await chamar().catch((e) => e as RemoteScanError);
+    expect(erro.code).toBe("unreachable");
+    expect(podeCairParaLocal(erro)).toBe(true);
+  });
+
+  it("recusa NOSSA não autoriza — é permissão a resolver", async () => {
+    responder(403, JSON.stringify({ error: "Acesso restrito." }), {
+      "content-type": "application/json",
+    });
+    const erro = await chamar().catch((e) => e as RemoteScanError);
+    expect(erro.code).toBe("failed");
+    expect(podeCairParaLocal(erro)).toBe(false);
+  });
+
+  it("corpo vazio não inventa pista", async () => {
+    responder(500, "", {});
+    const erro = await chamar().catch((e) => e as Error);
+    expect(erro.message).toContain("500");
+  });
+});
