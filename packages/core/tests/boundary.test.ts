@@ -37,11 +37,27 @@ async function arquivos(dir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * Tira os comentários antes de procurar imports.
+ *
+ * Sem isto, uma frase de comentário que CITE um import é lida como import de
+ * verdade — e num código onde os comentários explicam por que tal módulo não
+ * pode ser importado de tal lugar, é justamente o arquivo mais bem documentado
+ * que passa a falhar o teste. Aconteceu aqui.
+ *
+ * O `[^:]` antes de `//` preserva URLs dentro de strings (`https://…`), que de
+ * outro modo seriam truncadas no meio e poderiam esconder um import na mesma
+ * linha.
+ */
+function semComentarios(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 /** Especificadores de `import`/`export … from`/`import()` de um arquivo. */
 function especificadores(src: string): string[] {
   const out: string[] = [];
   const RE = /(?:from|import)\s*\(?\s*(["'])([^"']+)\1/g;
-  for (let m; (m = RE.exec(src)); ) out.push(m[2]!);
+  for (let m; (m = RE.exec(semComentarios(src))); ) out.push(m[2]!);
   return out;
 }
 
@@ -135,4 +151,106 @@ describe("o que pode ser importado do NAVEGADOR não puxa Node", () => {
       expect(culpados).toEqual([]);
     });
   }
+});
+
+// ============================================================
+// A SEGUNDA fronteira: o que o Edge runtime consegue carregar.
+//
+// A primeira fronteira olha para fora — o núcleo não pode conhecer o app. Esta
+// olha para dentro: **nem todo módulo do núcleo pode ser importado de todo
+// lugar**, e a diferença derrubou o painel inteiro.
+//
+// O que aconteceu: `sastJobs()` nasceu em `config.ts` e precisa ler o cgroup,
+// que mora em `container.ts` (`node:fs`, `node:os`). Só que `config.ts` é
+// reexportado por `lib/config.ts`, que o `middleware.ts` importa — e o
+// middleware roda no **Edge runtime**. O empacotador puxa o grafo inteiro, o
+// middleware não compila, e um middleware que não compila responde **404 em
+// TODAS as rotas**. Não uma rota: o site.
+//
+// O que torna isso perigoso é que nada avisa antes: `tsc`, ESLint e `npm test`
+// passam os três, porque nenhum deles sabe o que é o Edge runtime. Só o
+// `next build` reclama — e a mensagem fala de `node:fs`, não do middleware.
+//
+// Por isso a regra vira teste, do mesmo jeito e pelo mesmo motivo que a
+// primeira: um acordo que só o Next verifica é um acordo que ninguém verifica.
+// ============================================================
+
+/**
+ * Módulos que o EDGE precisa conseguir carregar, com quem os arrasta para lá.
+ *
+ * Curta de propósito. Não é "o que seria bom manter leve": é a lista do que o
+ * `middleware.ts` alcança hoje, e cada entrada tem um caminho de import real
+ * atrás dela.
+ */
+const RAIZES_EDGE: { arquivo: string; porque: string }[] = [
+  { arquivo: "config.ts", porque: "lib/config.ts -> middleware.ts" },
+  { arquivo: "types.ts", porque: "arrastado por config.ts" },
+  { arquivo: "i18n/config.ts", porque: "o middleware resolve o idioma" },
+  { arquivo: "i18n/messages.ts", porque: "arrastado por i18n/config.ts" },
+  { arquivo: "i18n/translate.ts", porque: "erro de rota traduzido na borda" },
+];
+
+describe("o que o middleware alcança não pode tocar em `node:`", () => {
+  it.each(RAIZES_EDGE)(
+    "$arquivo e tudo que ele importa ($porque)",
+    async ({ arquivo }) => {
+      const vistos = new Set<string>();
+      const culpados: string[] = [];
+
+      const visitar = async (rel: string): Promise<void> => {
+        if (vistos.has(rel)) return;
+        vistos.add(rel);
+
+        let src: string;
+        try {
+          src = await readFile(join(SRC, rel), "utf8");
+        } catch {
+          return; // não é arquivo nosso (dependência externa)
+        }
+
+        for (const spec of especificadores(src)) {
+          if (/^node:/.test(spec)) {
+            culpados.push(`${rel} importa ${spec}`);
+            continue;
+          }
+          if (!spec.startsWith(".")) continue;
+          // Import relativo do núcleo: sem extensão, por causa do Turbopack.
+          const destino = join(rel, "..", spec).split("\\").join("/");
+          await visitar(`${destino}.ts`);
+          await visitar(`${destino}/index.ts`);
+        }
+      };
+
+      await visitar(arquivo);
+
+      // A mensagem nomeia o caminho inteiro: quem quebrar isto precisa saber
+      // que o sintoma NÃO vai ser um erro de tipo, vai ser o painel fora do ar.
+      expect(
+        culpados,
+        `Estes módulos chegam ao Edge runtime pelo middleware e usam APIs do ` +
+          `Node. O resultado não é um erro de tipo — é 404 em todas as rotas do ` +
+          `painel. Mova o que lê disco/CPU para um módulo NODE-ONLY (ex.: ` +
+          `container.ts) e importe-o só dos analisadores.\n  ` +
+          culpados.join("\n  ")
+      ).toEqual([]);
+    }
+  );
+});
+
+describe("o cgroup mora em `container.ts`, e só", () => {
+  it("`config.ts` não importa o `container`", async () => {
+    // A regressão exata: uma linha de import aqui e o painel some. Lido pelo
+    // extrator que ignora comentários — o cabeçalho deste arquivo CITA o import
+    // proibido para explicá-lo, e citar não é importar.
+    const src = await readFile(join(SRC, "config.ts"), "utf8");
+    expect(especificadores(src)).not.toContain("./container");
+  });
+
+  it("mas as funções continuam existindo, no lugar node-only", async () => {
+    const { sastJobs, sastMaxMemoryMb } = await import("../src/container");
+    expect(sastJobs()).toBeGreaterThanOrEqual(1);
+    // `null` fora de contêiner, número dentro: as duas respostas são válidas.
+    const mem = sastMaxMemoryMb();
+    expect(mem === null || mem >= 128).toBe(true);
+  });
 });

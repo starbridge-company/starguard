@@ -74,6 +74,12 @@ export type UnavailableReason =
   | "no_workspace" // precisa de código e ninguém informou repositório/caminho
   | "no_input" // precisa de entrada própria (descrição, skills) e não veio
   | "binary_missing" // o executável configurado não está no host
+  // O binário existe, mas não há RULESET para ele. Motivo próprio porque a
+  // resposta é outra: não é "instale o opengrep", é "aponte as regras". Com
+  // opengrep, `--config auto` não funciona (exit 2, saída vazia), então rodar
+  // assim mesmo seria gastar 27 s para terminar sem explicação — o oposto do
+  // que "indisponível aparece COM o motivo" promete. Ver AUDITORIA.md#ARQ-18.
+  | "no_rules"
   | "engine_off" // desligado por configuração (SAST_ENGINE=none)
   | "no_ai_key" // precisa de IA e não há credencial
   // Cancelado antes de começar. É motivo como os outros, e não ausência: quem

@@ -103,16 +103,19 @@ describe("o caminho normal: aceita, acompanha, entrega", () => {
       { status: "done", result: [] },
     ]);
 
-    const avisos: [string, number | undefined][] = [];
+    // Os valores são NOMEADOS, e não posicionais: a ordem das palavras muda
+    // entre os três idiomas, então a frase interpola `{n}`, não "o primeiro
+    // argumento". Ver `RemoteScanInput.report`.
+    const avisos: [string, Record<string, string | number> | undefined][] = [];
     await callRemoteScan(t, {
       analyzer: "sast",
       files: arquivos,
       locale: "pt-BR",
-      report: (chave, n) => avisos.push([chave, n]),
+      report: (chave, valores) => avisos.push([chave, valores]),
     });
 
-    expect(avisos).toContainEqual(["scan.queuedAt", 2]); // a do 202
-    expect(avisos).toContainEqual(["scan.queuedAt", 3]); // a da consulta
+    expect(avisos).toContainEqual(["scan.queuedAt", { n: 2 }]); // a do 202
+    expect(avisos).toContainEqual(["scan.queuedAt", { n: 3 }]); // a da consulta
   });
 
   it("o mesmo aviso não é repetido a cada consulta", async () => {

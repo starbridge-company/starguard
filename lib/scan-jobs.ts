@@ -256,10 +256,10 @@ async function executar(job: ScanJob): Promise<void> {
     // previsão, indistinguível de travado.
     const opcoes = {
       signal: job.abortar.signal,
-      report: (chave: string, n?: number) => {
+      report: (chave: string, valores?: Record<string, string | number>) => {
         if (chave === "scan.slotQueued") {
           job.status = "queued";
-          job.vaga = n;
+          job.vaga = typeof valores?.n === "number" ? valores.n : undefined;
         } else if (chave === "scan.scanning") {
           job.status = "running";
           job.vaga = undefined;

@@ -142,10 +142,11 @@ export interface RemoteScanInput {
    * Para dizer na tela o que está acontecendo — inclusive "na fila, 2º".
    *
    * Recebe CHAVE de tradução, nunca frase: este módulo não conhece idioma, e
-   * quem chama (o analisador) conhece. `n` é o número que a frase interpola,
-   * quando ela tem um.
+   * quem chama (o analisador) conhece. `valores` são os campos que a frase
+   * interpola — nomeados, e não posicionais, porque a ordem das palavras muda
+   * entre os três idiomas.
    */
-  report?: (chave: string, n?: number) => void;
+  report?: (chave: string, valores?: Record<string, string | number>) => void;
 }
 
 /**
@@ -157,7 +158,7 @@ export interface RemoteScanInput {
  */
 export interface OpcoesDeScanLocal {
   signal?: AbortSignal;
-  report?: (chave: string, n?: number) => void;
+  report?: (chave: string, valores?: Record<string, string | number>) => void;
 }
 
 /**
@@ -174,10 +175,8 @@ export function opcoesDeScanLocal(ctx: {
 }): OpcoesDeScanLocal {
   return {
     signal: ctx.signal,
-    report: (chave, n) =>
-      ctx.report?.(
-        translate(ctx.locale, chave as MessageKey, n === undefined ? undefined : { n })
-      ),
+    report: (chave, valores) =>
+      ctx.report?.(translate(ctx.locale, chave as MessageKey, valores)),
   };
 }
 
@@ -739,7 +738,7 @@ async function acompanharJob(
     const marca = `${chave}:${n ?? ""}`;
     if (marca === ultimoAviso) return;
     ultimoAviso = marca;
-    input.report?.(chave, n);
+    input.report?.(chave, n === undefined ? undefined : { n });
   };
 
   if (posicaoInicial !== undefined && posicaoInicial > 0) {

@@ -99,3 +99,59 @@ export function memoriaDisponivelMb(): number | null {
     memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory/memory.limit_in_bytes"))
   );
 }
+
+// ------------------------------------------------------------
+// O que o SAST deriva desses limites
+// ------------------------------------------------------------
+//
+// Estas duas moravam em `config.ts`, e isso derrubou o painel INTEIRO.
+//
+// `config.ts` é reexportado por `lib/config.ts`, que é importado pelo
+// `middleware.ts` — e o middleware roda no **Edge runtime**, onde `node:fs` e
+// `node:os` não existem. O empacotador puxa o grafo inteiro: bastava
+// `config.ts` importar este arquivo para o middleware deixar de compilar, e um
+// middleware que não compila responde **404 em todas as rotas**. Não uma rota:
+// o site.
+//
+// O que torna esse erro perigoso é que ele não aparece em lugar nenhum antes de
+// acontecer — `tsc`, ESLint e `npm test` passam os três, porque nenhum deles
+// sabe o que é o Edge runtime. Só o `next dev`/`next build` reclama, e a
+// mensagem fala de `node:fs`, não do middleware.
+//
+// Aqui é o lugar certo por dois motivos, e o segundo é o que importa: elas SÃO
+// derivações do limite do contêiner, e este arquivo já é NODE-ONLY por natureza
+// — ninguém o importa de um caminho de borda por engano.
+//
+// Travado por teste em `packages/core/tests/boundary.test.ts`.
+
+/**
+ * Quantos processos o SAST pode abrir — AUDITORIA.md#ARQ-15.
+ *
+ * Sai do CGROUP, não de `os.cpus()`. A diferença derrubou o servidor: dentro do
+ * contêiner, `os.cpus()` conta os núcleos do hospedeiro, e o scan abria oito
+ * processos numa instância de meia CPU e 512 MB. A memória estourava, a
+ * instância morria no meio da requisição e o editor recebia a página de erro da
+ * borda — sem corpo JSON, o que fazia a mensagem virar "403" sem autor.
+ *
+ * `SAST_JOBS` tem precedência: quem hospeda sabe da própria caixa.
+ */
+export function sastJobs(): number {
+  const env = Number(process.env.SAST_JOBS);
+  if (Number.isFinite(env) && env >= 1) return Math.floor(env);
+  return paralelismoDisponivel();
+}
+
+/**
+ * Teto de memória por processo do SAST, em MB, ou `null` para não passar a
+ * flag. Derivado do limite do contêiner, dividido pelos processos e com folga
+ * para o Node — que também mora nesta caixa.
+ */
+export function sastMaxMemoryMb(): number | null {
+  const env = Number(process.env.SAST_MAX_MEMORY_MB);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  const total = memoriaDisponivelMb();
+  if (!total) return null;
+  // Metade da caixa para os scanners, dividida entre os processos. A outra
+  // metade é do Node, do JSON de saída e do sistema.
+  return Math.max(128, Math.floor((total * 0.5) / sastJobs()));
+}

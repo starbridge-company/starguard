@@ -71,7 +71,7 @@ export async function runSca(
           signal: opts.signal,
         });
       },
-      (posicao) => opts.report?.("scan.slotQueued", posicao)
+      (posicao) => opts.report?.("scan.slotQueued", { n: posicao })
     );
     return parseTrivy(JSON.parse(stdout));
   } catch (e: unknown) {
@@ -142,8 +142,7 @@ async function scaRemoto(
     signal,
     // "na fila (2º)" chega por aqui: o servidor roda um scanner por vez, e
     // esperar a vez é estado a mostrar, não erro a relatar.
-    report: (m, n) =>
-      report?.(translate(locale, m as MessageKey, n === undefined ? undefined : { n })),
+    report: (m, valores) => report?.(translate(locale, m as MessageKey, valores)),
   });
   return (cru ?? []) as DependencyVuln[];
 }

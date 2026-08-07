@@ -24,9 +24,55 @@ interface Heuristic {
 
 const HEURISTICS: Heuristic[] = [
   {
+    // ---- A frase canônica não era detectada ----
+    //
+    // O padrão anterior era
+    // `ignore\s+(the\s+)?(previous|above|prior|as)\s+(instru|rules|prompt)`.
+    // Ele exige que o qualificador seja exatamente `the` ou nada — então
+    // **"ignore all previous instructions"**, que é a formulação mais comum de
+    // prompt injection que existe, passava batido. `disregard` só valia com
+    // "instru|rules" logo depois, então "disregard your safety guidelines"
+    // também passava. E o ramo em português cobria só "esqueça as instruções",
+    // deixando "ignore todas as instruções anteriores" de fora.
+    //
+    // Medido: um arquivo com as três frases era aprovado como "limpo".
+    //
+    // O desenho agora é uma peça só, montada de três partes — VERBO +
+    // qualificador opcional + ALVO —, nos três idiomas do produto. Falso
+    // positivo aqui custa uma linha de revisão; falso negativo custa o motivo
+    // de o analisador existir.
     type: "prompt-injection",
     severity: "critical",
-    re: /ignore\s+(the\s+)?(previous|above|prior|as)\s+(instru|rules|prompt)|disregard\s+.{0,20}(instru|rules)|esque[çc]a\s+as\s+instru/i,
+    re: new RegExp(
+      // ignore / disregard / forget / override — e os equivalentes pt/es
+      "(?:ignore|ignora|ignorar|disregard|descarta|desconsidere|desconsidera|" +
+        "forget|esque[çc]a|esque[çc]e|olvida|olvide|override|sobrescreva|anule|anula)" +
+        // até 40 caracteres de qualificador: "all", "any", "todas as", "las"…
+        "[\\s\\S]{0,40}?" +
+        // o que se manda ignorar
+        "(?:instruction|instru[çc][õo]es|instrucciones|rule|regra|regla|" +
+        "prompt|guideline|diretriz|directriz|orienta[çc][õo]es|" +
+        "polic(?:y|ies)|pol[íi]tica|restri[çc][õo]es|restriction|safeguard|" +
+        "system\\s+message|mensagem\\s+do\\s+sistema)",
+      "i"
+    ),
+    titleKey: "skillFinding.promptInjection.title",
+    recommendationKey: "skillFinding.promptInjection.fix",
+  },
+  {
+    // Revelar o prompt do sistema é o outro pedido clássico, e é diferente de
+    // "ignore as regras": aqui não se pede desobediência, se pede o segredo.
+    type: "prompt-injection",
+    severity: "high",
+    re: new RegExp(
+      "(?:reveal|revele|revela|print|imprima|show|mostre|muestra|repeat|repita|" +
+        "output|exiba|divulgue)" +
+        "[\\s\\S]{0,30}?" +
+        "(?:system\\s+prompt|prompt\\s+do\\s+sistema|prompt\\s+del\\s+sistema|" +
+        "system\\s+message|initial\\s+instructions|instru[çc][õo]es\\s+iniciais|" +
+        "api[\\s_-]?key|chave\\s+de\\s+api|clave\\s+de\\s+api|secret|segredo)",
+      "i"
+    ),
     titleKey: "skillFinding.promptInjection.title",
     recommendationKey: "skillFinding.promptInjection.fix",
   },
@@ -45,9 +91,21 @@ const HEURISTICS: Heuristic[] = [
     recommendationKey: "skillFinding.backdoor.fix",
   },
   {
+    // "Nunca recuse" e "sem pedir confirmação" são bypass de política tanto
+    // quanto "jailbreak" — e muito mais frequentes num prompt escrito de boa-fé,
+    // que é justamente onde este analisador precisa acertar. Ficavam de fora.
     type: "policy-bypass",
     severity: "medium",
-    re: /jailbreak|DAN mode|developer mode|sem restri[çc][õo]es|no restrictions/i,
+    re: new RegExp(
+      "jailbreak|DAN\\s+mode|developer\\s+mode|" +
+        "sem\\s+restri[çc][õo]es|no\\s+restrictions|sin\\s+restricciones|" +
+        "(?:never|nunca|jam[áa]s)\\s+(?:refuse|recuse|rejeite|se\\s+recuse|rechaces)|" +
+        "(?:n[ãa]o|don'?t|do\\s+not|no)\\s+(?:refuse|recuse|pergunte|ask|confirm)|" +
+        "without\\s+(?:confirmation|asking|approval)|" +
+        "sem\\s+(?:confirma[çc][ãa]o|confirmar|perguntar|aprova[çc][ãa]o)|" +
+        "sin\\s+(?:confirmaci[óo]n|preguntar)",
+      "i"
+    ),
     titleKey: "skillFinding.policyBypass.title",
     recommendationKey: "skillFinding.policyBypass.fix",
   },

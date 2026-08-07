@@ -9,7 +9,13 @@
 import { execFile } from "node:child_process";
 
 import { promisify } from "node:util";
-import { BIN, ENGINES, sastConfig, sastJobs, sastMaxMemoryMb } from "../config";
+import { BIN, ENGINES } from "../config";
+// As regras saem daqui, e não de `config.ts`: a busca no disco usa `node:fs`,
+// e `config.ts` precisa continuar carregável no Edge runtime.
+import { regrasDoSast, regrasUsaveis } from "../sast-rules";
+// Do `container`, e não do `config`: as duas leem o cgroup, e `config.ts`
+// precisa continuar importável do Edge runtime. Ver o cabeçalho de ambos.
+import { sastJobs, sastMaxMemoryMb } from "../container";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
 import { comSocorroLocal, probeBinary } from "../binaries";
@@ -95,9 +101,10 @@ export async function runSast(
   // continua sendo o número de núcleos.
   const jobs = sastJobs();
   const memoria = sastMaxMemoryMb();
+  const regras = regrasDoSast();
   const args = [
     "--config",
-    sastConfig(),
+    regras.config,
     "--json",
     "--quiet",
     "--timeout",
@@ -108,19 +115,15 @@ export async function runSast(
     ".",
   ];
 
-  // `--config auto` BAIXA o ruleset inteiro de semgrep.dev, a cada execução.
+  // Regras achadas no disco são DECLARADAS, nunca usadas em silêncio.
   //
-  // É o padrão quando ninguém apontou regras locais, e é a explicação mais
-  // comum para "o SAST está rodando há vinte minutos e não sai do lugar": não há
-  // nada travado, há milhares de regras sendo buscadas pela rede antes de o
-  // primeiro arquivo ser lido. Numa máquina atrás de proxy com CA própria isso
-  // nem termina — falha no meio, e o sintoma é um erro de rede no lugar de
-  // "falta configurar".
-  //
-  // Não dá para consertar o download; dá para parar de fazê-lo em silêncio. A
-  // frase diz o que está acontecendo e qual é a saída, e o `doctor` repete o
-  // aviso antes de a pessoa esperar por nada. Ver AUDITORIA.md#ARQ-17.
-  if (sastConfig() === "auto") opts.report?.("scan.rulesRemote");
+  // Detectar e não contar seria mudar o comportamento por baixo — a mesma falta
+  // que o transporte remoto evita. Quem lê a frase sabe qual ruleset produziu o
+  // resultado, e é assim que "não encontrou nada" vira uma afirmação verificável
+  // em vez de um palpite. Ver AUDITORIA.md#ARQ-18.
+  if (regras.origem === "detectado") {
+    opts.report?.("scan.rulesFound", { dir: regras.config });
+  }
 
   try {
     // A vaga envolve só o PROCESSO NATIVO. Segurá-la durante o parse ou o
@@ -143,7 +146,7 @@ export async function runSast(
           signal: opts.signal,
         });
       },
-      (posicao) => opts.report?.("scan.slotQueued", posicao)
+      (posicao) => opts.report?.("scan.slotQueued", { n: posicao })
     );
     return parseSemgrep(JSON.parse(stdout));
   } catch (e: unknown) {
@@ -243,8 +246,7 @@ async function sastRemoto(
       signal,
       // O transporte fala por CHAVE e por número; quem sabe o idioma é o
       // analisador. `n` é a posição na fila do servidor quando há uma.
-      report: (m, n) =>
-        report?.(translate(locale, m as MessageKey, n === undefined ? undefined : { n })),
+      report: (m, valores) => report?.(translate(locale, m as MessageKey, valores)),
     },
     () => report?.(translate(locale, "scan.split"))
   );
@@ -264,6 +266,13 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
     if (usingRemoteScan()) return { ok: true, detail: "servidor" };
     const bin = sastBinary()!;
     const r = await probeBinary(bin);
+    // Binário presente e nenhuma regra é um caminho SEM saída com opengrep:
+    // `--config auto` sai com exit 2 e saída vazia depois de ~27 s tentando a
+    // rede, e o que chegava à tela era `Unexpected end of JSON input` — um erro
+    // de parser no lugar de "faltam regras". Ver AUDITORIA.md#ARQ-18.
+    if (r.present && !regrasUsaveis()) {
+      return { ok: false, reason: "no_rules", detail: bin };
+    }
     // O motivo carrega o NOME do binário: "instale o opengrep" é acionável,
     // "scanner indisponível" manda a pessoa adivinhar. Ver AUDITORIA.md#UX-15.
     return r.present

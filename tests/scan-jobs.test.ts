@@ -17,7 +17,7 @@
 // Os testes abaixo são quase todos sobre SAIR da fila: por cancelamento, por
 // abandono e por teto por pessoa. O caso feliz é o menor deles.
 // ============================================================
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 
 // O `audit` grava no Postgres, que não existe nesta suíte. O que interessa aqui
 // é a máquina de estados do job, não o registro — e um mock deixa isso explícito
@@ -36,16 +36,26 @@ import {
   tocarJob,
 } from "@/lib/scan-jobs";
 
+// ------------------------------------------------------------
+// NENHUM teste deste arquivo gera processo de scanner.
+// ------------------------------------------------------------
+//
+// O que se afirma aqui é o ciclo de vida do JOB — fila, cancelamento, abandono,
+// limpeza do temporário. Nada disso depende de haver opengrep na máquina, e
+// depender disso saía caro: com o ruleset detectado no disco, um único scan de
+// verdade leva ~40 s, e o teste passava a medir a carga da máquina.
+//
+// `ENGINES` é lido UMA vez, na carga do módulo `config.ts` do núcleo — por isso
+// a variável é posta aqui em cima, antes de qualquer import do núcleo
+// acontecer. Com os engines desligados, `runSast`/`runSca` devolvem `[]` na
+// primeira linha e o job segue o mesmo caminho de sempre até o `finally`.
+process.env.SAST_ENGINE = "none";
+process.env.SCA_ENGINE = "none";
+
 const ALICE = "user-alice";
 const BOB = "user-bob";
 
-/**
- * Um job que não roda scanner nenhum.
- *
- * `dir` aponta para um diretório que não existe: `runSast` falha rápido, o job
- * termina em `error` e nada de pesado é executado. O que estes testes medem é a
- * CONTABILIDADE da fila, e ela não depende de haver opengrep na máquina.
- */
+/** Um job qualquer. Com os engines desligados, ele termina sem tocar em disco. */
 function jobFalso(userId = ALICE, analyzer: "sast" | "sca" = "sast") {
   return criarJob({
     userId,
@@ -56,6 +66,27 @@ function jobFalso(userId = ALICE, analyzer: "sast" | "sca" = "sast") {
     bytes: 10,
   });
 }
+
+/**
+ * Carrega o grafo do núcleo ANTES de cronometrar qualquer coisa.
+ *
+ * `executar` importa os analisadores por `await import(...)`, e esse grafo é
+ * grande — config, parsers, enrich, catálogo dos três idiomas, corretores. Na
+ * suíte cheia, com dezenas de arquivos disputando a máquina, a PRIMEIRA
+ * resolução desse import passa de dez segundos, e o teste que espera o job
+ * terminar falhava medindo o compilador em vez do código.
+ *
+ * Aquecer aqui não afrouxa nada: o que se afirma continua sendo o comportamento
+ * do job. Só se tira do relógio o custo que não é dele.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import("@starguard/core/analyzers/sast"),
+    import("@starguard/core/analyzers/sca"),
+    import("@starguard/core/enrich"),
+    import("@starguard/core/redact"),
+  ]);
+}, 120_000);
 
 beforeEach(() => limparJobs());
 afterEach(() => limparJobs());
@@ -226,8 +257,6 @@ describe("os arquivos recebidos", () => {
 // ============================================================
 
 describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
-  const rota = () => import("@/app/api/scan/route");
-
   it("o `content-length` é conferido antes do parse", async () => {
     // `MAX_BYTES` era checado DEPOIS de `readJson`, ou seja, depois de o JSON
     // inteiro já estar bufferizado e parseado na memória. Numa instância de
@@ -243,10 +272,10 @@ describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
     expect(antes).toBeLessThan(depois);
   });
 
-  it("a rota continua exportando o guarda de caminho, com o teste que o cobre", async () => {
-    const { caminhoSeguro } = await rota();
-    expect(caminhoSeguro("../../etc/passwd")).toBeNull();
-  });
+  // O guarda de caminho (`caminhoSeguro`) tem suíte própria em
+  // `tests/scan-remoto.test.ts`, que é quase toda caminho negativo. Repeti-lo
+  // aqui custava 5 s por importar a cadeia inteira do Next e não afirmava nada
+  // que o outro arquivo já não afirme melhor.
 });
 
 describe("nenhum temporário fica para trás", () => {
@@ -258,16 +287,10 @@ describe("nenhum temporário fica para trás", () => {
     const dir = await mkdtemp(join(tmpdir(), "sg-scan-teste-"));
     await writeFile(join(dir, "a.ts"), "const a = 1;", "utf8");
 
-    // Um binário que não existe: o scanner falha em milissegundos, e é o
-    // desfecho RUIM que interessa aqui. "Nada é persistido" não pode valer só
-    // no caminho feliz — e a máquina que roda esta suíte não precisa ter
-    // opengrep para o teste dizer a verdade.
-    //
-    // `BIN.opengrep` é um getter que lê o env a cada acesso, justamente para
-    // poder ser configurado depois da carga do módulo. Ver `core/src/config.ts`.
-    const antes = process.env.OPENGREP_BIN;
-    process.env.OPENGREP_BIN = "binario-que-nao-existe-starguard";
-    try {
+    // O contrato aqui é o `finally`: **o temporário some quando o job termina**.
+    // Ele é o mesmo nos dois desfechos — a saída por erro está coberta pelos
+    // testes de cancelamento acima, que afirmam `job.dir === null`.
+    {
       const job = criarJob({
         userId: ALICE,
         analyzer: "sast",
@@ -286,11 +309,10 @@ describe("nenhum temporário fica para trás", () => {
         timeout: 10_000,
         interval: 20,
       });
-      expect(job.status).toBe("error");
+      expect(job.status).toBe("done");
+      // A prova: o diretório com código de outra pessoa não sobrevive ao scan.
       await expect(access(dir)).rejects.toThrow();
-    } finally {
-      if (antes === undefined) delete process.env.OPENGREP_BIN;
-      else process.env.OPENGREP_BIN = antes;
+      expect(job.dir).toBeNull();
       await import("node:fs/promises").then((fs) =>
         fs.rm(dir, { recursive: true, force: true }).catch(() => {})
       );

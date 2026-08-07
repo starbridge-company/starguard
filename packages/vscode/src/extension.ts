@@ -1409,6 +1409,12 @@ function saidasPara(reason?: string): { rotulo: string; comando: string }[] {
   if (reason === "no_ai_key") {
     return [{ rotulo: t("tree.action.useAccountAi"), comando: "starguard.enableAccountAi" }];
   }
+  // Faltar REGRA tem a mesma saída de faltar binário — apontar o caminho — mas
+  // não a de rodar no servidor: o servidor tem o ruleset dele, e oferecer isso
+  // aqui responderia a pergunta errada.
+  if (reason === "no_rules") {
+    return [{ rotulo: t("panel.actionConfigurePaths"), comando: "starguard.configurarCaminhos" }];
+  }
   if (reason !== "binary_missing") return [];
   return SAIDAS.filter(
     (s) => s.comando !== "starguard.enableAccountAi" || !usingRemoteScan()
@@ -1984,20 +1990,27 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         );
       }
 
-      // O ruleset do SAST local, dito ANTES de alguém esperar por ele.
+      // O ruleset do SAST, dito ANTES de alguém esperar por ele.
       //
-      // Sem `starguard.sastRules`, o opengrep roda com `--config auto` e baixa
-      // milhares de regras de semgrep.dev a cada execução. É a explicação mais
-      // comum para "está rodando há vinte minutos e não sai do lugar", e é
-      // invisível: não há erro, não há log, só espera. Ver AUDITORIA.md#ARQ-17.
-      const regras = cfg().get<string>("sastRules")?.trim();
+      // `--config auto` NÃO funciona com opengrep: exit 2, saída vazia, depois
+      // de ~27 s tentando a rede. Sem regras não há scan de código nenhum — e a
+      // pessoa precisa saber disso aqui, não depois de uma análise que morre
+      // com `Unexpected end of JSON input`. Ver AUDITORIA.md#ARQ-18.
+      const { regrasDoSast, limparCacheDeRegras } = await import(
+        "@starguard/core/sast-rules"
+      );
+      limparCacheDeRegras(); // o diagnóstico mostra o estado de AGORA
+      const regras = regrasDoSast();
       saida.appendLine("");
       saida.appendLine(
-        regras
-          ? `✔ Regras do SAST: ${regras}`
-          : "⚠ Regras do SAST: nenhuma configurada — o opengrep vai BAIXAR o ruleset de\n" +
-            "  semgrep.dev a cada execução (lento, e não funciona offline). Aponte um\n" +
-            "  diretório local em starguard.sastRules."
+        regras.origem === "env"
+          ? `✔ Regras do SAST: ${regras.config} (configurado)`
+          : regras.origem === "detectado"
+            ? `✔ Regras do SAST: ${regras.config} (encontrado no disco)`
+            : "✖ Regras do SAST: NENHUMA encontrada. O opengrep não escaneia sem elas —\n" +
+              "  `--config auto` é do Semgrep e aqui só gasta 27 s para falhar. Clone\n" +
+              "  github.com/opengrep/opengrep-rules e aponte o caminho em\n" +
+              "  starguard.sastRules."
       );
 
       await diagnosticarServidor();
