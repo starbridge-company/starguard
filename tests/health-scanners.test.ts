@@ -50,7 +50,9 @@ beforeEach(() => {
 });
 
 async function corpo() {
-  const res = await GET();
+  // Sem `?probe=live`: é a PRONTIDÃO que se mede aqui. A vivacidade tem suíte
+  // própria em `tests/health-vivacidade.test.ts`.
+  const res = await GET(new Request("http://localhost/api/health"));
   return (await res.json()) as {
     status: string;
     scanners: unknown;

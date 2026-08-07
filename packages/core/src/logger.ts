@@ -48,8 +48,28 @@ const CAUSAS_MAX = 3;
 
 function safe(v: unknown): unknown {
   if (typeof v === "string") return redact(v);
-  if (v instanceof Error) return redact(mensagemComCausa(v));
+  if (v instanceof Error) return descreverErro(v);
   return v;
+}
+
+/**
+ * O erro em uma frase, já com a corrente de `cause` e já redigido.
+ *
+ * Exportado porque o log não é o único lugar que descreve um erro para uma
+ * pessoa. `/api/health` publicava `"Não foi possível verificar o schema: Failed
+ * query: select created_at from drizzle.__drizzle_migrations order by
+ * created_at params:"` — o SQL, que é a parte que ninguém precisa, no lugar de
+ * `password authentication failed` ou `ECONNREFUSED`, que é a que decide o
+ * conserto. Mesma doença que `mensagemComCausa` já tinha curado no log, em
+ * outro arquivo.
+ *
+ * A redação vem junto e não é opcional: um erro de conexão do `pg` traz a URL
+ * do banco, com senha, e este texto vai para a resposta HTTP e para o JSONB
+ * `phases`. Ver `redact.ts` e AUDITORIA.md#SEC-01.
+ */
+export function descreverErro(e: unknown): string {
+  if (e instanceof Error) return redact(mensagemComCausa(e));
+  return redact(String(e ?? ""));
 }
 
 /**

@@ -49,7 +49,48 @@ function comPrazo<T>(promessa: Promise<T>, aoEstourar: T): Promise<T> {
   ]);
 }
 
-export async function GET() {
+/**
+ * VIVACIDADE ≠ PRONTIDÃO, e confundir as duas trava o deploy.
+ *
+ * Esta rota, do jeito que estava, respondia por prontidão: 503 enquanto o banco
+ * não estivesse alcançável e em dia. Como sinal para um orquestrador que
+ * distribui tráfego entre réplicas, está certo — e continua sendo o que ela faz
+ * abaixo. Como `HEALTHCHECK` de contêiner, está errado, e o preço é alto: o
+ * Coolify usa o healthcheck do Docker como PORTÃO do rolling update. Contêiner
+ * que não fica saudável é revertido.
+ *
+ * O que aconteceu em produção (07/08/2026, servidor dedicado):
+ *
+ *   [entrypoint] StarGuard subindo em 0.0.0.0:3003
+ *   ✓ Ready in 307ms
+ *   worker.loop.failed … Connection terminated due to connection timeout
+ *   Attempt 1..5 of 5 | Healthcheck logs: curl: (22) … returned error: 503
+ *   New container is not healthy, rolling back to the old container.
+ *
+ * O processo estava DE PÉ e servindo HTTP — quem respondeu 503 foi ele mesmo,
+ * corretamente, dizendo "não alcanço o Postgres". A reversão não conserta nada:
+ * o contêiner velho tem o mesmo problema, porque o problema não está na imagem.
+ * E o efeito colateral é o pior: enquanto o banco estiver fora, NENHUM deploy
+ * consegue entrar — nem o que conserta a configuração.
+ *
+ * O mesmo laço fecha em servidor novo, sem banco fora do ar: schema não
+ * migrado ⇒ `ok: false` ⇒ 503 ⇒ o primeiro deploy nunca sobe.
+ *
+ * Por isso a vivacidade é uma sonda separada, que NÃO toca no banco: ela
+ * responde "este processo está servindo HTTP", que é a única pergunta que o
+ * healthcheck do contêiner sabe usar. A prontidão continua inteira em
+ * `GET /api/health` — é o que o `starguard doctor`, a extensão e quem estiver
+ * depurando consultam, e é lá que o 503 tem significado.
+ */
+function vivacidade(): Response {
+  return jsonOk({ status: "live" }, 200);
+}
+
+export async function GET(req: Request) {
+  // `?probe=live` antes de qualquer coisa: nada abaixo desta linha pode entrar
+  // no caminho de uma sonda que existe justamente para não depender de nada.
+  if (new URL(req.url).searchParams.get("probe") === "live") return vivacidade();
+
   // O health check é o batimento mais frequente que esta instância tem. Usá-lo
   // para recolher jobs abandonados dá ao mecanismo uma segunda chance de rodar
   // mesmo quando ninguém está escaneando — que é justamente quando o resto de

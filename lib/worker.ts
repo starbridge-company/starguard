@@ -24,6 +24,45 @@ import { redactError } from "@starguard/core/redact";
 /** Pausa entre varreduras quando a fila está vazia. */
 const OCIOSO_MS = Number(process.env.QUEUE_POLL_MS || 5_000);
 
+/** Teto da espera quando a fila está INALCANÇÁVEL (banco fora do ar). */
+const BACKOFF_MAX_MS = Number(process.env.QUEUE_BACKOFF_MAX_MS || 60_000);
+
+/**
+ * Quanto esperar depois de `falhas` tentativas seguidas de falar com a fila.
+ *
+ * Sem isto, o laço mantém a cadência de fila vazia contra um banco que não
+ * responde. Medido no deploy de 07/08/2026: a cada 15 segundos (5 s de pausa +
+ * 10 s de `connectionTimeoutMillis`), uma entrada de log com vinte linhas de
+ * SQL. Em uma hora, 240 delas — o suficiente para esconder qualquer outra coisa
+ * que o servidor tivesse a dizer, inclusive a mensagem do boot que explica o
+ * problema.
+ *
+ * Exponencial com teto de um minuto: um banco que volta é reencontrado em no
+ * máximo um minuto (ninguém está esperando por isso — a fila tem `run_after`,
+ * não perde trabalho), e um banco que não volta custa 60 tentativas por hora em
+ * vez de 240.
+ */
+export function pausaAposFalha(falhas: number): number {
+  if (falhas < 1) return OCIOSO_MS;
+  return Math.min(OCIOSO_MS * 2 ** (falhas - 1), BACKOFF_MAX_MS);
+}
+
+/**
+ * Esta falha vai para o log?
+ *
+ * Só a 1ª e depois nas potências de dois (1, 2, 4, 8, 16…). O primeiro registro
+ * é o que interessa — traz o erro inteiro, no momento em que o problema começou
+ * — e os seguintes são idênticos a ele. Rarear em vez de calar mantém a prova
+ * de que ainda está fora do ar, sem transformar o log num muro.
+ *
+ * Com o backoff acima, "ainda fora" aparece na 1ª, 2ª, 4ª… tentativa: umas 10
+ * linhas na primeira hora, contra 240.
+ */
+export function deveRegistrarFalha(falhas: number): boolean {
+  if (falhas < 1) return false;
+  return (falhas & (falhas - 1)) === 0;
+}
+
 /** Identifica esta instância nos logs e no `locked_by`. */
 const WORKER_ID = `${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -58,15 +97,29 @@ export function iniciarWorker(): void {
 }
 
 async function laco(): Promise<void> {
+  // Falhas SEGUIDAS ao falar com a fila. Zera na primeira volta que dá certo —
+  // inclusive a que não encontra job nenhum, que também é uma conversa com o
+  // banco bem-sucedida.
+  let falhas = 0;
+
   for (;;) {
     let pegou = false;
     try {
       pegou = await umaVolta();
+      falhas = 0;
     } catch (e) {
       // Falha ao FALAR com a fila (banco fora do ar). O laço não pode morrer
       // por isso — se morresse, seria preciso reiniciar o processo para a fila
       // voltar a andar.
-      log.error("worker.loop.failed", { error: e });
+      falhas++;
+      if (deveRegistrarFalha(falhas)) {
+        // `consecutive` é o que diz "isto não é um soluço": na 1ª linha ainda
+        // pode ser oscilação; na 64ª é configuração errada, e quem lê precisa
+        // dessa diferença sem ter de contar linhas repetidas.
+        log.error("worker.loop.failed", { error: e, consecutive: falhas });
+      }
+      await dormir(pausaAposFalha(falhas));
+      continue;
     }
     // Só dorme quando não havia nada: com fila cheia, processa em sequência
     // sem esperar 5 s entre um job e outro.

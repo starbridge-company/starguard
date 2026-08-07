@@ -38,6 +38,8 @@ Trabalhe de cima para baixo: a ordem dos blocos é a ordem de execução recomen
 | **Correção pontual** | BUG-23 | ✅ **corrigido e medido em Chromium** em 28/07/2026 — a suíte de `e2e/` pela tela real segue pendente, ver PEND-32 |
 | **Correção pontual** | UX-23 | ✅ **entregue** em 05/08/2026 — relatado pelo uso real da extensão; validado por unidade, percurso no editor segue em PEND-33 |
 | **Polimento da extensão** | UX-24 · UX-25 | ✅ **entregue** em 05/08/2026 — botão preso, cancelamento que não cancelava, correção em lote, skills invisíveis e a relação entre analisadores explicada na tela |
+| **Deploy no servidor dedicado** | BUG-28 · BUG-29 | ✅ **entregue** em 07/08/2026 — porta 3003, CRLF no entrypoint, o `--timeout` invertido do healthcheck, "tabela não existe" ≠ "banco fora do ar" e a senha do banco que ia para o stdout |
+| **Deploy que não subia (Coolify)** | BUG-30 | ✅ **entregue** em 07/08/2026 — vivacidade separada da prontidão (o healthcheck prendia o deploy), o boot passou a dizer QUAL host não respondeu, backoff no worker, `db-doctor` e a saída do Render (`render.yaml` → `DEPLOY.md`) |
 | Próxima | ARQ-12 (sintoma) · UX-14 · UX-16 · UX-17 · UX-18 · UX-20 · UX-21 · SEC-09 · ARQ-04 a ARQ-09 · PEND-24 a PEND-32 | ⬜ a fazer |
 
 <details>
@@ -2650,6 +2652,107 @@ aplicados pelo próprio entrypoint.
 | Shebang na imagem | `# ! / b i n / s h 
 ` — LF, como tem de ser |
 | Suíte | `typecheck` 0 erros · `lint` 0 erros · **856 testes + 2 skipped** |
+
+### BUG-29 · Três erros de banco saíam com a mesma cara ✅
+
+> ✅ **Feito em 07/08/2026.** Citado por `tests/health-scanners.test.ts`,
+> `tests/schema-check.test.ts` e `tests/redact.test.ts`; a seção faltava.
+>
+> Três correções do mesmo deploy, todas sobre a mesma incapacidade — o sistema
+> distinguia mal os motivos pelos quais o banco não responde:
+>
+> 1. **O `--timeout` do HEALTHCHECK era 5 s e o prazo interno de `/api/health` é
+>    8 s.** Com o banco pendurado a rota espera os 8 de propósito, para responder
+>    o que conseguiu medir; o `curl` já tinha sido morto aos 5. A checagem não
+>    tinha como passar. Nunca. Subiu para 15 s, com o acoplamento fixado em teste
+>    que lê os DOIS arquivos — a relação mora entre um arquivo de build e um de
+>    runtime, e nenhum teste normal a alcança.
+> 2. **"A tabela não existe" ≠ "banco fora do ar".** Os dois caíam no mesmo
+>    `catch` e saíam idênticos, mas pedem ações opostas — uma é rede ou
+>    credencial, a outra é `npm run db:migrate`, e a segunda acontece em TODO
+>    servidor novo. `semSchema()` lê os códigos `42P01`/`3F000` percorrendo a
+>    corrente de `cause`, porque o Drizzle embrulha o erro do `pg` e o código
+>    fica um nível abaixo.
+> 3. **A senha do banco ia para o stdout.** A regra de redação cobria
+>    `https?://` e deixava passar `postgres://sg:senha@host` — justamente a URL
+>    que aparece em erro de CONEXÃO. Passou a valer para qualquer esquema. Não
+>    era detalhe: o logger tinha acabado de passar a seguir a corrente de
+>    `cause`, e a correção de diagnóstico teria AMPLIADO o vazamento sem esta.
+
+### BUG-30 · O healthcheck confundia vivacidade com prontidão, e prendia o deploy ✅
+
+> ✅ **Feito em 07/08/2026**, a partir de um deploy que não subia no servidor
+> dedicado (Coolify, `sv5`). O `render.yaml` foi apagado na mesma tarefa: a
+> produção não está mais numa PaaS, e o runbook virou o [`DEPLOY.md`](DEPLOY.md).
+
+**O que quebrou, e por que a saída não ajudava**
+
+> ```
+> [entrypoint] StarGuard subindo em 0.0.0.0:3003
+> ✓ Ready in 307ms
+> worker.loop.failed … Connection terminated due to connection timeout
+> Attempt 1..5 of 5 | Healthcheck logs: curl: (22) … returned error: 503
+> New container is not healthy, rolling back to the old container.
+> ```
+>
+> A causa raiz é **de ambiente**: o contêiner não alcança o Postgres — aplicação
+> e banco em redes Docker diferentes. Isso o repositório não conserta. O que ele
+> conservava era tudo em volta, e era ruim:
+>
+> **1. O 503 era correto e mesmo assim errado.** `/api/health` responde por
+> PRONTIDÃO — 503 enquanto o banco não estiver alcançável e migrado. Como sinal
+> para quem distribui tráfego, certo. Como `HEALTHCHECK` de contêiner, é um
+> **impasse**: o Coolify usa o healthcheck como portão do rolling update,
+> contêiner que não fica saudável é revertido, e o contêiner velho tem o mesmo
+> problema — porque o problema não está na imagem. Enquanto o banco estivesse
+> fora, **nenhum deploy entraria, nem o que conserta a configuração.** O mesmo
+> laço fecha em servidor novo com o banco de pé: schema não migrado ⇒ 503 ⇒ o
+> primeiro deploy nunca sobe.
+>
+> O healthcheck passou a bater em **`/api/health?probe=live`**, que não toca no
+> banco. A prontidão continua inteira, com o mesmo 503 — é o que o `doctor`, a
+> extensão e quem depura consultam.
+>
+> **2. Nada dizia PARA ONDE a conexão foi tentada.** O aviso de subida calava de
+> propósito quando o banco não respondia (para não alarmar por oscilação de
+> rede), e a única pista era o worker repetindo vinte linhas de SQL. Agora sai
+> uma linha, no boot, com o `host:porta` (sem credencial) e uma dica **escolhida
+> pelo erro** — timeout, recusado, DNS e credencial mandam olhar em quatro
+> lugares diferentes, e uma dica errada custa a mesma hora que o silêncio.
+>
+> **3. O erro publicado era o SQL, não a causa.** `/api/health` mostrava
+> `"Failed query: select created_at from drizzle.__drizzle_migrations …"` — a
+> única parte inútil — no lugar de `password authentication failed` ou
+> `ECONNREFUSED`. Mesma doença que `mensagemComCausa` já tinha curado no log, em
+> outro arquivo; `descreverErro` passou a ser exportado e usado nos dois.
+>
+> **4. O worker mantinha a cadência de fila vazia contra um banco fora do ar.**
+> 240 entradas de log por hora, idênticas. Backoff exponencial com teto de 1 min,
+> e registro só na 1ª e nas potências de dois: menos de 15 linhas na primeira
+> hora, sem nunca calar de vez.
+>
+> **5. Não havia como perguntar ao contêiner o que ele enxerga.** `scripts/db-doctor.mjs`
+> responde camada a camada — DNS → TCP → handshake → schema — e nomeia a que
+> quebrou. O `pg` reporta as quatro com a MESMA frase.
+
+| O que | Resultado **medido** |
+|---|---|
+| Vivacidade com banco inalcançável | `GET /api/health?probe=live` → **200 `{"status":"live"}`** com `DATABASE_URL` apontando para um IP que descarta pacote. Era o 503 que revertia o deploy |
+| Prontidão, no mesmo processo | **503**, `"db":"unreachable"` — preservada de propósito |
+| Aviso de subida | `Banco INALCANÇÁVEL em 10.255.255.1:5432/starguard: … ← Connection terminated due to connection timeout ← Connection terminated unexpectedly` — antes: silêncio |
+| Corrente de `cause` no que é publicado | Aparece `[28P01] password authentication failed` no lugar do SQL; a senha da URL some (`postgres://***@db-interno:5432`) e o **host sobrevive** |
+| `db-doctor`, três modos exercitados | `ENOTFOUND` → "não está na rede"; `ECONNREFUSED` → "nada escutando na porta"; sem resposta em 3 s → "pacote DESCARTADO", com `nc -vz` sugerido |
+| Ruído do worker | ~70 tentativas e **<15 linhas** na 1ª hora (eram ~240 tentativas e 240 linhas) |
+| Suíte | `typecheck` 0 erros · `lint` **0 erros** (12 avisos, todos anteriores) · **912 testes + 2 skipped, 61 arquivos** (eram 902) |
+| Build de produção | `next build` OK |
+
+**O que NÃO foi verificado, e por quê**
+
+> O deploy em si não subiu: juntar aplicação e banco na mesma rede Docker do
+> Coolify é operação no servidor, com SSH, e não há como fazê-la daqui. É a
+> exceção legítima da regra "resolva, não registre" — depende de acesso que não
+> tenho. O procedimento, com os comandos de conferência e a prova sem redeploy
+> (`docker network connect` + `db-doctor`), está no [`DEPLOY.md`](DEPLOY.md).
 
 ## As 8 pendências que sobraram, e o que cada uma precisa de você
 

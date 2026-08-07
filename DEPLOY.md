@@ -1,0 +1,191 @@
+# Deploy — servidor dedicado (Coolify)
+
+Substitui o `render.yaml`, apagado em 07/08/2026. A produção é
+`https://starguard.starbridge.com.br`, num servidor dedicado (`sv5`) com
+Coolify, recurso do tipo **Dockerfile**.
+
+O que este arquivo é: a lista do que o serviço PRECISA encontrar, e o
+procedimento para quando ele não sobe. Não é fonte da verdade do que está no ar
+— variável mudada no painel não chega aqui sozinha.
+
+---
+
+## O que mudou ao sair da PaaS
+
+- **`PORT` não é mais injetada pela plataforma.** A imagem traz `3003`; o proxy
+  reverso aponta para ela.
+- **O TLS é do seu proxy**, não da plataforma.
+- **`TRUSTED_PROXY_HOPS`** (padrão `1`) é quantos proxies existem à frente.
+  nginx sozinho = 1; nginx + Cloudflare = 2. Errar esse número faz o rate limit
+  e o log de auditoria enxergarem o IP errado — o do proxy, igual para todo
+  mundo.
+- **As migrações não rodam sozinhas.** Ver `RUN_MIGRATIONS` abaixo.
+
+---
+
+## Variáveis
+
+Segredo nenhum mora no repositório: tudo abaixo é definido no painel do
+recurso. Quem gera as chaves: `npm run gen:keys`.
+
+### Sem estas o serviço não funciona
+
+| Variável | O que acontece sem ela |
+|---|---|
+| `DATABASE_URL` | Nada funciona: login, fila e análises falham. Use o **endereço interno** do banco (ver "Rede" abaixo) |
+| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` | O entrypoint gera efêmeras e **as sessões caem a cada deploy** |
+| `COOKIE_SECRET` | idem |
+| `TOKEN_ENC_KEY` | Pior: é a chave AES dos tokens do GitHub gravados no banco. Trocá-la torna **ilegível o que já está cifrado** |
+| `AUDIT_IP_SALT` | O log de auditoria perde a capacidade de correlacionar |
+
+### Operação
+
+| Variável | Valor | Por quê |
+|---|---|---|
+| `NODE_ENV` | `production` | |
+| `PORT` | `3003` | O padrão da imagem; declarada para o proxy não adivinhar |
+| `SESSION_SECURE` | `true` | Cookies só por HTTPS |
+| `TRUSTED_PROXY_HOPS` | `1` (ou `2` com Cloudflare) | Ver acima |
+| `RUN_MIGRATIONS` | `true` | **Sem isto o banco fica vazio** e o login recusa com 503 |
+| `QUEUE_WORKER` | `on` | O worker sobe junto com o web. Com worker dedicado, `off` aqui |
+| `SAST_RULES` | `/opt/opengrep-rules` | Regras embutidas na imagem; sem isto o SAST baixa do registro remoto a cada análise |
+
+### IA e GitHub App
+
+| Variável | Nota |
+|---|---|
+| `ANTHROPIC_API_KEY` | A chave do servidor — é ela que atende `/api/ai/complete`, e por isso quem usa a extensão não precisa de chave própria |
+| `AI_MONTHLY_BUDGET_USD` | `50` |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | Sem os três, `/api/github/webhook` responde 503 e os gatilhos não existem |
+| `WEBHOOK_MAX_FIXES` / `WEBHOOK_MIN_SEVERITY` | `5` / `high` |
+
+### O tamanho da caixa — `AUDITORIA.md#ARQ-15`
+
+Estes números não são zelo. Dentro do contêiner, `os.cpus()` conta os núcleos do
+HOSPEDEIRO: o scan abria oito processos do opengrep, estourava a memória e
+**matava a instância no meio da requisição**.
+
+| Variável | Valor | |
+|---|---|---|
+| `SAST_JOBS` | `1` | |
+| `SAST_MAX_MEMORY_MB` | `200` | |
+| `SCAN_MAX_FILES` | `800` | Teto do que UMA requisição carrega |
+| `SCAN_MAX_BYTES` | `8388608` | idem |
+| `NODE_OPTIONS` | `--max-old-space-size=256` | O Node divide a caixa com dois scanners |
+
+Ao subir de plano, suba estes juntos — senão a caixa cresce e o trabalho não.
+
+---
+
+## Rede: o app precisa alcançar o Postgres
+
+**É aqui que o deploy de 07/08/2026 quebrou**, e o sintoma não menciona banco
+nenhum — só `503` no healthcheck e `rolling back to the old container`.
+
+No Coolify, cada recurso vai para a sua própria rede Docker. Aplicação e banco
+em redes diferentes não se enxergam: o nome do serviço não resolve, ou resolve e
+o pacote é descartado. O `pg` reporta os dois casos com a mesma frase —
+`Connection terminated due to connection timeout`.
+
+**Confirme antes de mexer** (no host, via SSH):
+
+```bash
+docker ps --format '{{.Names}}'          # ache os dois nomes
+docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' <app> <postgres>
+```
+
+Se as duas linhas não tiverem rede em comum, é isto.
+
+**Prove sem redeploy** — junte na mão e pergunte ao próprio app:
+
+```bash
+docker network connect <rede-do-postgres> <app>
+docker exec -it <app> node scripts/db-doctor.mjs
+```
+
+O `db-doctor` responde camada a camada (DNS → TCP → handshake → schema) e diz
+qual delas quebrou. Ver o cabeçalho de [`scripts/db-doctor.mjs`](scripts/db-doctor.mjs).
+
+**Conserto permanente**, para sobreviver ao próximo deploy — o `docker network
+connect` acima é temporário e some quando o contêiner é recriado:
+
+1. No recurso da aplicação, em *Advanced*, ligue **Connect To Predefined
+   Network**. Faça o mesmo no recurso do Postgres.
+2. `DATABASE_URL` usa o endereço **interno** que o Coolify mostra na página do
+   banco (*Postgres URL (internal)*) — não o público, não `localhost`.
+3. Redeploy, e confira com o `db-doctor` de novo.
+
+> `localhost` numa `DATABASE_URL` dentro de contêiner aponta para o **próprio
+> contêiner**. Nunca é o que se quer aqui.
+
+---
+
+## Healthcheck: vivacidade, não prontidão
+
+O `HEALTHCHECK` do Dockerfile bate em **`/api/health?probe=live`**, que não toca
+no banco e responde 200 enquanto o processo servir HTTP.
+
+Isso é deliberado, e a razão é concreta. `/api/health` (sem parâmetro) responde
+por prontidão: **503** enquanto o banco não estiver alcançável e migrado. Como
+sinal para quem distribui tráfego, está certo. Como portão do rolling update do
+Coolify, prende: contêiner que não fica saudável é revertido, o contêiner velho
+tem o mesmo problema — porque o problema não está na imagem — e **enquanto o
+banco estiver fora, nenhum deploy entra, nem o que conserta a configuração**.
+
+O mesmo laço fecha em servidor novo com o banco de pé: schema não migrado ⇒ 503
+⇒ o primeiro deploy nunca sobe. Daí o `RUN_MIGRATIONS=true` na tabela acima.
+
+Banco fora do ar continua visível — só não derruba mais o deploy:
+
+- `GET /api/health` → `"db": "unreachable"` e a mensagem
+- log do boot → uma linha nomeando o `host:porta` que não respondeu
+- `starguard doctor`, no terminal
+
+Se apontar o healthcheck de volta para a prontidão, o `--timeout` do
+`HEALTHCHECK` tem de ser MAIOR que `HEALTH_TIMEOUT_MS` (8 s). Está fixado em
+`tests/health-scanners.test.ts`.
+
+---
+
+## Quando não sobe: por onde começar
+
+```bash
+# 1. o processo subiu?
+docker logs <app> | grep entrypoint
+#    "[entrypoint] StarGuard subindo em 0.0.0.0:3003" = subiu.
+
+# 2. ele alcança o banco?
+docker exec -it <app> node scripts/db-doctor.mjs
+
+# 3. o schema existe?
+#    O db-doctor responde na etapa 5. Se nunca rodou:
+docker exec -it <app> node scripts/migrate.mjs
+#    E ponha RUN_MIGRATIONS=true para não repetir isto no próximo deploy.
+
+# 4. o que a prontidão diz, por dentro?
+docker exec -it <app> curl -s localhost:3003/api/health | head -40
+```
+
+Sintomas e o que significam:
+
+| No log | Significa |
+|---|---|
+| `worker.loop.failed … connection timeout` | Pacote DESCARTADO: rede errada ou firewall. Não é o Postgres no chão |
+| `worker.loop.failed … ECONNREFUSED` | A máquina respondeu: nada escuta nessa porta |
+| `Banco INALCANÇÁVEL em host:porta` (no boot) | O mesmo, já com o endereço nomeado |
+| `Banco desatualizado: N migração(ões) pendente(s)` | `RUN_MIGRATIONS=true`, ou `node scripts/migrate.mjs` |
+| `AVISO: chaves ausentes no ambiente` | Faltam `JWT_*`/`COOKIE_SECRET`/`TOKEN_ENC_KEY`. As sessões vão cair no próximo deploy |
+
+O worker repete o erro com backoff (1×, 2×, 4×… até 1 min) e só registra a 1ª e
+as potências de dois. **Se você vê poucas linhas, não quer dizer que passou** —
+quer dizer que ele parou de gritar. Ver `lib/worker.ts`.
+
+---
+
+## Voltar para uma PaaS, ou subir um ambiente de teste
+
+Todo o necessário está aqui: `runtime: docker` apontando para o `Dockerfile`
+(nunca buildpack de Node — ele instala dependências npm e mais nada, e o
+resultado é um servidor **sem trivy**, com o scan de dependências rodando,
+achando nada e parecendo repositório limpo), `healthCheckPath: /api/health` e a
+lista de variáveis acima.

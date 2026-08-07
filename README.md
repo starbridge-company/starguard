@@ -44,11 +44,10 @@ Acesse **http://localhost:3000** → login → onboarding → painel → relató
 >
 > `PORT` continua mandando: quem hospeda pode injetar a sua e ela vence o padrão.
 >
-> **Produção:** `https://starguard.starbridge.com.br` (servidor dedicado). É o
-> endereço que a extensão do VS Code e o `starguard` do terminal usam por
-> padrão — `starguard.server` e `STARGUARD_SERVER` cobrem quem auto-hospeda.
-> Atrás de proxy reverso, confira `TRUSTED_PROXY_HOPS` (padrão 1): ele decide
-> qual IP o rate limit e o log de auditoria enxergam.
+> **Produção:** `https://starguard.starbridge.com.br` (servidor dedicado, com
+> Coolify). É o endereço que a extensão do VS Code e o `starguard` do terminal
+> usam por padrão — `starguard.server` e `STARGUARD_SERVER` cobrem quem
+> auto-hospeda. Variáveis, rede e o que fazer quando não sobe: **[DEPLOY.md](DEPLOY.md)**.
 
 **Credenciais demo** (já preenchidas na tela de login):
 

@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # ============================================================
-# StarGuard — imagem de produção (Render ou qualquer host Docker).
+# StarGuard — imagem de produção. Roda em qualquer host Docker; a produção é um
+# servidor dedicado com Coolify. O runbook (variáveis, rede, quando não sobe)
+# está em DEPLOY.md.
 #
 # Por que NÃO usamos `output: "standalone"`: a Fase 4 usa o Claude Agent SDK,
 # que faz spawn de um binário próprio de dentro do node_modules, e `pg`/`argon2`
@@ -180,35 +182,49 @@ USER node
 RUN command -v opengrep >/dev/null 2>&1 && opengrep --version >/dev/null 2>&1 \
       || echo "AVISO: opengrep indisponivel — SAST cai em erro explicativo em runtime."
 
-# A porta do deploy. Continua sendo `$PORT`: quem hospeda (Render, Fly, Compose)
-# injeta a sua e ela vence este padrão — o `EXPOSE` é documentação da imagem,
-# não amarra. O HEALTHCHECK abaixo lê a variável, então acompanha sozinho.
+# A porta do deploy. Continua sendo `$PORT`: quem hospeda (Coolify, Compose, um
+# `docker run` à mão) pode injetar a sua e ela vence este padrão — o `EXPOSE` é
+# documentação da imagem, não amarra. O HEALTHCHECK abaixo lê a variável, então
+# acompanha sozinho.
 EXPOSE 3003
 
 # Clones descartáveis da Fase 3/4 vão para o tmpdir do SO.
 ENV TMPDIR=/tmp
 
-# ---- O timeout daqui TEM de ser maior que o prazo interno da rota ----
+# ---- `?probe=live`: o healthcheck pergunta VIVACIDADE, não prontidão ----
 #
-# Estes dois números são acoplados, e estavam invertidos. `/api/health` tem
-# prazo próprio de 8 s (`HEALTH_TIMEOUT_MS`, em `app/api/health/route.ts`): com
-# o banco pendurado ele ESPERA até esse limite para então responder o que
-# conseguiu medir. Com `--timeout=5s`, o `curl` era morto aos 5 — antes de a
-# rota responder — e a checagem não tinha como passar. Nunca.
+# `/api/health` sem parâmetro responde por PRONTIDÃO — 503 enquanto o banco não
+# estiver alcançável e migrado. É o certo para quem decide mandar tráfego, e é o
+# que o `starguard doctor` e a extensão consultam. É o ERRADO aqui: o Coolify
+# usa o healthcheck do Docker como portão do rolling update, e contêiner que não
+# fica saudável é REVERTIDO.
 #
-# O sintoma no Coolify é exatamente esse, e não menciona banco nenhum:
+# Foi o que derrubou o deploy de 07/08/2026, e a saída não menciona banco:
 #
-#   Attempt 1 of 3 | Healthcheck logs: curl: (22) … returned error: 503
-#   Attempt 2 of 3 | Healthcheck logs: Health check exceeded timeout (5s)
+#   ✓ Ready in 307ms                        <- o processo SUBIU
+#   worker.loop.failed … connection timeout  <- e não alcança o Postgres
+#   Attempt 1..5 of 5 | curl: (22) … returned error: 503
 #   New container is not healthy, rolling back to the old container.
 #
-# 15 s dá folga sobre os 8 s e continua curto para um health check. O
-# `start-period` sobe junto: numa máquina fria, o Next e a primeira conexão ao
-# banco não cabem em 40 s com sobra.
+# Reverter não conserta: o contêiner velho tem o mesmo problema, porque o
+# problema não está na imagem. E prende: enquanto o banco estiver fora, nenhum
+# deploy entra — nem o que conserta a configuração. O mesmo laço fecha em
+# servidor NOVO, com o banco de pé: schema não migrado ⇒ 503 ⇒ o primeiro
+# deploy nunca sobe.
 #
-# Se você mudar `HEALTH_TIMEOUT_MS`, mude este `--timeout` junto — sempre para
-# um valor MAIOR.
+# A sonda de vivacidade não toca no banco: ela responde "este processo está
+# servindo HTTP", que é a única pergunta que o healthcheck do contêiner sabe
+# usar. Banco fora do ar continua visível — em `/api/health`, no log do boot e
+# no `doctor` — só não derruba mais o deploy.
+#
+# ---- E o `--timeout` continua tendo de ser maior que o prazo da rota ----
+#
+# Vale para quem apontar este healthcheck de volta para a prontidão: a rota tem
+# prazo próprio de 8 s (`HEALTH_TIMEOUT_MS`) e ESPERA até lá para responder o
+# que conseguiu medir. Com `--timeout=5s` o `curl` morria aos 5, antes da
+# resposta, e a checagem não tinha como passar. Nunca. Se mudar
+# `HEALTH_TIMEOUT_MS`, mude este número junto — sempre para um MAIOR.
 HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
-  CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
+  CMD curl -fsS "http://127.0.0.1:${PORT}/api/health?probe=live" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]

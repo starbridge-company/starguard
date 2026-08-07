@@ -1,6 +1,7 @@
 # ============================================================
 # Contexto de build — o que NÃO entra na imagem.
-# .env.local fica de fora: segredos vêm do ambiente (Render), nunca da camada.
+# .env.local fica de fora: segredos vêm do ambiente (painel do host), nunca da
+# camada da imagem.
 # ============================================================
 node_modules
 .next

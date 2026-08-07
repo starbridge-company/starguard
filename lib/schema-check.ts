@@ -12,6 +12,7 @@
 // ============================================================
 import "server-only";
 import { sql } from "drizzle-orm";
+import { descreverErro } from "@starguard/core/logger";
 import { db } from "@/lib/db";
 import journal from "@/db/migrations/meta/_journal.json";
 
@@ -121,12 +122,20 @@ export async function checkSchema(force = false): Promise<SchemaStatus> {
     } else {
       // Banco fora do ar é diferente de banco atrasado: não afirmamos nada
       // sobre o schema, e quem chama não deve derrubar o processo por isto.
+      //
+      // `descreverErro` e não `e.message`: o Drizzle embrulha a falha num erro
+      // cuja mensagem é o SQL, e guarda o motivo REAL em `cause`. Sem seguir a
+      // corrente, esta rota publicava "Failed query: select created_at from
+      // drizzle.__drizzle_migrations …" — a única parte inútil — no lugar de
+      // `password authentication failed` ou `ECONNREFUSED`, que é o que decide
+      // o conserto. Vem redigido: um erro de conexão do `pg` carrega a URL do
+      // banco com senha, e este texto vai para a resposta HTTP.
       status = {
         ok: false,
         expected: ENTRIES.length,
         applied: 0,
         pending: [],
-        error: e instanceof Error ? e.message : String(e),
+        error: descreverErro(e),
       };
     }
   }

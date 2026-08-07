@@ -5,8 +5,8 @@
 //   Redis    (opcional) — via API REST do Upstash, quando RATE_LIMIT_REDIS_URL
 //                         e RATE_LIMIT_REDIS_TOKEN estão definidos.
 //
-// Com mais de uma instância no Render, o balde em memória vive por processo:
-// o limite efetivo multiplica pelo número de instâncias e fica imprevisível.
+// Com mais de uma instância, o balde em memória vive por processo: o limite
+// efetivo multiplica pelo número de instâncias e fica imprevisível.
 // Ver AUDITORIA.md#SEC-08 e #PEND-01.
 //
 // Escolha do protocolo REST em vez de um cliente TCP: funciona no runtime EDGE
@@ -174,8 +174,9 @@ export function rateLimitBackend(): "redis" | "memory" {
  * enchendo o balde dela. Proxies confiáveis ACRESCENTAM o IP real à direita —
  * por isso contamos a partir do fim.
  *
- * TRUSTED_PROXY_HOPS = quantos proxies confiáveis existem à frente da app
- * (Render/Vercel/Cloudflare = 1). 0 desliga a leitura do X-Forwarded-For.
+ * TRUSTED_PROXY_HOPS = quantos proxies confiáveis existem à frente da app.
+ * nginx sozinho = 1; nginx + Cloudflare = 2. 0 desliga a leitura do
+ * X-Forwarded-For. Ver DEPLOY.md.
  */
 const TRUSTED_HOPS = Math.max(0, Number(process.env.TRUSTED_PROXY_HOPS ?? 1));
 

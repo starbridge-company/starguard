@@ -185,3 +185,82 @@ describe("banco vazio é schema ATRASADO, não banco inalcançável", () => {
     expect(MIGRATE_HINT).toContain("db:migrate");
   });
 });
+
+// ============================================================
+// O erro publicado é a CAUSA, não a consulta que falhou
+// ============================================================
+//
+// O `status.error` daqui viaja longe: vira `message` em `/api/health`, vira a
+// linha de aviso da subida, e é o que o `starguard doctor` mostra. Ele guardava
+// `e.message` — e o Drizzle embrulha toda falha de consulta num erro cuja
+// mensagem é o SQL, com o motivo real em `cause`.
+//
+// O resultado, medido contra a produção de 07/08/2026:
+//
+//   "message": "Não foi possível verificar o schema: Failed query: select
+//    created_at from drizzle.__drizzle_migrations order by created_at params: "
+//
+// Duas linhas de SQL para dizer "não deu", e nada sobre por quê. Credencial
+// errada, banco fora do ar e firewall saíam com o MESMO texto — e são três
+// consertos diferentes. É a mesma doença que `mensagemComCausa` já tinha
+// curado no log; faltava aqui.
+describe("o erro publicado traz a causa, não o SQL", () => {
+  const comoDrizzleEmbrulha = (code: string, msg: string) =>
+    Object.assign(
+      new Error(
+        "Failed query: select created_at from drizzle.__drizzle_migrations order by created_at\nparams: "
+      ),
+      { cause: Object.assign(new Error(msg), { code }) }
+    );
+
+  it("banco fora do ar: o ECONNREFUSED aparece", async () => {
+    execute.mockRejectedValue(
+      comoDrizzleEmbrulha("ECONNREFUSED", "connect ECONNREFUSED 10.0.0.5:5432")
+    );
+
+    const s = await checkSchema(true);
+
+    expect(s.error).toContain("ECONNREFUSED 10.0.0.5:5432");
+  });
+
+  it("credencial errada: a frase do Postgres aparece, com o código", async () => {
+    // `[28P01]` vale mais que a frase: a frase muda entre versões do Postgres,
+    // o código não.
+    execute.mockRejectedValue(
+      comoDrizzleEmbrulha("28P01", 'password authentication failed for user "sg"')
+    );
+
+    const s = await checkSchema(true);
+
+    expect(s.error).toContain("28P01");
+    expect(s.error).toContain("password authentication failed");
+  });
+
+  it("os dois casos deixam de ser INDISTINGUÍVEIS — era o defeito", async () => {
+    execute.mockRejectedValue(comoDrizzleEmbrulha("ECONNREFUSED", "connect ECONNREFUSED"));
+    const fora = (await checkSchema(true)).error;
+
+    execute.mockRejectedValue(comoDrizzleEmbrulha("28P01", "password authentication failed"));
+    const credencial = (await checkSchema(true)).error;
+
+    expect(fora).not.toBe(credencial);
+  });
+
+  it("NÃO vaza a senha: este texto vai para a resposta HTTP", async () => {
+    // O erro de conexão do `pg` carrega a string de conexão inteira. Seguir a
+    // corrente de `cause` sem redigir teria ampliado o vazamento em vez de
+    // consertar o diagnóstico. Ver `redact.ts`.
+    execute.mockRejectedValue(
+      comoDrizzleEmbrulha(
+        "ECONNREFUSED",
+        "connect ECONNREFUSED: postgres://sg:senha-secreta@db-interno:5432/starguard"
+      )
+    );
+
+    const s = await checkSchema(true);
+
+    expect(s.error).not.toContain("senha-secreta");
+    // Mas o HOST sobrevive à redação — é justamente o que se quer saber.
+    expect(s.error).toContain("db-interno:5432");
+  });
+});
