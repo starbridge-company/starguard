@@ -227,6 +227,19 @@ export async function POST(req: NextRequest) {
     return jsonError(400, "Nenhum caminho de arquivo utilizável.", "err.badRequest");
   }
 
+  // ---- A ÚNICA referência ao conteúdo passa a ser `aprovados` ----
+  //
+  // `prepararDiretorio` solta cada string assim que ela chega ao disco, para o
+  // pico deixar de ser "o pacote inteiro em memória" e virar "um arquivo de cada
+  // vez". Isso só vale se ninguém MAIS estiver segurando as mesmas strings — e
+  // `corpo.files` estava, do começo ao fim da requisição, porque `corpo` vive
+  // até o `return`. Duas referências para o mesmo objeto, e o coletor não pode
+  // recuperar nada enquanto uma delas existir: sem esta linha a otimização do
+  // outro lado é teatro.
+  //
+  // `bytes` e `files.length` já foram medidos acima; nada abaixo lê `corpo`.
+  if (corpo) corpo.files = undefined;
+
   const locale = normalizeLocale(corpo?.locale);
   const { dir, escritos } = await prepararDiretorio(aprovados);
   if (escritos === 0) {
@@ -348,22 +361,36 @@ export async function GET(req: NextRequest) {
   const { sessao, erro } = await porteiro(req);
   if (erro) return erro;
 
+  const id = req.nextUrl.searchParams.get("job");
+
+  // ---- O BATIMENTO VEM ANTES DA VARREDURA ----
+  //
+  // `recolherAbandonados()` era a primeira linha desta rota, e `tocarJob` a
+  // décima. Nessa ordem, uma consulta que chegasse um segundo depois de
+  // `ABANDONO_MS` **matava o próprio job que ela vinha buscar**: a varredura via
+  // o silêncio, recolhia, e o `acharJob` logo abaixo devolvia 404. O cliente
+  // então dizia "O scan foi perdido pelo servidor (ele pode ter reiniciado)" —
+  // uma frase falsa duas vezes, porque o servidor não reiniciou e quem perdeu o
+  // scan foi esta requisição, que era exatamente a prova de que alguém ainda o
+  // queria.
+  //
+  // Basta uma janela de rede fechada, uma máquina que suspendeu ou um proxy que
+  // engoliu algumas consultas para o relógio passar de um minuto. O desenho já
+  // previa isso do lado do cliente (ele tolera consultas perdidas em vez de
+  // jogar fora o scan); o servidor é que desfazia a tolerância antes de ela
+  // poder valer.
+  const job = id ? acharJob(id, sessao!.sub) : undefined;
+  if (job) tocarJob(job);
+
   recolherAbandonados();
 
-  const id = req.nextUrl.searchParams.get("job");
   if (!id) {
     // Sem job: os tetos. É o que permite ao cliente empacotar exatamente o que
     // cabe, em vez de mandar demais e ser recusado.
     return jsonOk({ maxFiles: MAX_FILES, maxBytes: MAX_BYTES, active: jobsAtivos() });
   }
 
-  const job = acharJob(id, sessao!.sub);
   if (!job) return jsonError(404, "Scan não encontrado.", "err.notFound");
-
-  // ESTA linha é o batimento cardíaco do job: consultar é dizer "ainda quero".
-  // Sem ela, o recolhimento por abandono mataria um scan que está sendo
-  // acompanhado — e o defeito seria o oposto do que ele conserta.
-  tocarJob(job);
 
   if (job.status === "queued") {
     return jsonOk({ status: "queued", position: posicaoNaFila(job.id) });

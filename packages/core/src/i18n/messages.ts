@@ -892,6 +892,28 @@ export const PT_BR = {
   // silencioso passa por completo, e numa ferramenta de segurança isso é o
   // pior tipo de mentira. Ver UX-15.
   "scan.truncated": "{n} arquivos ficaram fora do envio (teto do servidor)",
+  // ---- O teto de tempo do scanner, dito com todas as letras ----
+  //
+  // Quando o `execFile` mata o scanner no teto, o Node devolve `killed: true`,
+  // `stdout` VAZIO e a mensagem `Command failed: <linha de comando inteira>` —
+  // medido. Cortada em 200 caracteres, o que chegava à tela era o começo de uma
+  // linha de comando e nada mais: nem a palavra "tempo", nem quanto se esperou,
+  // nem o que fazer. "Demora muito e quebra" era exatamente isto, e a mensagem
+  // não dava a quem lê nenhuma chance de descobrir por quê.
+  // ---- Resultado grande demais para a caixa ----
+  //
+  // Não é falha do scanner e não pode sair com a cara de uma: o scan ACONTECEU,
+  // o que não cabe é o resultado. Um JSON de N bytes custa 3 a 4× N no V8
+  // (string UTF-16 + grafo do parse), e passar disso derrubava o processo — que
+  // levava junto as requisições de todo mundo.
+  "scan.outputTooLarge":
+    "O scan produziu {mb} MB de resultado, acima do teto de {max} MB desta máquina. Quase sempre é um arquivo gerado (bundle, minificado, dump) sendo escaneado: exclua-o do projeto, ou aumente SCAN_MAX_OUTPUT_MB se a máquina comportar.",
+  // Cortar é defesa; cortar em SILÊNCIO é o UX-15 no lugar mais caro — um
+  // relatório menor com cara de completo. Corta-se pelos mais graves e diz-se.
+  "scan.findingsCapped":
+    "{n} achados a mais ficaram de fora (teto de {max}) — ficaram os mais graves",
+  "scan.timedOut":
+    "O {bin} passou de {s}s escaneando e foi interrompido — nenhum achado foi produzido. Não é defeito do scanner: este projeto é grande para a máquina que o roda. Dê mais CPU ao servidor (SAST_JOBS/SCAN_SLOTS), reduza o escopo, ou aumente {env}.",
   // Sem versão resolvida o Trivy não acha NADA, e "0 vulnerabilidades" passa a
   // significar "não deu para procurar". Medido: só package.json → 0 achados;
   // com package-lock.json → 9. Ver `bundle.ts`.
@@ -1991,6 +2013,12 @@ const EN: Record<MessageKey, string> = {
   "scan.scanningLocal": "scanning the code…",
   "scan.slotQueued": "waiting for a scanner slot (#{n})",
   "scan.truncated": "{n} files were left out of the upload (server limit)",
+  "scan.outputTooLarge":
+    "The scan produced {mb} MB of results, above this machine's {max} MB limit. It is almost always a generated file (bundle, minified, dump) being scanned: exclude it from the project, or raise SCAN_MAX_OUTPUT_MB if the machine can take it.",
+  "scan.findingsCapped":
+    "{n} further findings were left out (limit of {max}) — the most severe ones were kept",
+  "scan.timedOut":
+    "{bin} spent more than {s}s scanning and was stopped — no findings were produced. This is not a scanner defect: the project is large for the machine running it. Give the server more CPU (SAST_JOBS/SCAN_SLOTS), narrow the scope, or raise {env}.",
   "scan.noLockfile":
     "no lockfile found (package-lock.json, yarn.lock, poetry.lock…) — the dependency scanner cannot resolve versions, so this result does NOT mean there are no vulnerabilities",
 
@@ -3057,6 +3085,12 @@ const ES: Record<MessageKey, string> = {
   "scan.scanningLocal": "escaneando el código…",
   "scan.slotQueued": "esperando un puesto de escáner (nº {n})",
   "scan.truncated": "{n} archivos quedaron fuera del envío (límite del servidor)",
+  "scan.outputTooLarge":
+    "El escaneo produjo {mb} MB de resultados, por encima del límite de {max} MB de esta máquina. Casi siempre es un archivo generado (bundle, minificado, volcado) que se está escaneando: exclúyelo del proyecto, o aumenta SCAN_MAX_OUTPUT_MB si la máquina lo soporta.",
+  "scan.findingsCapped":
+    "{n} hallazgos más quedaron fuera (límite de {max}) — se conservaron los más graves",
+  "scan.timedOut":
+    "{bin} superó los {s}s escaneando y fue interrumpido — no se produjo ningún hallazgo. No es un defecto del escáner: el proyecto es grande para la máquina que lo ejecuta. Da más CPU al servidor (SAST_JOBS/SCAN_SLOTS), reduce el alcance o aumenta {env}.",
   "scan.noLockfile":
     "sin archivo de versiones fijadas (package-lock.json, yarn.lock, poetry.lock…) — el escáner de dependencias no puede resolver las versiones, y este resultado NO significa ausencia de vulnerabilidades",
 

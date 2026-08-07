@@ -50,6 +50,7 @@ import { audit } from "@/lib/auth";
 import {
   MSG_ESCANEANDO_LOCAL,
   MSG_VAGA_NA_FILA,
+  SILENCIO_TOLERADO_MS,
 } from "@starguard/core/scan-transport";
 import type { Locale } from "@/lib/i18n/config";
 
@@ -91,11 +92,22 @@ export interface ScanJob {
 /**
  * Sem consulta por este tempo, o job é considerado ABANDONADO.
  *
- * Generoso em relação ao intervalo de polling do cliente (que cresce até 5 s),
- * porque a rede de quem usa nem sempre colabora: um minuto sem notícia é
- * suspensão de máquina, queda de Wi-Fi ou aba fechada, não latência.
+ * **Derivado da tolerância do CLIENTE, e não escolhido aqui.** Eram 60 s
+ * escritos à mão, contra um cliente que tolera até `SILENCIO_TOLERADO_MS`
+ * (5 consultas × 20 s = 100 s) de silêncio antes de desistir do job. Os dois
+ * números moram em pacotes diferentes e ninguém os leu lado a lado — o resultado
+ * é que a tolerância do cliente nunca chegou a valer: com 60 s o servidor sempre
+ * recolhia primeiro, e o que a pessoa via era
+ * "O scan foi perdido pelo servidor (ele pode ter reiniciado)" depois de dez
+ * minutos de scan que estava indo bem.
+ *
+ * A margem de 2× em cima do que o cliente tolera é deliberada: recolher cedo
+ * demais joga fora trabalho caro (um SAST de repositório grande custa minutos de
+ * CPU), e recolher tarde demais custa uma vaga ociosa por alguns minutos. O
+ * segundo erro é muito mais barato que o primeiro.
  */
-const ABANDONO_MS = Number(process.env.SCAN_JOB_IDLE_MS) || 60_000;
+const ABANDONO_MS =
+  Number(process.env.SCAN_JOB_IDLE_MS) || Math.max(60_000, SILENCIO_TOLERADO_MS * 2);
 
 /**
  * Quanto tempo um resultado pronto fica disponível para ser buscado.
@@ -182,6 +194,19 @@ export async function prepararDiretorio(
     await mkdir(join(destino, ".."), { recursive: true });
     await writeFile(destino, f.content, "utf8");
     escritos++;
+    // ---- O que já está no disco não precisa continuar na memória ----
+    //
+    // O corpo de um envio de SAST chega aqui como 800 strings somando até 8 MB —
+    // que no V8 são ~16 MB em UTF-16, e que até agora ficavam TODAS vivas até o
+    // laço terminar, ao lado da cópia que acabara de ser escrita em disco. O
+    // pico era o pacote inteiro duas vezes, com dois envios podendo coincidir.
+    //
+    // Soltar a referência arquivo a arquivo transforma esse pico em "um arquivo
+    // de cada vez": o coletor recupera cada string assim que ela aterrissa. Só
+    // funciona porque a rota larga o `corpo.files` antes de chamar aqui — se
+    // sobrasse uma segunda referência, a string continuaria viva e isto seria
+    // teatro. Ver `app/api/scan/route.ts`.
+    f.content = "";
   }
   return { dir, escritos };
 }
@@ -263,6 +288,11 @@ async function executar(job: ScanJob): Promise<void> {
     // previsão, indistinguível de travado.
     const opcoes = {
       signal: job.abortar.signal,
+      // O idioma de quem PEDIU, e não o do servidor: o erro que `runSast` lança
+      // é gravado e exibido como está (ver CLAUDE.md — texto do JSONB sai já
+      // traduzido). Sem isto, um teto estourado chegava em português para quem
+      // usa o editor em inglês.
+      locale: job.locale,
       report: (chave: string, valores?: Record<string, string | number>) => {
         // As CONSTANTES do núcleo, e não literais repetidas aqui.
         //
@@ -413,14 +443,34 @@ export function recolherAbandonados(): { abandonados: number; vencidos: number }
   return { abandonados, vencidos };
 }
 
-/** Mantém no máximo `POR_PESSOA` jobs vivos por dono, derrubando o mais velho. */
+/**
+ * Mantém no máximo `POR_PESSOA` jobs vivos por dono, derrubando o ABANDONADO.
+ *
+ * A ordem era por `criadoEm` — o mais VELHO caía primeiro — e isso derrubava o
+ * job errado no caso mais comum de todos. Quando o envio do `sast` estoura o
+ * teto de 120 s numa conexão doméstica, o cliente repete o POST; o primeiro
+ * envio já criou um job do lado de cá, e o segundo cria outro. Com o `sca` esse
+ * é o terceiro — e o mais velho, o que o critério antigo escolhia para morrer,
+ * é justamente o que o cliente está acompanhando. A pessoa recebia
+ * "O scan foi perdido pelo servidor" por causa de uma retentativa do próprio
+ * cliente dela.
+ *
+ * `visitadoEm` responde a pergunta certa: **quem aqui ninguém está esperando?**
+ * O órfão de um envio repetido nunca é consultado, e é ele quem cai. O critério
+ * de idade sobra só para o desempate.
+ */
 function limitarPorPessoa(userId: string): void {
   const meus = [...jobs.values()]
     .filter((j) => j.userId === userId && (j.status === "queued" || j.status === "running"))
-    .sort((a, b) => a.criadoEm - b.criadoEm);
+    .sort((a, b) => a.visitadoEm - b.visitadoEm || a.criadoEm - b.criadoEm);
   while (meus.length >= POR_PESSOA) {
-    const velho = meus.shift()!;
-    cancelarJob(velho);
+    const esquecido = meus.shift()!;
+    audit(
+      "scan.replaced",
+      { analyzer: esquecido.analyzer, semConsultaMs: Date.now() - esquecido.visitadoEm },
+      userId
+    );
+    cancelarJob(esquecido);
   }
 }
 

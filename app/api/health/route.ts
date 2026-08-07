@@ -2,6 +2,7 @@ import { jsonOk } from "@/lib/http";
 import { checkSchema, schemaMessage, MIGRATE_HINT } from "@/lib/schema-check";
 import { checkBinaries, type BinaryStatus } from "@starguard/core/binaries";
 import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot";
+import { limitesDaCaixa } from "@starguard/core/container";
 import { jobsAtivos, recolherAbandonados, totalDeJobs } from "@/lib/scan-jobs";
 
 export const runtime = "nodejs";
@@ -170,6 +171,17 @@ export async function GET(req: Request) {
       waiting: naFilaDeVagas(),
       jobs: totalDeJobs(),
       activeJobs: jobsAtivos(),
+      /**
+       * De ONDE saiu o `slots` acima — ver `limitesDaCaixa()` no núcleo.
+       *
+       * `slots: 1` sozinho não responde nada: pode ser cota de CPU do
+       * contêiner, `SCAN_SLOTS`/`SAST_JOBS` fixados em 1 no painel (herança do
+       * DEPLOY.md escrito para a instância de meia CPU) ou uma máquina de um
+       * núcleo. São três consertos diferentes, e a pergunta que este campo
+       * responde é literalmente "por que o scan demora tanto no servidor
+       * dedicado?" — que não tinha como ser respondida de fora.
+       */
+      box: limitesDaCaixa(),
     },
     message: schemaMessage(schema),
     ...(schema.ok ? {} : { hint: MIGRATE_HINT }),

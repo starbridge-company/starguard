@@ -165,6 +165,40 @@ describe("abandono: quem não pergunta mais é recolhido", () => {
     expect(recolherAbandonados().abandonados).toBe(0);
     expect(jobsAtivos()).toBe(2);
   });
+
+  it("o prazo de abandono é MAIOR que o silêncio que o cliente tolera", async () => {
+    // Aqui estava a contradição que produzia
+    // "O scan foi perdido pelo servidor (ele pode ter reiniciado)" sem o
+    // servidor ter reiniciado nada.
+    //
+    // O cliente foi escrito para NÃO jogar fora um scan por causa de consultas
+    // perdidas: ele tolera `SILENCIO_TOLERADO_MS` (5 consultas × 20 s = 100 s)
+    // antes de desistir. O servidor recolhia com 60 s, escritos à mão noutro
+    // pacote. Ou seja: a tolerância do cliente era código morto — o servidor
+    // chegava primeiro, SEMPRE, e matava um scan que estava indo bem.
+    //
+    // Duas constantes em dois pacotes, ninguém as leu lado a lado. É o mesmo
+    // defeito das chaves de `MSG_ESCANEANDO_LOCAL`, e o mesmo conserto.
+    const { SILENCIO_TOLERADO_MS } = await import("@starguard/core/scan-transport");
+
+    const job = jobFalso();
+    // Silêncio dentro do que o cliente aguenta: uma janela de rede fechada, uma
+    // máquina que suspendeu por um minuto e meio.
+    job.visitadoEm = Date.now() - SILENCIO_TOLERADO_MS;
+
+    expect(recolherAbandonados().abandonados).toBe(0);
+    expect(job.abortar.signal.aborted).toBe(false);
+    expect(jobsAtivos()).toBe(1);
+  });
+
+  it("passado o prazo de verdade, recolhe — a rede de segurança continua existindo", () => {
+    // O conserto não pode virar "nunca recolhe": um job que ninguém mais quer
+    // segura a vaga do scanner, que é o recurso escasso da caixa.
+    const job = jobFalso();
+    job.visitadoEm = Date.now() - 60 * 60_000;
+    expect(recolherAbandonados().abandonados).toBe(1);
+    expect(job.abortar.signal.aborted).toBe(true);
+  });
 });
 
 describe("teto por pessoa: o resto de uma janela fechada não bloqueia a próxima", () => {
@@ -178,6 +212,33 @@ describe("teto por pessoa: o resto de uma janela fechada não bloqueia a próxim
     expect(primeiro.abortar.signal.aborted).toBe(true);
     expect(acharJob(primeiro.id, ALICE)).toBeUndefined();
     expect(jobsAtivos()).toBe(2);
+  });
+
+  it("derruba o ABANDONADO, e não o mais velho que alguém está acompanhando", () => {
+    // O caso real, e o que fazia a extensão dizer "O scan foi perdido pelo
+    // servidor": o envio do `sast` estoura o teto de 120 s numa conexão
+    // doméstica, o cliente REPETE o POST, e o primeiro envio já tinha criado um
+    // job deste lado. Com o `sca`, são três. Pelo critério de idade, o que
+    // morria era o mais velho — que é justamente o que o cliente está
+    // consultando de segundo em segundo. A pessoa perdia o scan por causa de
+    // uma retentativa do próprio cliente dela.
+    const acompanhado = jobFalso(ALICE, "sast");
+    const orfao = jobFalso(ALICE, "sast");
+
+    // `acompanhado` é o mais VELHO e o mais RECENTEMENTE consultado. O órfão do
+    // envio repetido nunca é consultado por ninguém.
+    acompanhado.criadoEm = 1;
+    orfao.criadoEm = 2;
+    orfao.visitadoEm = 1;
+    tocarJob(acompanhado);
+
+    jobFalso(ALICE, "sca");
+
+    expect(orfao.abortar.signal.aborted).toBe(true);
+    expect(acharJob(orfao.id, ALICE)).toBeUndefined();
+    // A prova: quem está sendo acompanhado sobrevive.
+    expect(acharJob(acompanhado.id, ALICE)?.id).toBe(acompanhado.id);
+    expect(acompanhado.abortar.signal.aborted).toBe(false);
   });
 
   it("o teto é POR PESSOA — dois projetos de donos diferentes convivem", () => {
@@ -233,6 +294,41 @@ describe("posição na fila: a espera vira previsão", () => {
   });
 });
 
+describe("o pacote recebido não fica em memória depois de aterrissar", () => {
+  it("cada conteúdo é solto assim que chega ao disco", async () => {
+    // O corpo de um envio de SAST chega como 800 strings somando até 8 MB — que
+    // no V8 são ~16 MB em UTF-16 — e ficavam TODAS vivas até o laço acabar, ao
+    // lado da cópia recém-escrita no disco. O pico era o pacote inteiro duas
+    // vezes, com dois envios podendo coincidir.
+    const { rm } = await import("node:fs/promises");
+    const entrada = [
+      { rel: "a.ts", content: "const a = 1;" },
+      { rel: "sub/b.ts", content: "const b = 2;" },
+    ];
+    const { dir, escritos } = await prepararDiretorio(entrada);
+    try {
+      expect(escritos).toBe(2);
+      // A prova: o array de entrada não segura mais nada.
+      expect(entrada.map((f) => f.content)).toEqual(["", ""]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a rota larga o `corpo.files` antes de mandar gravar", async () => {
+    // Sem isto, o de cima é teatro: `corpo.files` e `aprovados` apontam para as
+    // MESMAS strings, e o coletor não recupera nada enquanto uma das duas
+    // referências existir. `corpo` vive até o `return` da rota.
+    const fonte = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/api/scan/route.ts", "utf8")
+    );
+    const larga = fonte.indexOf("corpo.files = undefined");
+    const grava = fonte.indexOf("await prepararDiretorio(aprovados)");
+    expect(larga).toBeGreaterThan(0);
+    expect(larga).toBeLessThan(grava);
+  });
+});
+
 describe("os arquivos recebidos", () => {
   it("são gravados dentro do temporário e apagados no fim", async () => {
     const { readFile, rm } = await import("node:fs/promises");
@@ -276,6 +372,34 @@ describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
   // `tests/scan-remoto.test.ts`, que é quase toda caminho negativo. Repeti-lo
   // aqui custava 5 s por importar a cadeia inteira do Next e não afirmava nada
   // que o outro arquivo já não afirme melhor.
+});
+
+describe("a consulta não pode matar o job que ela vem buscar", () => {
+  it("o `tocarJob` acontece ANTES do `recolherAbandonados` no GET", async () => {
+    // A ordem era a inversa, e nela uma consulta que chegasse um segundo depois
+    // do prazo **recolhia o próprio job que vinha buscar**: a varredura via o
+    // silêncio, cancelava, e o `acharJob` logo abaixo devolvia 404. O cliente
+    // anunciava "O scan foi perdido pelo servidor (ele pode ter reiniciado)" —
+    // falso duas vezes: o servidor não reiniciou, e quem perdeu o scan foi a
+    // requisição que era a PROVA de que alguém ainda o queria.
+    //
+    // Asserção sobre a fonte, como a do `content-length` acima, porque o que
+    // está errado é a ORDEM — e ordem não quebra tipo, lint nem teste de
+    // unidade das funções envolvidas, que estão as duas corretas.
+    const fonte = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/api/scan/route.ts", "utf8")
+    );
+    const get = fonte.indexOf("export async function GET");
+    expect(get).toBeGreaterThan(0);
+    const trecho = fonte.slice(get);
+    // A chamada, e não a menção: as duas aparecem no comentário que explica o
+    // conserto, e um `indexOf` solto casaria com ele em vez de com o código.
+    const toca = trecho.indexOf("\n  if (job) tocarJob(job);");
+    const recolhe = trecho.indexOf("\n  recolherAbandonados();");
+    expect(toca).toBeGreaterThan(0);
+    expect(recolhe).toBeGreaterThan(0);
+    expect(toca).toBeLessThan(recolhe);
+  });
 });
 
 describe("nenhum temporário fica para trás", () => {

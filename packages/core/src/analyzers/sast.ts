@@ -7,6 +7,9 @@
 // analisador. NODE-ONLY.
 // ============================================================
 import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
@@ -15,7 +18,7 @@ import { BIN, ENGINES } from "../config";
 import { regrasDoSast, regrasParaOCodigo, regrasUsaveis } from "../sast-rules";
 // Do `container`, e não do `config`: as duas leem o cgroup, e `config.ts`
 // precisa continuar importável do Edge runtime. Ver o cabeçalho de ambos.
-import { sastJobs, sastMaxMemoryMb } from "../container";
+import { sastJobs, sastMaxMemoryMb, tetoDeSaidaMb } from "../container";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
 import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
@@ -38,10 +41,83 @@ import {
 import type { Analyzer } from "../contracts";
 import { translate } from "../i18n/translate";
 import type { MessageKey } from "../i18n/messages";
-import type { Locale } from "../i18n/config";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/config";
 import type { Vulnerability } from "../types";
 
 const pExecFile = promisify(execFile);
+
+// ============================================================
+// Quanto tempo o scanner tem — e por que 300 s era um número quebrado
+// ============================================================
+//
+// O teto era `300_000`, escrito à mão dentro do `execFile`, e ele CONTRADIZIA o
+// teto de arquivos que este mesmo produto publica. Os dois números moram em
+// arquivos diferentes e ninguém os leu lado a lado — que é a mesma armadilha do
+// `maxFiles` do cliente contra o da rota, e desta vez saiu mais caro.
+//
+// Medido, `--jobs 1`, ruleset estreitado para javascript+typescript+generic:
+//
+//   nesta máquina (16 núcleos, um deles), 268 arquivos  →   35 s
+//   na imagem de produção (meia CPU),      27 arquivos  →   65 s
+//
+// Ou seja: em produção o custo é da ordem de 1,3 s por arquivo depois do custo
+// fixo de carregar as regras. A rota aceita **800 arquivos por scan**
+// (`SCAN_MAX_FILES`), e 800 × 1,3 s ≈ **17 minutos**. O scanner era morto aos 5.
+//
+// **O teto de arquivos autorizava um trabalho que o teto de tempo proibia.** E o
+// desfecho não dizia nada disso: `execFile` mata o filho com SIGTERM e devolve
+// `killed: true`, `stdout` VAZIO e a mensagem `Command failed: <linha de comando
+// inteira>`. Cortada em 200 caracteres, o que chegava à tela era o começo de uma
+// linha de comando — sem a palavra "tempo", sem quanto se esperou e sem o que
+// fazer. No painel isso era "o SAST quebrou"; na extensão virava
+// `status: "error"`, que é justamente o código que NÃO autoriza o socorro local
+// (ver `podeCairParaLocal`), então a análise morria com o opengrep instalado a um
+// palmo de distância.
+//
+// O padrão agora é o do PRAZO DO CLIENTE (`PRAZO_MS`, 15 min): abaixo disso o
+// servidor desiste de um scan que o cliente ainda estaria esperando, e jogar
+// fora dez minutos de trabalho é o desperdício mais caro que este caminho tem.
+// Continua sendo um teto, e continua sendo dito quando estoura.
+const TETO_SAST_MS = Number(process.env.SAST_TIMEOUT_MS) || 15 * 60_000;
+
+/** O nome da variável vai na mensagem: quem lê precisa saber o que aumentar. */
+const ENV_TETO_SAST = "SAST_TIMEOUT_MS";
+
+/**
+ * Foi o TETO que matou, ou o scanner que falhou?
+ *
+ * `killed` é como o Node marca o processo que ELE matou ao estourar o teto —
+ * medido: `code: null`, `signal: "SIGTERM"`, `stdout` e `stderr` vazios. Sem
+ * esta distinção os dois desfechos saem com a mesma frase inútil, e eles pedem
+ * coisas opostas de quem lê: um pede mais tempo ou menos escopo, o outro pede
+ * conserto de instalação.
+ */
+export function morreuNoTeto(e: unknown): boolean {
+  const err = e as { killed?: boolean; signal?: string | null };
+  return err?.killed === true || err?.signal === "SIGTERM" || err?.signal === "SIGKILL";
+}
+
+/**
+ * O erro de teto estourado, montado num lugar só.
+ *
+ * `sast` e `sca` produzem a MESMA frase com números diferentes, e escrevê-la
+ * duas vezes é como as duas literais de `MSG_ESCANEANDO_LOCAL` deixaram de
+ * coincidir sem que tipo, lint ou teste notassem.
+ */
+export function erroDeTeto(
+  bin: string,
+  tetoMs: number,
+  envVar: string,
+  locale: Locale = DEFAULT_LOCALE
+): ScanUnavailable {
+  return new ScanUnavailable(
+    translate(locale, "scan.timedOut", {
+      bin,
+      s: Math.round(tetoMs / 1000),
+      env: envVar,
+    })
+  );
+}
 
 /** Qual executável este engine usa. `none` = desligado por configuração. */
 export function sastBinary(): string | null {
@@ -116,15 +192,57 @@ export async function runSast(
   // inteira e `linguagens` volta vazio — e aí nada é dito, porque nada mudou.
   const escolha = regrasParaOCodigo(regras.config, dir);
   const config = escolha.configs.flatMap((c) => ["--config", c]);
+
+  // ---- O resultado sai por ARQUIVO, não pelo cano ----
+  //
+  // Era `maxBuffer: 64 MB` num `stdout` que o Node acumula inteiro na memória
+  // antes de devolver, e sobre o qual rodava um `JSON.parse` — que no V8 custa
+  // outros 3 a 4× (string UTF-16 + grafo de objetos), tudo vivo ao mesmo tempo.
+  // Um repositório com um arquivo gerado dentro chegava perto disso, e o
+  // desfecho era o pior possível: `maxBuffer` estourado MATA o filho e devolve
+  // `ENOBUFS`, que caía no `Falha no SAST: …` genérico. Um scan derrubado por
+  // falta de memória do CHAMADOR, anunciado como defeito do scanner.
+  //
+  // Com `-o`, o opengrep escreve o JSON direto no disco e o `stdout` volta
+  // **vazio** (medido: 0 bytes). O cano deixa de existir como custo, e — o que
+  // vale mais — dá para PERGUNTAR O TAMANHO antes de gastar memória com ele.
+  //
+  // O arquivo mora FORA de `dir`: o alvo do scan é `.`, e escrever a saída lá
+  // dentro faria o opengrep escanear o próprio resultado.
+  const saida = join(await mkdtemp(join(tmpdir(), "sg-sast-")), "achados.json");
+
   const args = [
     ...config,
     "--json",
     "--quiet",
+    "-o",
+    saida,
     "--timeout",
     String(Number(process.env.SAST_RULE_TIMEOUT ?? 5)),
     "--jobs",
     String(jobs),
     ...(memoria ? ["--max-memory", String(memoria)] : []),
+    // ---- Dois cortes de payload TENTADOS e DESCARTADOS, com a medição ----
+    //
+    // Ficam escritos porque parecem boa ideia e não são — e a segunda vez que
+    // alguém tiver a ideia, vai ter o número em vez do palpite. Medido neste
+    // repositório: 268 arquivos, 691 achados, 835 kB de JSON.
+    //
+    // `--max-lines-per-finding 3` (padrão 10) → 691 achados, 835 kB.
+    //   **Zero.** Os achados daqui casam com uma linha só, então o contexto que
+    //   ele cortaria não existe. Em troca, encolheria o `codeSnippet` que a tela
+    //   e o corretor usam. Custo real, ganho nenhum.
+    //
+    // `--max-match-per-file 100` (padrão 10.000) → 470 achados, 623 kB.
+    //   Os −27% pareciam ótimos até a conta por arquivo: `results/[id]/page.tsx`
+    //   caiu de 109 achados para **0**, e `vscode/src/extension.ts` de 112 para
+    //   **0**. A flag não trunca no limite — ela DESCARTA o arquivo inteiro que
+    //   passar dele. Ou seja, os arquivos com mais problemas são exatamente os
+    //   que sumiriam do relatório, em silêncio. É o UX-15 na forma mais cara que
+    //   existe, e nenhum byte economizado paga isso.
+    //
+    // O teto de achados que ficou é o de `lerAchados`: corta pelos MAIS GRAVES,
+    // depois do parse, e DIZ quantos ficaram de fora.
     ".",
   ];
 
@@ -156,7 +274,7 @@ export async function runSast(
     // A vaga envolve só o PROCESSO NATIVO. Segurá-la durante o parse ou o
     // enriquecimento faria um scan barato esperar por trabalho que não disputa
     // CPU com ninguém. Ver `scan-slot.ts`.
-    const { stdout } = await comVaga(
+    await comVaga(
       () => {
         // Dito na TRANSIÇÃO, e não antes: entre pedir a vaga e recebê-la pode
         // haver minutos, e anunciar "escaneando" enquanto se espera é a mesma
@@ -166,8 +284,11 @@ export async function runSast(
         opts.report?.(MSG_ESCANEANDO_LOCAL);
         return pExecFile(bin, args, {
           cwd: dir,
-          timeout: 300_000,
-          maxBuffer: 64 * 1024 * 1024,
+          timeout: TETO_SAST_MS,
+          // 1 MB, e não 64: com `-o` o `stdout` volta vazio, e o que sobra no
+          // cano é aviso do próprio opengrep. Um teto pequeno aqui deixou de
+          // ser risco e passou a ser defesa.
+          maxBuffer: 1024 * 1024,
           // Cancelar de fora precisa MATAR o opengrep, não só parar de esperar
           // por ele. Ver o cabeçalho desta função.
           signal: opts.signal,
@@ -175,27 +296,93 @@ export async function runSast(
       },
       (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
-    return parseSemgrep(JSON.parse(stdout));
+    return await lerAchados(saida, opts);
   } catch (e: unknown) {
-    // Semgrep retorna exit code != 0 quando encontra achados; o stdout ainda é JSON válido.
     const err = e as { stdout?: string; message?: string; name?: string };
-    if (err.stdout) {
-      try {
-        return parseSemgrep(JSON.parse(err.stdout));
-      } catch {
-        /* cai no throw */
-      }
+    // Exit != 0 é o que o opengrep devolve quando ENCONTRA algo — o arquivo de
+    // saída está lá e é válido. Antes a recuperação era pelo `err.stdout`, que
+    // com `-o` volta vazio; ler o arquivo cobre os dois casos e não depende de
+    // quanto coube num cano.
+    if (!opts.signal?.aborted) {
+      const recuperado = await lerAchados(saida, opts).catch(() => null);
+      if (recuperado) return recuperado;
     }
     // Cancelamento não é falha do scanner: sobe como está, para quem cancelou
     // não receber "o SAST falhou" por ter clicado em parar.
     if (opts.signal?.aborted) throw e;
+    // TETO estourado tem frase PRÓPRIA — ver o cabeçalho de `TETO_SAST_MS`.
+    //
+    // Antes caía no `Falha no SAST: ${err.message}` abaixo, e o que chegava à
+    // tela era o começo de uma linha de comando cortada em 200 caracteres. Quem
+    // lia não tinha como saber que o scan tinha ACABADO O TEMPO, nem quanto se
+    // esperou, nem que a saída era dar CPU à caixa. "Não terminou" e "está
+    // quebrado" pedem coisas opostas, e saíam com a mesma frase.
+    if (morreuNoTeto(err)) {
+      throw erroDeTeto(bin, TETO_SAST_MS, ENV_TETO_SAST, opts.locale);
+    }
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
         `Binário do SAST (${bin}) não encontrado no host. Instale-o para habilitar o scan de código.`
       );
     }
     throw new ScanUnavailable(`Falha no SAST: ${(err.message || "").slice(0, 200)}`);
+  } finally {
+    // O JSON de achados é resultado intermediário e some com qualquer desfecho —
+    // a mesma regra do temporário do job em `lib/scan-jobs.ts`. Ele contém
+    // trechos do código de quem pediu.
+    await rm(dirname(saida), { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Lê o JSON de achados do disco — **perguntando o tamanho antes de gastar
+ * memória com ele.**
+ *
+ * Esta é a parte que o `stdout` não deixava fazer. Um `maxBuffer` estourado é
+ * uma decisão tomada quando os bytes JÁ ESTÃO na memória; um `stat` é uma
+ * decisão tomada antes. A diferença aparece na conta: um JSON de N bytes vive
+ * no V8 como string UTF-16 (2N) mais o grafo do `JSON.parse` — 3 a 4× o arquivo,
+ * tudo ao mesmo tempo, e é isso que derruba um processo.
+ *
+ * Passar do teto **não é erro de scanner**, e por isso tem frase própria: o
+ * scan aconteceu, o resultado é que não cabe nesta caixa.
+ */
+export async function lerAchados(
+  saida: string,
+  opts: OpcoesDeScanLocal = {}
+): Promise<Vulnerability[]> {
+  const teto = tetoDeSaidaMb();
+  const info = await stat(saida);
+  if (info.size > teto * 1024 * 1024) {
+    throw new ScanUnavailable(
+      translate(opts.locale ?? DEFAULT_LOCALE, "scan.outputTooLarge", {
+        mb: (info.size / (1024 * 1024)).toFixed(1),
+        max: teto,
+      })
+    );
+  }
+
+  // O bruto morre aqui dentro. `parseSemgrep` produz um array MENOR (só os
+  // campos que a tela usa), e manter os dois vivos era dobrar o pico à toa —
+  // ainda mais porque o que vem depois, `enrichFindings`, cria um terceiro.
+  const achados = parseSemgrep(JSON.parse(await readFile(saida, "utf8")));
+
+  // ---- O teto de achados, DECLARADO ----
+  //
+  // `enrichFindings` devolve um array novo (é `map`), o resultado fica no job
+  // pelo TTL e ainda é gravado no JSONB. Um repositório patológico multiplica
+  // tudo isso por milhares. Cortar é a defesa; **cortar em silêncio seria o
+  // UX-15 no lugar mais caro** — um relatório menor com cara de completo — então
+  // corta-se pelos MAIS GRAVES e diz-se quantos ficaram de fora.
+  const limite = Number(process.env.SCAN_MAX_FINDINGS) || 5_000;
+  if (achados.length <= limite) return achados;
+
+  const peso: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  achados.sort((a, b) => (peso[a.severity] ?? 9) - (peso[b.severity] ?? 9));
+  const cortados = achados.length - limite;
+  achados.length = limite;
+  opts.report?.("scan.findingsCapped", { n: cortados, max: limite });
+  return achados;
 }
 
 /**

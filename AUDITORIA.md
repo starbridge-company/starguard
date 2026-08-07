@@ -2754,6 +2754,163 @@ aplicados pelo próprio entrypoint.
 > tenho. O procedimento, com os comandos de conferência e a prova sem redeploy
 > (`docker network connect` + `db-doctor`), está no [`DEPLOY.md`](DEPLOY.md).
 
+### BUG-31 · O SAST nunca terminava no servidor, e o desfecho mentia sobre o motivo ✅
+
+*07/08/2026.* Relato: *"na extensão, o sast continua quebrando, no painel
+também, mesmo no servidor dedicado, nunca funciona… ele demora muito e quebra,
+mas o problema foi outro, o servidor não reiniciou."* A mensagem recebida foi
+`StarGuard · sast: O scan foi perdido pelo servidor (ele pode ter reiniciado).`
+
+Não era um defeito. Eram **cinco**, e o relato descreve dois deles com precisão:
+"demora muito" e "o servidor não reiniciou".
+
+#### 1. O teto de arquivos autorizava um trabalho que o teto de tempo proibia
+
+`runSast` matava o opengrep em `300_000` ms — número escrito à mão dentro do
+`execFile`. A rota aceita `SCAN_MAX_FILES = 800` arquivos por scan. Os dois moram
+em arquivos diferentes e ninguém os leu lado a lado.
+
+Medido, `--jobs 1`, ruleset já estreitado para javascript+typescript+generic:
+
+| Onde | Arquivos | Tempo |
+|---|---|---|
+| Imagem de produção (meia CPU) | 27 | 65 s |
+| Máquina de desenvolvimento, um núcleo | 268 | 35 s |
+
+Em produção o custo fica na ordem de **1,3 s por arquivo** depois do custo fixo
+das regras. **800 arquivos ≈ 17 minutos.** O scanner era morto aos 5, sempre, em
+qualquer repositório de tamanho real. Não é intermitência: é aritmética.
+
+#### 2. E o desfecho não dizia nada disso
+
+Medido, com um `execFile` de teto curto sobre o opengrep de verdade:
+
+```
+err.code = null   err.killed = true   err.signal = "SIGTERM"
+err.stdout = ""   err.stderr = ""
+err.message = "Command failed: /usr/local/bin/opengrep --config …"
+```
+
+O `stdout` vazio derruba a recuperação (`if (err.stdout) parseSemgrep(...)`), e a
+mensagem cai no `Falha no SAST: ${message.slice(0, 200)}`. **O que chegava à tela
+era o começo de uma linha de comando.** Sem a palavra "tempo", sem quanto se
+esperou, sem o que fazer — e indistinguível de uma instalação quebrada, que pede
+o conserto oposto. No caminho remoto isso vira `status: "error"`, que é
+justamente o código que **não** autoriza o socorro local.
+
+#### 3. A consulta matava o job que ela vinha buscar
+
+`GET /api/scan?job=` chamava `recolherAbandonados()` na primeira linha e
+`tocarJob` na décima. Nessa ordem, uma consulta que chegasse um segundo depois de
+`ABANDONO_MS` **recolhia o próprio job que vinha buscar**: a varredura via o
+silêncio, cancelava, e o `acharJob` logo abaixo devolvia 404.
+
+É esta a origem literal de *"O scan foi perdido pelo servidor (ele pode ter
+reiniciado)"* — uma frase falsa duas vezes: o servidor não reiniciou, e quem
+perdeu o scan foi a requisição que era a **prova** de que alguém ainda o queria.
+
+#### 4. A tolerância do cliente era código morto
+
+O cliente tolera `CONSULTAS_FALHAS_MAX × TETO_CONSULTA_MS` = **100 s** de
+silêncio antes de desistir — desenhado assim de propósito, porque "uma consulta
+perdida não joga fora dez minutos de scan". O servidor recolhia com **60 s**,
+escritos à mão noutro pacote. O servidor chegava primeiro, sempre. A tolerância
+nunca chegou a valer.
+
+Agora `ABANDONO_MS` **deriva** de `SILENCIO_TOLERADO_MS`, exportado do núcleo —
+o mesmo conserto das chaves `MSG_ESCANEANDO_LOCAL`/`MSG_VAGA_NA_FILA`.
+
+#### 5. O teto por pessoa derrubava o job errado
+
+`limitarPorPessoa` ordenava por `criadoEm` e matava o **mais velho**. Quando o
+envio do SAST estoura os 120 s numa conexão doméstica, o cliente repete o POST —
+e o primeiro envio já criou um job deste lado. Com o SCA, são três, e o mais
+velho é justamente o que está sendo consultado de segundo em segundo. A pessoa
+perdia o scan por causa de uma retentativa do próprio cliente dela. Passa a
+ordenar por `visitadoEm`: cai quem **ninguém está esperando**.
+
+#### O que mudou
+
+| Onde | Antes | Agora |
+|---|---|---|
+| `runSast`/`runSca` | `timeout: 300_000` literal | `SAST_TIMEOUT_MS`/`SCA_TIMEOUT_MS`, padrão 15 min — o mesmo prazo que o cliente espera |
+| Teto estourado | `Falha no SAST: Command failed: …` | `scan.timedOut`, nos três idiomas, com os segundos e a ordem certa do conselho (CPU antes de teto) |
+| `GET /api/scan?job=` | recolhe → procura | toca → recolhe → procura |
+| `ABANDONO_MS` | `60_000` literal | derivado de `SILENCIO_TOLERADO_MS` (2×) |
+| `limitarPorPessoa` | mais velho | menos consultado |
+| Idioma do erro do scanner | pt-BR para todo mundo | `OpcoesDeScanLocal.locale`, gravado já traduzido |
+
+**A causa de fundo continua fora do código**, e é a mais barata de consertar:
+`/api/health` responde `scan.slots: 1` num servidor dedicado. O `DEPLOY.md`
+mandava fixar `SAST_JOBS=1` — número escrito para a instância de meia CPU da PaaS
+anterior. A caixa cresceu e o trabalho não. O `DEPLOY.md` foi reescrito, e o
+health passou a publicar `scan.box`, com a **procedência** do número
+(`"env"` | `"cgroup"` | `"hospedeiro"`): `sastJobsDe: "env"` com `hospedeiro: 8`
+é a resposta para "por que demora tanto no servidor dedicado?", que até aqui não
+tinha como ser respondida de fora.
+
+### ARQ-20 · A memória do caminho de scan não tinha teto onde importava ✅
+
+*07/08/2026.* Pedido: *"a minha instância tem 4 GB, mas você deve otimizar AO
+MÁXIMO o uso de memória"*.
+
+O problema não era teto alto demais: era **teto nenhum sobre a única coisa deste
+caminho cujo tamanho não se conhece de antemão** — o resultado do scanner. A
+entrada é limitada (`SCAN_MAX_BYTES`); a saída não era.
+
+E ela não custa o que aparenta. Um JSON de N bytes vira, no V8, a string em
+UTF-16 (2N) mais o grafo do `JSON.parse`: **3 a 4× o arquivo, tudo vivo ao mesmo
+tempo**. Com o resultado chegando por `stdout` (`maxBuffer: 64 MB`), a decisão de
+recusar acontecia **depois** de os bytes já estarem na memória — e um `maxBuffer`
+estourado mata o filho com `ENOBUFS`, que caía no `Falha no SAST:` genérico. Um
+scan derrubado por falta de memória do CHAMADOR, anunciado como defeito do
+scanner.
+
+| Mudança | Efeito |
+|---|---|
+| `-o <arquivo>` em vez do cano | O `stdout` volta com **0 bytes** (medido). O buffer de 64 MB deixa de existir; `maxBuffer` cai para 1 MB |
+| `stat()` antes do `readFile`/`JSON.parse` | A recusa passa a ser uma decisão **antes** de gastar memória. Teto em `SCAN_MAX_OUTPUT_MB`, padrão 5% da caixa (8–64 MB) |
+| `scan.outputTooLarge` | "o scan aconteceu e o resultado não cabe" deixa de sair com a cara de "o binário está quebrado" |
+| Teto de achados (`SCAN_MAX_FINDINGS`, 5.000) | `enrichFindings` devolve um array NOVO, o job segura o resultado pelo TTL e ele ainda vai para o JSONB — um repositório patológico multiplicava tudo isso. Corta pelos **mais graves** e **diz** quantos ficaram de fora |
+| `prepararDiretorio` solta cada conteúdo ao gravar, e a rota larga `corpo.files` | O pico do upload deixa de ser "o pacote inteiro duas vezes" e vira "um arquivo de cada vez". As duas metades são necessárias: com duas referências para a mesma string, o coletor não recupera nada |
+
+**Duas otimizações foram TENTADAS e DESCARTADAS**, e ficam registradas com a
+medição porque parecem boa ideia e não são:
+
+- `--max-lines-per-finding 3` (padrão 10) → 691 achados, 835 kB. **Idêntico.** Os
+  achados casam com uma linha só; em troca encolheria o `codeSnippet` que a tela
+  e o corretor usam. Custo real, ganho zero.
+- `--max-match-per-file 100` (padrão 10.000) → 470 achados, 623 kB. Os −27%
+  pareciam ótimos até a conta por arquivo: `results/[id]/page.tsx` caiu de 109
+  achados para **0**, e `vscode/src/extension.ts` de 112 para **0**. A flag não
+  trunca no limite — **descarta o arquivo inteiro** que passar dele. Os arquivos
+  com mais problemas seriam exatamente os que sumiriam do relatório, em silêncio.
+  É o UX-15 na forma mais cara que existe.
+
+Medido depois, com o opengrep de verdade sobre este repositório (268 arquivos):
+**692 achados em 35,2 s, heap retido +4,2 MB, RSS 45 MB.**
+
+**O que ficou de fora, e por quê:** o corpo do `POST /api/scan` continua sendo um
+JSON único bufferizado por `readJson`. Trocá-lo por um formato em fluxo
+(NDJSON/multipart escrito direto no disco) tiraria o pico de ~16 MB por envio,
+mas muda o protocolo dos três produtos ao mesmo tempo, e a geração anterior do
+cliente precisa continuar funcionando durante uma implantação. Não é "fica para a
+próxima": é trabalho de escopo próprio, que não cabe dentro de uma correção de
+defeito sem colocar em risco justamente o caminho que se está consertando.
+
+## Como o sprint foi validado — 07/08/2026 (SAST no servidor)
+
+| O que | Resultado medido |
+|---|---|
+| `opengrep` real, este repositório, `--jobs 1` | 268 arquivos, **35,4 s**, 691 achados, 835 kB de JSON |
+| `runSast` depois da mudança, mesmo repositório | **692 achados em 35,2 s**, heap retido **+4,2 MB**, RSS **45 MB** |
+| `-o` em vez do cano | `stdout` com **0 bytes** |
+| `--max-match-per-file 100` | **Descartado**: dois arquivos caíram de 109 e 112 achados para **0** |
+| `--max-lines-per-finding 3` | **Descartado**: 691 achados e 835 kB, idêntico ao padrão |
+| Forma do erro de teto | `killed: true`, `signal: SIGTERM`, `stdout: ""`, `message: "Command failed: …"` |
+| Produção, `/api/health` | `opengrep 1.26.0` e `trivy 0.73.0` presentes; `scan.slots: 1`; **`db: unreachable`** |
+| Suíte | `typecheck` 0 erros · `lint` **0 erros** (12 avisos, todos anteriores) · **941 testes + 2 skipped, 63 arquivos** (eram 927) |
+
 ## As 8 pendências que sobraram, e o que cada uma precisa de você
 
 Esta sprint fechou **24 das 32** pendências abertas. As oito que restam têm uma

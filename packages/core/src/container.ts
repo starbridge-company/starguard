@@ -161,6 +161,78 @@ export function processosDeScan(nucleos: number): number {
 }
 
 /**
+ * Quanto RESULTADO de scanner esta caixa aguenta segurar, em MB.
+ *
+ * O número existe porque o resultado é a única coisa neste caminho que não tem
+ * tamanho previsível: os arquivos de entrada são limitados por `SCAN_MAX_BYTES`,
+ * mas um repositório com um arquivo gerado pode render dezenas de MB de JSON.
+ *
+ * E ele não custa o que aparenta. Um JSON de N bytes vira, no V8, a string em
+ * UTF-16 (2N) mais o grafo de objetos do `JSON.parse` — na prática **3 a 4×** o
+ * tamanho do arquivo, tudo vivo ao mesmo tempo. Por isso a fatia é pequena em
+ * relação à caixa: 5%, com piso de 8 MB para não inviabilizar um repositório
+ * normal e teto de 64 MB porque acima disso o problema é outro (é um arquivo
+ * gerado sendo escaneado, e a resposta certa é excluí-lo, não comprar RAM).
+ *
+ * Fora de contêiner, sem limite declarado, vale o teto — a máquina de quem
+ * desenvolve não precisa desta defesa.
+ */
+export function tetoDeSaidaMb(): number {
+  const env = Number(process.env.SCAN_MAX_OUTPUT_MB);
+  if (Number.isFinite(env) && env > 0) return Math.floor(env);
+  const total = memoriaDisponivelMb();
+  if (!total) return 64;
+  return Math.min(64, Math.max(8, Math.floor(total * 0.05)));
+}
+
+/**
+ * O tamanho da caixa, com a PROCEDÊNCIA de cada número.
+ *
+ * Existe porque `/api/health` publicava `slots: 1` e mais nada, e esse `1` tem
+ * três origens que pedem consertos completamente diferentes:
+ *
+ *   - o contêiner tem cota de CPU no cgroup (mexer no plano/no Coolify);
+ *   - `SCAN_SLOTS`/`SAST_JOBS` estão fixados em 1 no ambiente (herança da
+ *     instância de meia CPU: quem hospeda seguiu o DEPLOY.md e a caixa mudou);
+ *   - a máquina tem um núcleo mesmo.
+ *
+ * Sem essa distinção, "por que o scan demora tanto no servidor dedicado?" não
+ * tem resposta possível de fora — e foi exatamente essa a pergunta. É a mesma
+ * regra do `UnavailableReason`: o número aparece com o motivo, nunca sozinho.
+ */
+export function limitesDaCaixa(): {
+  /** Núcleos que o SO enxerga. Dentro do contêiner, são os do HOSPEDEIRO. */
+  hospedeiro: number;
+  /** Fatia declarada no cgroup, em CPUs. `null` = sem cota declarada. */
+  cotaDeCpu: number | null;
+  /** Memória do contêiner em MB. `null` = sem limite declarado. */
+  memoriaMb: number | null;
+  /** Processos que o SAST abre, e de onde o número veio. */
+  sastJobs: number;
+  sastJobsDe: "env" | "cgroup" | "hospedeiro";
+  scanSlotsDe: "env" | "cgroup" | "hospedeiro";
+} {
+  const hospedeiro = Math.max(1, cpus().length);
+  const cotaDeCpu =
+    cpusDeCgroupV2(lerOuNulo("/sys/fs/cgroup/cpu.max")) ??
+    cpusDeCgroupV1(
+      lerOuNulo("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"),
+      lerOuNulo("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+    );
+  const envJobs = Number(process.env.SAST_JOBS);
+  const envSlots = Number(process.env.SCAN_SLOTS);
+  const daCota = cotaDeCpu === null ? "hospedeiro" : "cgroup";
+  return {
+    hospedeiro,
+    cotaDeCpu,
+    memoriaMb: memoriaDisponivelMb(),
+    sastJobs: sastJobs(),
+    sastJobsDe: Number.isFinite(envJobs) && envJobs >= 1 ? "env" : daCota,
+    scanSlotsDe: Number.isFinite(envSlots) && envSlots >= 1 ? "env" : daCota,
+  };
+}
+
+/**
  * Teto de memória por processo do SAST, em MB, ou `null` para não passar a
  * flag. Derivado do limite do contêiner, dividido pelos processos e com folga
  * para o Node — que também mora nesta caixa.

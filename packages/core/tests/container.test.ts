@@ -132,3 +132,50 @@ describe("processosDeScan — o scanner não pode tomar a caixa inteira", () => 
     expect(processosDeScan(-3)).toBe(1);
   });
 });
+
+// ------------------------------------------------------------
+// De ONDE veio o número — AUDITORIA.md#ARQ-15
+// ------------------------------------------------------------
+//
+// `/api/health` publicava `slots: 1` e nada mais. Esse `1` tem três origens que
+// pedem consertos opostos: cota de CPU no cgroup, `SCAN_SLOTS`/`SAST_JOBS`
+// fixados no ambiente (herança do DEPLOY.md escrito para a instância de meia
+// CPU), ou uma máquina de um núcleo. Sem a procedência, "por que o scan demora
+// tanto no servidor DEDICADO?" não tem como ser respondida de fora — e foi
+// exatamente essa a pergunta.
+describe("limitesDaCaixa — o número vem com a procedência", () => {
+  it("variável de ambiente é declarada como tal", async () => {
+    const { limitesDaCaixa } = await import("../src/container");
+    const antes = process.env.SAST_JOBS;
+    process.env.SAST_JOBS = "1";
+    try {
+      const b = limitesDaCaixa();
+      expect(b.sastJobs).toBe(1);
+      // A distinção que importa: aqui não há caixa pequena nenhuma — alguém
+      // escreveu `1` no painel, e é isso que precisa ser desfeito.
+      expect(b.sastJobsDe).toBe("env");
+    } finally {
+      if (antes === undefined) delete process.env.SAST_JOBS;
+      else process.env.SAST_JOBS = antes;
+    }
+  });
+
+  it("sem env e sem cgroup, o número é do hospedeiro", async () => {
+    const { limitesDaCaixa } = await import("../src/container");
+    const antesJ = process.env.SAST_JOBS;
+    const antesS = process.env.SCAN_SLOTS;
+    delete process.env.SAST_JOBS;
+    delete process.env.SCAN_SLOTS;
+    try {
+      const b = limitesDaCaixa();
+      // Esta suíte roda fora de contêiner: não há cota declarada.
+      expect(b.cotaDeCpu).toBeNull();
+      expect(b.sastJobsDe).toBe("hospedeiro");
+      expect(b.scanSlotsDe).toBe("hospedeiro");
+      expect(b.hospedeiro).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (antesJ !== undefined) process.env.SAST_JOBS = antesJ;
+      if (antesS !== undefined) process.env.SCAN_SLOTS = antesS;
+    }
+  });
+});

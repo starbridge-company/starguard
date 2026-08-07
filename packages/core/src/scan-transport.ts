@@ -159,6 +159,16 @@ export interface RemoteScanInput {
 export interface OpcoesDeScanLocal {
   signal?: AbortSignal;
   report?: (chave: string, valores?: Record<string, string | number>) => void;
+  /**
+   * O idioma de quem pediu — para o ERRO, não para o progresso.
+   *
+   * O progresso vai por chave e quem traduz é o analisador. O erro não pode: ele
+   * é LANÇADO, atravessa o orquestrador e vai parar no JSONB `phases`, que é
+   * lido do banco para sempre sem passar por `t()` de novo (ver CLAUDE.md). Ou
+   * seja, ou ele sai traduzido daqui, ou sai em português para todo mundo — que
+   * é o que acontecia com `Falha no SAST: …`.
+   */
+  locale?: Locale;
 }
 
 /**
@@ -175,6 +185,7 @@ export function opcoesDeScanLocal(ctx: {
 }): OpcoesDeScanLocal {
   return {
     signal: ctx.signal,
+    locale: ctx.locale,
     report: (chave, valores) =>
       ctx.report?.(translate(ctx.locale, chave as MessageKey, valores)),
   };
@@ -332,6 +343,23 @@ function ritmoDeConsulta() {
  * local entra.
  */
 const CONSULTAS_FALHAS_MAX = 5;
+
+/**
+ * Quanto tempo o CLIENTE aguenta sem uma consulta bem-sucedida antes de desistir.
+ *
+ * Exportado, e não deduzido do outro lado, porque o servidor precisa deste
+ * número: é ele que decide a partir de quando um job pode ser dado como
+ * abandonado (`ABANDONO_MS` em `lib/scan-jobs.ts`). Enquanto os dois foram
+ * escritos à mão em pacotes diferentes, eles se CONTRADISSERAM — o cliente
+ * tolerava até ~2 minutos de silêncio e o servidor recolhia com 1. A tolerância
+ * do cliente era código morto: o servidor sempre chegava primeiro, e o desfecho
+ * era um 404 anunciado como "o servidor pode ter reiniciado".
+ *
+ * É o mesmo defeito das chaves `MSG_ESCANEANDO_LOCAL`/`MSG_VAGA_NA_FILA`, e o
+ * mesmo conserto: uma constante só, com os dois lados lendo dela.
+ */
+export const SILENCIO_TOLERADO_MS =
+  CONSULTAS_FALHAS_MAX * (Number(process.env.SCAN_POLL_TIMEOUT_MS) || 20_000);
 
 /**
  * Quanto esperar entre as tentativas depois de um 429, quando o servidor não

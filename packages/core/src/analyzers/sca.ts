@@ -7,10 +7,18 @@
 // NODE-ONLY.
 // ============================================================
 import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
+import { tetoDeSaidaMb } from "../container";
 import { parseTrivy } from "../parsers";
 import { ScanUnavailable } from "../git";
+// `morreuNoTeto` mora em `sast.ts` porque foi lá que o defeito foi medido, e
+// duplicar a heurística de "o Node matou o filho" em dois arquivos é como as
+// duas literais de `MSG_ESCANEANDO_LOCAL` deixaram de coincidir.
+import { erroDeTeto, morreuNoTeto } from "./sast";
 import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
@@ -31,10 +39,21 @@ import {
 import type { Analyzer } from "../contracts";
 import { translate } from "../i18n/translate";
 import type { MessageKey } from "../i18n/messages";
-import type { Locale } from "../i18n/config";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/config";
 import type { DependencyVuln } from "../types";
 
 const pExecFile = promisify(execFile);
+
+/**
+ * Teto de tempo do trivy. Ver o cabeçalho de `TETO_SAST_MS` em `sast.ts`: o
+ * mesmo `300_000` escrito à mão vivia aqui, e com o mesmo desfecho mudo.
+ *
+ * O trivy tem um agravante próprio: na primeira execução depois de a base
+ * vencer (~6 h) ele BAIXA 1,2 GB antes de olhar o primeiro manifesto, e é essa
+ * execução — a de quem chega logo depois de um deploy — que estourava o teto.
+ */
+const TETO_SCA_MS = Number(process.env.SCA_TIMEOUT_MS) || 15 * 60_000;
+const ENV_TETO_SCA = "SCA_TIMEOUT_MS";
 
 /**
  * Roda o SCA (Trivy) em modo filesystem sobre o diretório clonado.
@@ -51,6 +70,11 @@ export async function runSca(
   const engine = ENGINES.sca;
   if (engine === "none") return [];
 
+  // Pelo ARQUIVO, e não pelo cano — ver o mesmo trecho, com a medição, em
+  // `sast.ts`. Aqui pesa ainda mais: o JSON do trivy carrega a descrição
+  // completa de cada CVE, e um lockfile grande rende dezenas de MB.
+  const saida = join(await mkdtemp(join(tmpdir(), "sg-sca-")), "deps.json");
+
   const args = [
     "fs",
     "--scanners",
@@ -58,42 +82,66 @@ export async function runSca(
     "--format",
     "json",
     "--quiet",
+    "-o",
+    saida,
     ".",
   ];
 
   try {
-    const { stdout } = await comVaga(
+    await comVaga(
       () => {
         // Ver o mesmo trecho em `sast.ts`: a transição é o que se anuncia.
         opts.report?.(MSG_ESCANEANDO_LOCAL);
         return pExecFile(BIN.trivy, args, {
           cwd: dir,
-          timeout: 300_000,
-          maxBuffer: 64 * 1024 * 1024,
+          timeout: TETO_SCA_MS,
+          // Com `-o` o cano só carrega aviso. Ver `sast.ts`.
+          maxBuffer: 1024 * 1024,
           signal: opts.signal,
         });
       },
       (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
-    return parseTrivy(JSON.parse(stdout));
+    return await lerDependencias(saida, opts);
   } catch (e: unknown) {
     const err = e as { stdout?: string; message?: string };
-    if (err.stdout) {
-      try {
-        return parseTrivy(JSON.parse(err.stdout));
-      } catch {
-        /* cai no throw */
-      }
+    if (!opts.signal?.aborted) {
+      const recuperado = await lerDependencias(saida, opts).catch(() => null);
+      if (recuperado) return recuperado;
     }
     // Cancelamento sobe como está: quem parou não deve ler "o SCA falhou".
     if (opts.signal?.aborted) throw e;
+    // Teto estourado é dito com todas as letras — ver `morreuNoTeto` em `sast.ts`.
+    if (morreuNoTeto(err)) {
+      throw erroDeTeto(BIN.trivy, TETO_SCA_MS, ENV_TETO_SCA, opts.locale);
+    }
     if (/ENOENT|not found/i.test(err.message || "")) {
       throw new ScanUnavailable(
         `Binário do SCA (${BIN.trivy}) não encontrado no host. Instale-o para habilitar a análise de dependências.`
       );
     }
     throw new ScanUnavailable(`Falha no SCA: ${(err.message || "").slice(0, 200)}`);
+  } finally {
+    await rm(dirname(saida), { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/** Ver `lerAchados` em `sast.ts`: pergunta o tamanho antes de gastar memória. */
+async function lerDependencias(
+  saida: string,
+  opts: OpcoesDeScanLocal
+): Promise<DependencyVuln[]> {
+  const teto = tetoDeSaidaMb();
+  const info = await stat(saida);
+  if (info.size > teto * 1024 * 1024) {
+    throw new ScanUnavailable(
+      translate(opts.locale ?? DEFAULT_LOCALE, "scan.outputTooLarge", {
+        mb: (info.size / (1024 * 1024)).toFixed(1),
+        max: teto,
+      })
+    );
+  }
+  return parseTrivy(JSON.parse(await readFile(saida, "utf8")));
 }
 
 /**

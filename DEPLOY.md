@@ -61,19 +61,85 @@ recurso. Quem gera as chaves: `npm run gen:keys`.
 
 ### O tamanho da caixa — `AUDITORIA.md#ARQ-15`
 
-Estes números não são zelo. Dentro do contêiner, `os.cpus()` conta os núcleos do
-HOSPEDEIRO: o scan abria oito processos do opengrep, estourava a memória e
-**matava a instância no meio da requisição**.
+**Estes números foram escritos para uma instância de meia CPU e 512 MB de PaaS.
+Num servidor dedicado eles são o motivo de o SAST demorar.** Ler a tabela abaixo
+como receita foi o que deixou o opengrep escaneando em **um processo só** numa
+máquina com vários núcleos ociosos.
+
+Antes de copiar qualquer valor, pergunte à própria instância:
+
+```bash
+curl -s https://starguard.starbridge.com.br/api/health | jq .scan
+```
+
+```jsonc
+{
+  "slots": 1,          // quantos scanners rodam ao mesmo tempo
+  "box": {
+    "hospedeiro": 8,   // núcleos que o SO enxerga
+    "cotaDeCpu": null, // fatia declarada no cgroup (null = sem cota)
+    "sastJobs": 1,
+    "sastJobsDe": "env" // "env" | "cgroup" | "hospedeiro"  <- a procedência
+  }
+}
+```
+
+`sastJobsDe: "env"` com `hospedeiro: 8` significa que a caixa cresceu e o
+trabalho não: alguém (esta tabela) fixou o `1`. `"cgroup"` significa que o
+contêiner tem cota — é no Coolify que se muda. `"hospedeiro"` significa que a
+máquina é essa mesmo.
+
+**Por que isto importa tanto**, medido com o ruleset já estreitado para
+javascript+typescript+generic:
+
+| Onde | Arquivos | `--jobs` | Tempo |
+|---|---|---|---|
+| Imagem de produção, meia CPU | 27 | 1 | 65 s |
+| Máquina de desenvolvimento, um núcleo | 268 | 1 | 35 s |
+
+Em produção o custo fica na ordem de **1,3 s por arquivo**. A rota aceita **800
+arquivos por scan**, o que dá ≈ **17 minutos com `--jobs 1`**. É isso que o
+relato "demora muito e quebra" descreve, e é aritmética, não defeito.
+
+#### Caixa pequena (meia CPU, 512 MB) — os valores defensivos
 
 | Variável | Valor | |
 |---|---|---|
 | `SAST_JOBS` | `1` | |
 | `SAST_MAX_MEMORY_MB` | `200` | |
-| `SCAN_MAX_FILES` | `800` | Teto do que UMA requisição carrega |
-| `SCAN_MAX_BYTES` | `8388608` | idem |
 | `NODE_OPTIONS` | `--max-old-space-size=256` | O Node divide a caixa com dois scanners |
 
-Ao subir de plano, suba estes juntos — senão a caixa cresce e o trabalho não.
+#### Servidor dedicado (o caso atual: 4 GB) — **apague estas variáveis**
+
+Deixe `SAST_JOBS`, `SCAN_SLOTS`, `SAST_MAX_MEMORY_MB` e `NODE_OPTIONS`
+**ausentes**: o código lê o cgroup e se dimensiona sozinho, reservando um núcleo
+para o Node continuar respondendo (`processosDeScan`). Confira em `/api/health`
+que `sastJobsDe` deixou de ser `"env"`.
+
+> **`--max-old-space-size=256` numa caixa de 4 GB deixou de ser prudência e
+> virou a causa.** Ele não protege memória nenhuma: limita o heap do V8 a 256 MB
+> e faz o processo morrer com `JavaScript heap out of memory` enquanto 3,7 GB
+> ficam parados. Se preferir declarar um valor em vez de deixar o padrão do
+> Node, use algo como `--max-old-space-size=2048`.
+
+Se o Coolify impuser cota de CPU ao recurso, é lá que ela sobe — nenhuma
+variável daqui contorna um cgroup.
+
+#### Valem para as duas
+
+| Variável | Valor | |
+|---|---|---|
+| `SCAN_MAX_FILES` | `800` | Teto do que UMA requisição carrega |
+| `SCAN_MAX_BYTES` | `8388608` | idem |
+| `SAST_TIMEOUT_MS` | `900000` (padrão) | Teto do opengrep. **Tem de caber o que `SCAN_MAX_FILES` autoriza** — era 300 s fixo, e 800 arquivos nunca couberam nele |
+| `SCA_TIMEOUT_MS` | `900000` (padrão) | idem, trivy |
+| `SCAN_JOB_IDLE_MS` | derivado | Silêncio até dar o job por abandonado. O padrão sai da tolerância do CLIENTE; fixá-lo abaixo dela faz o servidor recolher scans que estão sendo acompanhados |
+| `SCAN_MAX_OUTPUT_MB` | derivado (5% da caixa, entre 8 e 64) | Teto do JSON de resultado. Um JSON de N bytes custa **3 a 4× N** no V8 — é a única coisa deste caminho cujo tamanho não se conhece de antemão |
+| `SCAN_MAX_FINDINGS` | `5000` | Achados guardados por scan. Acima disso ficam os mais graves e o corte é dito na tela |
+
+Baixar `SCAN_MAX_FILES` é a alavanca mais direta quando não há CPU a dar: menos
+arquivos por scan, dentro do mesmo teto de tempo. O que fica de fora é dito na
+tela (`scan.truncated`), nunca some em silêncio.
 
 ---
 
