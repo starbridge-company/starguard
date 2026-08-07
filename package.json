@@ -6,6 +6,11 @@
   "workspaces": [
     "packages/*"
   ],
+  "//engines": "O npm 10 do Node 22 resolve a árvore de dependências de forma diferente do 11 e RECUSA este package-lock.json (Missing: esbuild@0.28.1). O lock é artefato do npm 11; a CI e o Dockerfile fixam essa major. Declarar aqui faz o aviso aparecer ANTES do erro críptico do npm ci.",
+  "engines": {
+    "node": ">=22",
+    "npm": ">=11"
+  },
   "scripts": {
     "setup": "node scripts/gen-keys.mjs",
     "predev": "node scripts/gen-keys.mjs",

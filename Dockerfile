@@ -11,7 +11,7 @@
 # Todos ficam na imagem. Sem eles a etapa degrada com mensagem — não quebra o app.
 #
 #   docker build -t starguard .
-#   docker run -p 3000:3000 --env-file .env.local starguard
+#   docker run -p 3003:3003 --env-file .env.local starguard
 # ============================================================
 
 ARG NODE_IMAGE=node:22-bookworm-slim
@@ -62,7 +62,7 @@ WORKDIR /app
 # em ASCII e morre com UnicodeDecodeError antes de escanear nada.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000 \
+    PORT=3003 \
     HOME=/home/node \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
@@ -180,7 +180,10 @@ USER node
 RUN command -v opengrep >/dev/null 2>&1 && opengrep --version >/dev/null 2>&1 \
       || echo "AVISO: opengrep indisponivel — SAST cai em erro explicativo em runtime."
 
-EXPOSE 3000
+# A porta do deploy. Continua sendo `$PORT`: quem hospeda (Render, Fly, Compose)
+# injeta a sua e ela vence este padrão — o `EXPOSE` é documentação da imagem,
+# não amarra. O HEALTHCHECK abaixo lê a variável, então acompanha sozinho.
+EXPOSE 3003
 
 # Clones descartáveis da Fase 3/4 vão para o tmpdir do SO.
 ENV TMPDIR=/tmp

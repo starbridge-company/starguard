@@ -5,7 +5,7 @@
 # ============================================================
 set -e
 
-: "${PORT:=3000}"
+: "${PORT:=3003}"
 
 # ---- 1. Chaves ----
 # Em produção defina JWT_PRIVATE_KEY, JWT_PUBLIC_KEY, COOKIE_SECRET e

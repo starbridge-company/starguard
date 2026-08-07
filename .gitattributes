@@ -1,0 +1,35 @@
+# ============================================================
+# Finais de linha — LF, e não por gosto.
+#
+# Um `docker-entrypoint.sh` gravado com CRLF no Windows vira `#!/bin/sh\r`, e o
+# Linux procura um interpretador chamado `sh\r`. O contêiner morre com:
+#
+#   [FATAL tini (7)] exec /usr/local/bin/docker-entrypoint.sh failed:
+#   No such file or directory
+#
+# — sobre um arquivo que ESTÁ lá, com permissão de execução. A mensagem aponta
+# para o arquivo errado (o script) em vez do certo (o interpretador), e o
+# `docker build` não reclama de nada: a imagem monta e só quebra ao subir.
+#
+# Aconteceu de verdade nesta base, ao editar o entrypoint por uma ferramenta que
+# escreve em modo texto no Windows. Uma linha aqui impede a classe inteira.
+# ============================================================
+
+# O padrão: o git normaliza para LF no repositório e entrega ao sistema o que
+# ele espera na cópia de trabalho.
+* text=auto eol=lf
+
+# Estes NUNCA podem virar CRLF, em máquina nenhuma: são executados por um shell
+# Linux dentro do contêiner.
+*.sh            text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Binários: o git não deve tentar converter nada.
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.vsix          binary
+*.pdf           binary

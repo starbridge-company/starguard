@@ -22,16 +22,52 @@ import { conteudoDoHook, instalarHook, removerHook } from "../src/hook";
 const pExecFile = promisify(execFile);
 let repo = "";
 
-beforeEach(async () => {
-  repo = await mkdtemp(join(tmpdir(), "sg-hook-"));
-  await pExecFile("git", ["init", "-q"], { cwd: repo });
-});
+/**
+ * Há `git` nesta máquina?
+ *
+ * Não é preciosismo. Num contêiner Linux enxuto (o que a CI usa para simular o
+ * ambiente limpo) o `git` pode não existir, e o `beforeEach` abaixo morria com
+ * `spawn git ENOENT` — derrubando os **onze** testes deste arquivo, inclusive
+ * os três que verificam `conteudoDoHook()`, que é função PURA e não chega perto
+ * de um repositório.
+ *
+ * Duas coisas erradas ali, e as duas foram consertadas:
+ *
+ *   1. teste de função pura não pode depender de ferramenta externa — hoje o
+ *      `beforeEach` do git vive só dentro das suítes que mexem em repositório;
+ *   2. faltando a ferramenta, a saída tem de DIZER isso. `spawn git ENOENT`
+ *      repetido onze vezes manda procurar bug no hook; "não há git aqui" manda
+ *      instalar o git.
+ */
+async function temGit(): Promise<boolean> {
+  try {
+    await pExecFile("git", ["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+const GIT = await temGit();
+if (!GIT) {
+  console.warn(
+    "[hook.test] `git` não encontrado — as suítes que precisam de um repositório " +
+      "foram puladas. As de conteúdo do hook continuam valendo."
+  );
+}
 
-afterEach(async () => {
-  await rm(repo, { recursive: true, force: true });
-});
+/** Cria o repositório temporário. Só para as suítes que de fato precisam. */
+function comRepositorio() {
+  beforeEach(async () => {
+    repo = await mkdtemp(join(tmpdir(), "sg-hook-"));
+    await pExecFile("git", ["init", "-q"], { cwd: repo });
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+}
 
-describe("instalação", () => {
+describe.skipIf(!GIT)("instalação", () => {
+  comRepositorio();
   it("instala em .git/hooks e o arquivo fica executável", async () => {
     const r = await instalarHook(repo, await conteudoDoHook());
     expect(r.ok).toBe(true);
@@ -89,7 +125,8 @@ describe("instalação", () => {
   });
 });
 
-describe("remoção", () => {
+describe.skipIf(!GIT)("remoção", () => {
+  comRepositorio();
   it("remove o nosso", async () => {
     await instalarHook(repo, await conteudoDoHook());
     const r = await removerHook(repo);

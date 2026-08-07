@@ -34,6 +34,16 @@ npm run dev        # gera chaves JWT automaticamente (predev) e sobe em :3000
 
 Acesse **http://localhost:3000** → login → onboarding → painel → relatório.
 
+> O `:3000` acima é do `next dev`. **O deploy é na porta 3003** — a imagem de
+> produção traz `PORT=3003` e o `render.yaml` declara o mesmo número:
+>
+> ```bash
+> docker build -t starguard .
+> docker run -p 3003:3003 --env-file .env.local starguard
+> ```
+>
+> `PORT` continua mandando: quem hospeda pode injetar a sua e ela vence o padrão.
+
 **Credenciais demo** (já preenchidas na tela de login):
 
 ```

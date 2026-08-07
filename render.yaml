@@ -28,6 +28,20 @@ services:
       - key: NODE_ENV
         value: production
 
+      # ---- A porta do serviço ----
+      #
+      # Declarada, e não deixada por conta da detecção do Render: sem um valor
+      # explícito ele adivinha a porta escutando o processo, e uma imagem que
+      # demora a subir pode ser marcada como saudável na porta errada. Com a
+      # variável posta, o `docker-entrypoint.sh` passa exatamente este número
+      # para o `next start` e o `healthCheckPath` bate na mesma porta.
+      #
+      # É o MESMO padrão do Dockerfile (`ENV PORT=3003`). Estão nos dois lugares
+      # porque servem a coisas diferentes: aqui vale para o Render, lá vale para
+      # quem roda a imagem à mão.
+      - key: PORT
+        value: 3003
+
       # ---- Banco ----
       # `sync: false` = o Render pede o valor na criação e NÃO o versiona aqui.
       # Vale para tudo que é segredo: este arquivo vai para o git.

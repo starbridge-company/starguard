@@ -2541,6 +2541,68 @@ aplicados pelo próprio entrypoint.
 | Build da imagem | Corrigido: `packages/*/dist` e `*.vsix` foram para o `.dockerignore` — o `extension.js` gerado pelo esbuild em pasta do OneDrive chega ao contexto com um modo que o tar do BuildKit recusa, e o `docker build` morria com uma mensagem que não aponta para a causa |
 | Suíte | **856 testes** em 57 arquivos (eram 823 em 55) · `typecheck` e `lint` sem erro |
 
+### BUG-27 · A CI quebrava em todo push, no `npm ci` ✅
+
+**Relato:** "a CI sempre está quebrando".
+
+> ✅ **Corrigido em 07/08/2026.** Não era o lock estar errado: era a **major do
+> npm** ser parte do ambiente e ninguém ter dito isso ao GitHub Actions.
+>
+> ```
+> npm error `npm ci` can only install packages when your package.json and
+> npm error package-lock.json are in sync.
+> npm error Missing: esbuild@0.28.1 from lock file   (+ 26 pacotes @esbuild/*)
+> ```
+>
+> O `package-lock.json` é artefato da versão do npm que o gerou. Este foi
+> gerado pelo **npm 11**, que aninha `esbuild@0.28.1` sob `tsx` (que entra por
+> `drizzle-kit` e por `vite`); o **npm 10**, que vem embutido no Node 22,
+> resolve a árvore de outra forma e espera esse pacote noutro lugar — então
+> recusa.
+>
+> **O Dockerfile já sabia disso e fixava `npm@11`** no estágio `deps`, com o
+> comentário explicando exatamente este erro. A CI, que usa
+> `actions/setup-node` com `node-version: 22`, nunca recebeu o mesmo cuidado —
+> e por isso quebrava em todo push enquanto a imagem montava sem reclamar.
+>
+> A mensagem do npm sugere `npm install`, e seguir a sugestão seria o conserto
+> errado: reescreveria o lock em toda máquina com npm diferente, trocando um
+> build quebrado por um lock instável.
+>
+> Três coisas foram feitas:
+>
+> 1. **`npm i -g npm@11` antes do `npm ci`**, nos DOIS jobs que instalam
+>    (`verificar` e `e2e`) — cada job do Actions começa numa máquina limpa.
+> 2. **`engines: { node: ">=22", npm: ">=11" }`** no `package.json`, para que
+>    quem usar npm 10 veja o requisito em vez do EUSAGE críptico.
+> 3. O `packages/vscode` no lock estava **desatualizado** (`version: 0.1.0`,
+>    com `@starguard/core` como dependência de runtime em vez de dev). O
+>    `npm install --package-lock-only` acertou isso junto — 7 linhas somadas,
+>    5 removidas, **nenhuma versão de pacote alterada**.
+
+**Um segundo defeito, que só apareceria depois de consertar o primeiro**
+
+> Com o `npm ci` passando, a suíte quebrava: `spawn git ENOENT` derrubando os
+> **onze** testes de `packages/cli/tests/hook.test.ts` — inclusive os três que
+> verificam `conteudoDoHook()`, que é **função pura** e não chega perto de um
+> repositório. A causa era um `beforeEach` global rodando `git init` para todo
+> mundo.
+>
+> Duas coisas erradas, as duas consertadas: o `beforeEach` do git passou a
+> viver só dentro das suítes que mexem em repositório, e a ausência da
+> ferramenta virou aviso explícito com `describe.skipIf`, em vez de onze
+> `spawn git ENOENT` mandando procurar bug no hook.
+
+**Como foi validado — reproduzindo a falha e a correção**
+
+| O que | Resultado **medido** |
+|---|---|
+| Reprodução da falha | `node:22-bookworm-slim` (npm **10.9.8**, o mesmo do runner): `npm ci` sai com **EUSAGE**, `Missing: esbuild@0.28.1` |
+| A correção | Mesmo contêiner, após `npm i -g npm@11`: `npm ci` **exit 0** |
+| CI inteira em Linux limpo | `npm ci` OK · `typecheck` OK · `lint` OK · **858 testes, 57 arquivos, todos passando** |
+| Sem `git` no contêiner | 3 testes puros passam, **8 pulados com aviso**, a suíte NÃO falha |
+| Job da imagem | `docker build --target deps` monta com o lock novo |
+
 ## As 8 pendências que sobraram, e o que cada uma precisa de você
 
 Esta sprint fechou **24 das 32** pendências abertas. As oito que restam têm uma

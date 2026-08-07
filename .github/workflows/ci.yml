@@ -23,6 +23,29 @@ jobs:
           node-version: 22
           cache: npm
 
+      # ---- A MAJOR do npm é parte do ambiente, não detalhe ----
+      #
+      # `package-lock.json` é artefato da versão do npm que o gerou. O npm 10
+      # que vem embutido no Node 22 resolve a árvore de forma diferente do
+      # npm 11 e RECUSA este lock:
+      #
+      #   npm error `npm ci` can only install packages when your package.json
+      #   and package-lock.json are in sync.
+      #   npm error Missing: esbuild@0.28.1 from lock file
+      #
+      # O lock não está errado: ele traz `esbuild@0.28.1` aninhado sob `tsx`
+      # (que entra por `drizzle-kit` e por `vite`), e o npm 10 espera essa
+      # dependência noutro lugar da árvore. A mensagem manda "rodar npm
+      # install", o que reescreveria o lock em toda máquina com npm diferente —
+      # trocando um build quebrado por um lock instável.
+      #
+      # O Dockerfile já fixava `npm@11` por este exato motivo (ver o comentário
+      # do estágio `deps`); a CI ficou de fora e quebrava a cada push. Medido:
+      # com o npm 10.9.8 do Node 22, `npm ci` sai com EUSAGE; com o npm 11,
+      # sai 0.
+      - name: Fixar a major do npm (o lock é artefato dela)
+        run: npm i -g npm@11 --no-fund
+
       - run: npm ci
 
       - name: Tipos
@@ -70,6 +93,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # Mesmo motivo do job `verificar`: o lock é artefato do npm 11 e o npm 10
+      # do Node 22 o recusa. Repetido aqui porque cada job do Actions começa
+      # numa máquina limpa — não há estado a herdar.
+      - name: Fixar a major do npm (o lock é artefato dela)
+        run: npm i -g npm@11 --no-fund
 
       - run: npm ci
       - run: npm run setup           # gera as chaves JWT/cookie
