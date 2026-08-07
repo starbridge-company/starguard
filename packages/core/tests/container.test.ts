@@ -17,7 +17,9 @@ import {
   cpusDeCgroupV1,
   cpusDeCgroupV2,
   memoriaDeCgroup,
-  memoriaMinimaDoScanner,
+  modoEconomicoParaRecursos,
+  concorrenciaDaAnaliseParaRecursos,
+  memoriaDoTrivyParaRecursos,
   processosPara,
   processosDeScan,
   scanSlotsParaRecursos,
@@ -108,25 +110,19 @@ describe("memória do contêiner", () => {
   });
 });
 
-describe("piso de segurança dos scanners no servidor", () => {
-  it("SAST reserva mais memória que SCA e ambos são configuráveis", () => {
-    const antesSast = process.env.SAST_MIN_SERVER_MEMORY_MB;
-    const antesSca = process.env.SCA_MIN_SERVER_MEMORY_MB;
-    try {
-      delete process.env.SAST_MIN_SERVER_MEMORY_MB;
-      delete process.env.SCA_MIN_SERVER_MEMORY_MB;
-      expect(memoriaMinimaDoScanner("sast")).toBe(1024);
-      expect(memoriaMinimaDoScanner("sca")).toBe(768);
-      process.env.SAST_MIN_SERVER_MEMORY_MB = "1536";
-      process.env.SCA_MIN_SERVER_MEMORY_MB = "896";
-      expect(memoriaMinimaDoScanner("sast")).toBe(1536);
-      expect(memoriaMinimaDoScanner("sca")).toBe(896);
-    } finally {
-      if (antesSast === undefined) delete process.env.SAST_MIN_SERVER_MEMORY_MB;
-      else process.env.SAST_MIN_SERVER_MEMORY_MB = antesSast;
-      if (antesSca === undefined) delete process.env.SCA_MIN_SERVER_MEMORY_MB;
-      else process.env.SCA_MIN_SERVER_MEMORY_MB = antesSca;
-    }
+describe("modo econômico dos scanners", () => {
+  it("512 MB serializa o trabalho em vez de recusá-lo", () => {
+    expect(modoEconomicoParaRecursos(512)).toBe(true);
+    expect(concorrenciaDaAnaliseParaRecursos(512)).toBe(1);
+    expect(memoriaDoTrivyParaRecursos(512)).toBe(192);
+  });
+
+  it("cresce gradualmente com a caixa e nunca passa de quatro fases", () => {
+    expect(modoEconomicoParaRecursos(1024)).toBe(false);
+    expect(concorrenciaDaAnaliseParaRecursos(1536)).toBe(2);
+    expect(concorrenciaDaAnaliseParaRecursos(3072)).toBe(3);
+    expect(concorrenciaDaAnaliseParaRecursos(8192)).toBe(4);
+    expect(memoriaDoTrivyParaRecursos(4096)).toBe(1024);
   });
 });
 
@@ -180,6 +176,10 @@ describe("orçamento combinado de CPU e memória", () => {
   it("o orçamento de 4 GB deixa metade da caixa fora do Opengrep", () => {
     expect(sastMaxMemoryParaRecursos(4096, 1, 3)).toBe(682);
     expect(sastMaxMemoryParaRecursos(4096, 2, 1)).toBe(1024);
+  });
+
+  it("em 512 MB o Opengrep recebe 192 MB e deixa mais de 60% para Node e SO", () => {
+    expect(sastMaxMemoryParaRecursos(512, 1, 1)).toBe(192);
   });
 
   it("nem uma caixa enorme autoriza mais de 1 GB por filho", () => {

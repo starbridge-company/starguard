@@ -383,19 +383,14 @@ describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
   // que o outro arquivo já não afirme melhor.
 });
 
-describe("o SAST não pode aceitar um job que derrubará o servidor", () => {
-  it("confere a memória antes de gravar o pacote e criar o job", async () => {
+describe("o servidor pequeno executa em modo econômico", () => {
+  it("não recusa SAST/SCA por um piso fixo de memória", async () => {
     const fonte = await import("node:fs/promises").then((fs) =>
       fs.readFile("app/api/scan/route.ts", "utf8")
     );
-    const confere = fonte.indexOf("memoriaInsuficienteParaScanner(analyzer)");
-    const grava = fonte.indexOf("await prepararDiretorio(aprovados)");
-    const cria = fonte.indexOf("job = criarJob({");
-    expect(confere).toBeGreaterThan(0);
-    expect(confere).toBeLessThan(grava);
-    expect(confere).toBeLessThan(cria);
-    expect(fonte).toContain("memoriaInsuficienteParaScanner");
-    expect(fonte).toContain("scan.serverMemoryTooLow");
+    expect(fonte).not.toContain("memoriaInsuficienteParaScanner");
+    expect(fonte).not.toContain("scan.serverMemoryTooLow");
+    expect(fonte).toContain("modo econômico");
   });
 });
 

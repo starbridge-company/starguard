@@ -19,6 +19,7 @@ import { lookupCatalog } from "./catalog/index";
 import { DEFAULT_LOCALE, LOCALE_AI_NAME, type Locale } from "./i18n/config";
 import { translate } from "./i18n/translate";
 import type { FindingExplain, Vulnerability, DependencyVuln } from "./types";
+import { modoEconomico } from "./container";
 
 /** Teto de regras distintas enviadas à IA numa passada. */
 const MAX_RULES_PER_CALL = 25;
@@ -116,7 +117,11 @@ export async function enrichFindings(
 
   // 2) IA, uma chamada para todas as regras que sobraram.
   const groups = [...pending.values()].slice(0, MAX_RULES_PER_CALL);
-  if (groups.length) {
+  // Catálogo e texto do scanner continuam completos no modo econômico; apenas
+  // a explicação opcional por IA fica para caixas >= 1 GB, evitando sobrepor
+  // uma resposta grande ao próximo processo nativo.
+  const permiteIa = !modoEconomico() || process.env.ENRICH_AI_IN_LOW_MEMORY === "true";
+  if (groups.length && permiteIa) {
     try {
       const prompt = groups
         .map(

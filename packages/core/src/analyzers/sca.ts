@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
-import { memoriaInsuficienteParaScanner, tetoDeSaidaMb } from "../container";
+import { ambienteDoTrivy, tetoDeSaidaMb } from "../container";
 import { parseTrivy } from "../parsers";
 import { ScanUnavailable } from "../git";
 // `morreuNoTeto` mora em `sast.ts` porque foi lá que o defeito foi medido, e
@@ -75,19 +75,6 @@ export async function runSca(
   const engine = ENGINES.sca;
   if (engine === "none") return [];
 
-  if (process.env.STARGUARD_SERVER_RUNTIME === "1") {
-    const memoria = memoriaInsuficienteParaScanner("sca");
-    if (memoria) {
-      throw new ScanUnavailable(
-        translate(opts.locale ?? DEFAULT_LOCALE, "scan.serverMemoryTooLow", {
-          scanner: "SCA",
-          min: memoria.min,
-          actual: memoria.actual,
-        })
-      );
-    }
-  }
-
   // O painel entrega um clone completo, mas o SCA de vulnerabilidades só usa
   // manifestos e lockfiles. Copiar esses poucos arquivos evita o Trivy andar
   // por todo o repositório (incluindo assets/gerados não ignorados) e não
@@ -117,7 +104,7 @@ export async function runSca(
   ];
 
   try {
-    await comVaga(
+    return await comVaga(
       () => {
         // Ver o mesmo trecho em `sast.ts`: a transição é o que se anuncia.
         opts.report?.(MSG_ESCANEANDO_LOCAL);
@@ -127,11 +114,11 @@ export async function runSca(
           // Com `-o` o cano só carrega aviso. Ver `sast.ts`.
           maxBuffer: 1024 * 1024,
           signal: opts.signal,
-        });
+          env: ambienteDoTrivy(),
+        }).then(() => lerDependencias(saida, opts));
       },
       (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
-    return await lerDependencias(saida, opts);
   } catch (e: unknown) {
     const err = e as { stdout?: string; message?: string };
     if (!opts.signal?.aborted) {

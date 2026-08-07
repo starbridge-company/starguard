@@ -61,8 +61,6 @@ import {
 } from "@/lib/http";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { normalizeLocale } from "@/lib/i18n/config";
-import { translateIn } from "@starguard/core/i18n/translate";
-import { memoriaInsuficienteParaScanner } from "@starguard/core/container";
 import { processInstanceId } from "@/lib/process-instance";
 import {
   acharJob,
@@ -221,24 +219,9 @@ export async function POST(req: NextRequest) {
   }
   const locale = normalizeLocale(corpo?.locale);
 
-  // O limite precisa ser conferido antes de gravar os arquivos e antes de
-  // criar um job. Em producao, o host tem 4 GB, mas o cgroup antigo ainda
-  // entrega apenas 512 MB ao container: o Opengrep derruba o Node e o Map em
-  // memoria desaparece, que chega ao cliente como um 404 misterioso.
-  {
-    const memoria = memoriaInsuficienteParaScanner(analyzer);
-    if (memoria) {
-      return jsonError(
-        503,
-        translateIn(locale, "scan.serverMemoryTooLow", {
-          scanner: analyzer.toUpperCase(),
-          min: memoria.min,
-          actual: memoria.actual,
-        }),
-        null
-      );
-    }
-  }
+  // 512 MB ativa o modo econômico no núcleo; não é motivo para recusar o
+  // trabalho. O portão global serializa os scanners e cada processo recebe um
+  // orçamento derivado do cgroup.
   let files = Array.isArray(corpo?.files) ? corpo!.files! : [];
   if (files.length === 0) return jsonError(400, "Nenhum arquivo enviado.", "err.badRequest");
   if (files.length > MAX_FILES) {

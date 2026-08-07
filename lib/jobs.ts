@@ -26,6 +26,7 @@ import { translate } from "@/lib/i18n/translate";
 import { ANALYZER_IDS, type AnalyzerId } from "@/types";
 import type { Job, JobInput, JobInputPublic, PhaseState } from "@/types";
 import { decryptToken, encryptToken, type EncryptedToken } from "@/lib/crypto";
+import { concorrenciaDaAnalise } from "@starguard/core/container";
 
 // Segredos transitórios (nunca vão ao BD).
 interface Transient {
@@ -344,6 +345,9 @@ export async function runJob(id: string, transientCifrado?: unknown): Promise<vo
       locale,
       systemDescription: raw.systemDescription,
       skills: raw.skills,
+      // Em 512 MB o painel executa uma fase por vez. Em caixas maiores cresce
+      // automaticamente até quatro, sem uma configuração histórica fixa.
+      concurrency: concorrenciaDaAnalise(),
       sinks: [sink],
     });
     audit("analyze.done", { jobId: id });

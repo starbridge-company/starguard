@@ -151,7 +151,6 @@ RUN set -eu; \
       echo "AVISO: opengrep-rules nao clonado — SAST usara o registro remoto (auto)."; \
     fi
 ENV SAST_RULES=/opt/opengrep-rules
-ENV STARGUARD_SERVER_RUNTIME=1
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules

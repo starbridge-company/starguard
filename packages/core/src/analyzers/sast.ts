@@ -19,7 +19,6 @@ import { regrasDoSast, regrasParaOCodigo, regrasUsaveis } from "../sast-rules";
 // Do `container`, e não do `config`: as duas leem o cgroup, e `config.ts`
 // precisa continuar importável do Edge runtime. Ver o cabeçalho de ambos.
 import {
-  memoriaInsuficienteParaScanner,
   sastJobs,
   sastMaxMemoryMb,
   tetoDeSaidaMb,
@@ -150,19 +149,6 @@ export async function runSast(
   const engine = ENGINES.sast;
   if (engine === "none") return [];
 
-  if (process.env.STARGUARD_SERVER_RUNTIME === "1") {
-    const memoria = memoriaInsuficienteParaScanner("sast");
-    if (memoria) {
-      throw new ScanUnavailable(
-        translate(opts.locale ?? DEFAULT_LOCALE, "scan.serverMemoryTooLow", {
-          scanner: "SAST",
-          min: memoria.min,
-          actual: memoria.actual,
-        })
-      );
-    }
-  }
-
   const bin = engine === "semgrep" ? BIN.semgrep : BIN.opengrep;
   // execFile com argumentos em array — o `dir` é caminho controlado por nós.
   // `sastConfig()` = "auto" (registro remoto) ou um diretório de regras local.
@@ -289,10 +275,10 @@ export async function runSast(
   }
 
   try {
-    // A vaga envolve só o PROCESSO NATIVO. Segurá-la durante o parse ou o
-    // enriquecimento faria um scan barato esperar por trabalho que não disputa
-    // CPU com ninguém. Ver `scan-slot.ts`.
-    await comVaga(
+    // A vaga inclui a leitura do resultado: em 512 MB, soltar o próximo
+    // scanner enquanto o Node ainda faz `JSON.parse` sobre o anterior recria o
+    // mesmo pico por outra porta.
+    return await comVaga(
       () => {
         // Dito na TRANSIÇÃO, e não antes: entre pedir a vaga e recebê-la pode
         // haver minutos, e anunciar "escaneando" enquanto se espera é a mesma
@@ -310,11 +296,10 @@ export async function runSast(
           // Cancelar de fora precisa MATAR o opengrep, não só parar de esperar
           // por ele. Ver o cabeçalho desta função.
           signal: opts.signal,
-        });
+        }).then(() => lerAchados(saida, opts));
       },
       (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
-    return await lerAchados(saida, opts);
   } catch (e: unknown) {
     const err = e as { stdout?: string; message?: string; name?: string };
     // Exit != 0 é o que o opengrep devolve quando ENCONTRA algo — o arquivo de

@@ -158,13 +158,20 @@ variável daqui contorna um cgroup.
 | `SCAN_JOB_TTL_MS` | `120000` | Fallback para resultado pronto. Clientes atuais enviam um ACK (`DELETE`) assim que consomem e liberam a cópia imediatamente |
 | `SCAN_MAX_OUTPUT_MB` | derivado (5% da caixa, entre 8 e 64) | Teto do JSON de resultado. Um JSON de N bytes custa **3 a 4× N** no V8 — é a única coisa deste caminho cujo tamanho não se conhece de antemão |
 | `SCAN_MAX_FINDINGS` | `5000` | Achados guardados por scan. Acima disso ficam os mais graves e o corte é dito na tela |
-| `SAST_MIN_SERVER_MEMORY_MB` | `1024` | Piso de segurança: abaixo dele o servidor responde 503 antes de iniciar o Opengrep, evitando OOM e permitindo fallback local |
-| `SCA_MIN_SERVER_MEMORY_MB` | `768` | Piso equivalente do Trivy; evita que a atualização/carregamento da base derrube o Node |
+| `ANALYSIS_CONCURRENCY` | derivado | Fases simultâneas do painel. Em 512 MB vale `1`; cresce gradualmente até `4`. Só fixe se tiver medição que justifique |
+| `GOMEMLIMIT` / `GOMAXPROCS` | derivados | Limites suaves do Trivy. Em 512 MB o padrão é `192MiB` e um processo; valores explícitos continuam tendo precedência |
+| `ENRICH_AI_IN_LOW_MEMORY` | `false` | Em menos de 1 GB usa catálogo/texto do scanner e não sobrepõe a explicação opcional por IA ao próximo scanner |
 | `QUEUE_LOCK_HEARTBEAT_MS` / `ANALYSIS_HEARTBEAT_MS` | `30000` | Mantêm lock da fila e `updated_at` vivos durante scanners longos; devem ficar bem abaixo de `QUEUE_LOCK_STALE_MS`/`ANALYSIS_STALE_MS` |
 
 Baixar `SCAN_MAX_FILES` é a alavanca mais direta quando não há CPU a dar: menos
 arquivos por scan, dentro do mesmo teto de tempo. O que fica de fora é dito na
 tela (`scan.truncated`), nunca some em silêncio.
+
+Uma cota de 512 MB não bloqueia mais SAST nem SCA. Ela ativa automaticamente o
+modo econômico: painel com uma fase por vez, uma vaga nativa, `--jobs 1`, 192 MB
+para o Opengrep, limite suave de 192 MiB para o Trivy e leitura do resultado
+antes de liberar a vaga seguinte. Aumentar a cota continua recomendado para
+velocidade, mas deixou de ser condição para a análise existir.
 
 ---
 

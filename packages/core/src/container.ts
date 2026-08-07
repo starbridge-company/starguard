@@ -107,23 +107,49 @@ export function memoriaDisponivelMb(): number | null {
   return Number.isFinite(host) && host > 0 ? host : null;
 }
 
-export type ScannerNativo = "sast" | "sca";
-
-/** Piso para o processo Node e o scanner nativo coexistirem sem OOM. */
-export function memoriaMinimaDoScanner(scanner: ScannerNativo): number {
-  const nome = scanner === "sast" ? "SAST_MIN_SERVER_MEMORY_MB" : "SCA_MIN_SERVER_MEMORY_MB";
-  const configurado = Number(process.env[nome]);
-  if (Number.isFinite(configurado) && configurado > 0) return Math.floor(configurado);
-  return scanner === "sast" ? 1024 : 768;
+/**
+ * Abaixo de 1 GB os scanners continuam funcionando, mas tudo que os cerca
+ * precisa ser serializado. O erro anterior tratava 512 MB como incapacidade e
+ * recusava o trabalho antes de tentá-lo, mesmo com `--jobs 1`.
+ */
+export function modoEconomicoParaRecursos(memoriaMb: number | null): boolean {
+  return memoriaMb !== null && memoriaMb < 1024;
 }
 
-/** `null` quando cabe; números reais quando iniciar seria arriscado. */
-export function memoriaInsuficienteParaScanner(
-  scanner: ScannerNativo
-): { actual: number; min: number } | null {
-  const actual = memoriaDisponivelMb();
-  const min = memoriaMinimaDoScanner(scanner);
-  return actual !== null && actual < min ? { actual, min } : null;
+export function modoEconomico(): boolean {
+  return modoEconomicoParaRecursos(memoriaDisponivelMb());
+}
+
+/** Paralelismo das fases da análise, separado das vagas do scanner nativo. */
+export function concorrenciaDaAnaliseParaRecursos(memoriaMb: number | null): number {
+  if (!memoriaMb) return 4;
+  return Math.max(1, Math.min(4, Math.ceil(memoriaMb / 1024)));
+}
+
+export function concorrenciaDaAnalise(): number {
+  const env = Number(process.env.ANALYSIS_CONCURRENCY);
+  if (Number.isFinite(env) && env >= 1) return Math.floor(env);
+  return concorrenciaDaAnaliseParaRecursos(memoriaDisponivelMb());
+}
+
+/** Limite suave do heap Go do Trivy; deixa o Node e o SO respirarem. */
+export function memoriaDoTrivyParaRecursos(memoriaMb: number | null): number | null {
+  if (!memoriaMb) return null;
+  const fracao = memoriaMb < 1024 ? 0.375 : 0.5;
+  return Math.max(128, Math.min(1024, Math.floor(memoriaMb * fracao)));
+}
+
+export function ambienteDoTrivy(): NodeJS.ProcessEnv {
+  const memoria = memoriaDoTrivyParaRecursos(memoriaDisponivelMb());
+  return {
+    ...process.env,
+    GOMAXPROCS: process.env.GOMAXPROCS || String(paralelismoDisponivel()),
+    ...(process.env.GOMEMLIMIT
+      ? {}
+      : memoria
+        ? { GOMEMLIMIT: `${memoria}MiB` }
+        : {}),
+  };
 }
 
 /** Origem da memória publicada no health, para o número não aparecer sem causa. */
@@ -237,11 +263,12 @@ export function sastMaxMemoryParaRecursos(
   slots: number,
   processosPorSast: number
 ): number {
+  const fracao = totalMb < 1024 ? 0.375 : 0.5;
   return Math.max(
     64,
     Math.min(
       1024,
-      Math.floor((Math.max(1, totalMb) * 0.5) / Math.max(1, slots) / Math.max(1, processosPorSast))
+      Math.floor((Math.max(1, totalMb) * fracao) / Math.max(1, slots) / Math.max(1, processosPorSast))
     )
   );
 }
@@ -298,6 +325,9 @@ export function limitesDaCaixa(): {
   sastJobs: number;
   sastJobsDe: "env" | "cgroup" | "hospedeiro" | "memoria";
   scanSlotsDe: "env" | "cgroup" | "hospedeiro";
+  modoEconomico: boolean;
+  concorrenciaDaAnalise: number;
+  trivyMemoryMb: number | null;
 } {
   const hospedeiro = Math.max(1, cpus().length);
   const cotaDeCpu =
@@ -324,6 +354,9 @@ export function limitesDaCaixa(): {
           ? "memoria"
           : daCota,
     scanSlotsDe: Number.isFinite(envSlots) && envSlots >= 1 ? "env" : daCota,
+    modoEconomico: modoEconomico(),
+    concorrenciaDaAnalise: concorrenciaDaAnalise(),
+    trivyMemoryMb: memoriaDoTrivyParaRecursos(memoriaDisponivelMb()),
   };
 }
 
