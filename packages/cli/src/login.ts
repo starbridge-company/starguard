@@ -48,8 +48,13 @@ function abrirNavegador(url: string): void {
 
 /** Página que o navegador mostra ao voltar. Sem CSS externo, sem rede. */
 function paginaFinal(titulo: string, detalhe: string): string {
+  // Escapa todos os caracteres HTML-sensíveis, incluindo aspas simples, para
+  // que qualquer valor interpolado não possa injetar marcação/atributos.
   const esc = (s: string) =>
-    s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+    s.replace(
+      /[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+    );
   return `<!doctype html><html lang="pt-BR"><meta charset="utf-8">
 <title>StarGuard</title>
 <body style="font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#0f1512;color:#e8efea">
