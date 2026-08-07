@@ -6,6 +6,24 @@ node_modules
 .next
 out
 build
+coverage
+
+# Artefatos de build dos PACOTES.
+#
+# Nenhum deles faz falta na imagem: o `next build` resolve `@starguard/core`
+# pelo CÓDIGO-FONTE (o alias de `tsconfig.json`), e a extensão do VS Code não é
+# servida pelo app. Mandá-los no contexto era, além de desperdício, um build
+# QUEBRADO nesta máquina:
+#
+#   ERROR: failed to solve: failed to checksum file
+#   packages/vscode/dist/extension.js: archive/tar: unknown file mode ?rwxr-xr-x
+#
+# O esbuild grava o bundle com um modo que o tar do BuildKit recusa quando o
+# projeto vive numa pasta do OneDrive no Windows. O sintoma não aponta para a
+# causa — parece problema do Docker — e impede gerar a imagem de produção a
+# partir de um clone que já tenha compilado os pacotes uma vez.
+packages/*/dist
+*.vsix
 
 .git
 .gitignore

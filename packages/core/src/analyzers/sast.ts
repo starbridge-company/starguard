@@ -18,7 +18,7 @@ import { regrasDoSast, regrasUsaveis } from "../sast-rules";
 import { sastJobs, sastMaxMemoryMb } from "../container";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
-import { comSocorroLocal, probeBinary } from "../binaries";
+import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
 import { enrichFindings } from "../enrich";
 import { makeCodeFixer } from "../fix/code-fixer";
 import { empacotarParaScan } from "../bundle";
@@ -29,6 +29,8 @@ import {
   limitesDoServidor,
   servidorRespondeu,
   usingRemoteScan,
+  MSG_ESCANEANDO_LOCAL,
+  MSG_VAGA_NA_FILA,
   opcoesDeScanLocal,
   RemoteScanError,
   type OpcoesDeScanLocal,
@@ -136,7 +138,7 @@ export async function runSast(
         // mentira que a barra parada contava. Quem lê isto do lado do servidor
         // (`lib/scan-jobs.ts`) usa estas duas chaves para saber se o job está
         // na fila ou trabalhando.
-        opts.report?.("scan.scanning");
+        opts.report?.(MSG_ESCANEANDO_LOCAL);
         return pExecFile(bin, args, {
           cwd: dir,
           timeout: 300_000,
@@ -146,7 +148,7 @@ export async function runSast(
           signal: opts.signal,
         });
       },
-      (posicao) => opts.report?.("scan.slotQueued", { n: posicao })
+      (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
     return parseSemgrep(JSON.parse(stdout));
   } catch (e: unknown) {
@@ -266,18 +268,32 @@ export const sastAnalyzer: Analyzer<Vulnerability[]> = {
     if (usingRemoteScan()) return { ok: true, detail: "servidor" };
     const bin = sastBinary()!;
     const r = await probeBinary(bin);
+    // `pareceInstalado`, e não `r.present`: uma sondagem que estourou o teto é
+    // desconhecimento, não ausência — e tirar o SAST do plano por causa dela
+    // era o que fazia a análise seguinte sair SEM SCANNER NENHUM enquanto a
+    // anterior ainda ocupava a máquina. Ver o cabeçalho de `binaries.ts`.
+    const instalado = pareceInstalado(r);
     // Binário presente e nenhuma regra é um caminho SEM saída com opengrep:
     // `--config auto` sai com exit 2 e saída vazia depois de ~27 s tentando a
     // rede, e o que chegava à tela era `Unexpected end of JSON input` — um erro
     // de parser no lugar de "faltam regras". Ver AUDITORIA.md#ARQ-18.
-    if (r.present && !regrasUsaveis()) {
+    if (instalado && !regrasUsaveis()) {
       return { ok: false, reason: "no_rules", detail: bin };
     }
     // O motivo carrega o NOME do binário: "instale o opengrep" é acionável,
     // "scanner indisponível" manda a pessoa adivinhar. Ver AUDITORIA.md#UX-15.
-    return r.present
-      ? { ok: true, detail: r.version }
-      : { ok: false, reason: "binary_missing", detail: bin };
+    // `||`, e não `??`: a produção devolve `version: ""` para o opengrep (ele
+    // não imprime nada no stdout do contêiner), e string vazia não cai no
+    // fallback de `??` — o cartão ficava sem detalhe nenhum.
+    if (instalado) return { ok: true, detail: r.version || bin };
+    // "não consigo INICIAR" e "não está aqui" pedem coisas diferentes de quem
+    // lê: a primeira é reiniciar o servidor, a segunda é instalar. Ver
+    // `BinaryProbeReason` em `binaries.ts`.
+    return {
+      ok: false,
+      reason: r.reason === "spawn_failed" ? "spawn_failed" : "binary_missing",
+      detail: bin,
+    };
   },
 
   async run(ctx) {

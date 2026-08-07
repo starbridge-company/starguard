@@ -44,6 +44,13 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { audit } from "@/lib/auth";
+// Estático, e não dinâmico como `runSast`/`runSca`: `scan-transport.ts` é TS
+// puro (não toca em `node:*`), então importá-lo não arrasta o núcleo NODE-ONLY
+// para o grafo de quem carrega este módulo.
+import {
+  MSG_ESCANEANDO_LOCAL,
+  MSG_VAGA_NA_FILA,
+} from "@starguard/core/scan-transport";
 import type { Locale } from "@/lib/i18n/config";
 
 export type EstadoDoScan = "queued" | "running" | "done" | "error" | "cancelled";
@@ -257,10 +264,18 @@ async function executar(job: ScanJob): Promise<void> {
     const opcoes = {
       signal: job.abortar.signal,
       report: (chave: string, valores?: Record<string, string | number>) => {
-        if (chave === "scan.slotQueued") {
+        // As CONSTANTES do núcleo, e não literais repetidas aqui.
+        //
+        // Quem escaneia neste ponto é o servidor, localmente; a frase "no
+        // servidor" é montada pelo CLIENTE ao ver `running`. Enquanto os dois
+        // lados comparavam literais escritas à mão, bastava renomear a chave no
+        // analisador para o job nunca mais sair de `queued` — e o cliente
+        // mostrar fila eterna com o scan rodando até o fim. Tipo, lint e testes
+        // passam os três diante de duas strings que deixaram de coincidir.
+        if (chave === MSG_VAGA_NA_FILA) {
           job.status = "queued";
           job.vaga = typeof valores?.n === "number" ? valores.n : undefined;
-        } else if (chave === "scan.scanning") {
+        } else if (chave === MSG_ESCANEANDO_LOCAL) {
           job.status = "running";
           job.vaga = undefined;
         }

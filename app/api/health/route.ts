@@ -1,6 +1,6 @@
 import { jsonOk } from "@/lib/http";
 import { checkSchema, schemaMessage, MIGRATE_HINT } from "@/lib/schema-check";
-import { checkBinaries } from "@starguard/core/binaries";
+import { checkBinaries, type BinaryStatus } from "@starguard/core/binaries";
 import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot";
 import { jobsAtivos, recolherAbandonados, totalDeJobs } from "@/lib/scan-jobs";
 
@@ -30,12 +30,22 @@ export const dynamic = "force-dynamic";
  * não deu para medir. Uma resposta parcial e pontual vale mais que uma completa
  * que nunca chega.
  */
-const PRAZO_CHECAGEM_MS = Number(process.env.HEALTH_TIMEOUT_MS) || 8_000;
+/**
+ * Função, e não constante de módulo — mesma razão do `aiHttp()`: uma constante
+ * é congelada na avaliação do módulo, e um teste que precise encurtar o prazo
+ * teria de reimportar a rota inteira para consegui-lo. Aqui isso é mais que
+ * conveniência: sem poder encurtá-lo, o caminho do prazo ESTOURADO — que é
+ * justamente o que a produção exercita — só seria testável esperando 8 s.
+ */
+function prazoDeChecagem(): number {
+  return Number(process.env.HEALTH_TIMEOUT_MS) || 8_000;
+}
 
 function comPrazo<T>(promessa: Promise<T>, aoEstourar: T): Promise<T> {
+  const relogio = prazoDeChecagem();
   return Promise.race([
     promessa.catch(() => aoEstourar),
-    new Promise<T>((r) => setTimeout(() => r(aoEstourar), PRAZO_CHECAGEM_MS)),
+    new Promise<T>((r) => setTimeout(() => r(aoEstourar), relogio)),
   ]);
 }
 
@@ -52,9 +62,24 @@ export async function GET() {
       expected: 0,
       applied: 0,
       pending: [],
-      error: `Sem resposta do banco em ${PRAZO_CHECAGEM_MS} ms.`,
+      error: `Sem resposta do banco em ${prazoDeChecagem()} ms.`,
     }),
-    comPrazo(checkBinaries(), []),
+    // `null`, e NÃO `[]`, quando o prazo estoura.
+    //
+    // Lista vazia é indistinguível de "conferi e está tudo certo" — e era
+    // exatamente isso que a rota respondia. Medido contra a produção, na
+    // primeira requisição depois de a instância acordar:
+    //
+    //   {"status":"ok", …, "scanners":[], "scan":{"slots":1,…}}
+    //
+    // Luz verde com ZERO conhecimento sobre os scanners, no único momento em
+    // que alguém consulta esta rota — quando desconfia que algo está errado. E
+    // não é acaso que estoure ali: a caixa tem meia CPU, e a primeira execução
+    // do opengrep ainda paga a auto-extração dele.
+    //
+    // "Não consegui verificar" é uma resposta legítima; "está tudo bem" quando
+    // não se olhou, não é. Ver AUDITORIA.md#BUG-26.
+    comPrazo<BinaryStatus[] | null>(checkBinaries(), null),
   ]);
 
   // Distinguimos "atrasado" de "inalcançável": são consertos diferentes.
@@ -62,10 +87,24 @@ export async function GET() {
   // Scanner exigido e ausente não derruba a fase (UX-15), mas produz um scan
   // que não escaneia — quem opera precisa ver isso aqui, não num relatório
   // vazio que parece repositório limpo.
-  const faltando = binaries.filter((b) => b.required && !b.present);
+  //
+  // **Ausente e "não respondeu" são separados**, e não por preciosismo: os dois
+  // saíam com a mesma frase — "configurado mas ausente no host" — e ela mandava
+  // quem opera conferir uma instalação que estava perfeita. O que havia era a
+  // máquina ocupada com o nosso próprio scan. Ver o cabeçalho de `binaries.ts`.
+  //
+  // `binaries === null` = o prazo estourou e NÃO se sabe nada. É diferente de
+  // "conferi e está tudo certo", e a diferença aparece no `status`.
+  const naoVerificado = binaries === null;
+  const exigidos = (binaries ?? []).filter((b) => b.required && !b.present);
+  const faltando = exigidos.filter((b) => b.reason !== "busy");
+  const semResposta = exigidos.filter((b) => b.reason === "busy");
 
   const body = {
-    status: schema.ok && faltando.length === 0 ? "ok" : "degraded",
+    // Não conferir é motivo para NÃO dizer "ok". Um orquestrador que lê esta
+    // rota precisa poder confiar no verde; um verde que às vezes significa
+    // "não olhei" não serve para decidir nada.
+    status: schema.ok && faltando.length === 0 && !naoVerificado ? "ok" : "degraded",
     db,
     schema: {
       ok: schema.ok,
@@ -73,6 +112,7 @@ export async function GET() {
       applied: schema.applied,
       pending: schema.pending,
     },
+    // `null` viaja como `null`: quem consome vê "não sei", não "nada a relatar".
     scanners: binaries,
     /**
      * O estado da fila, em números.
@@ -92,11 +132,26 @@ export async function GET() {
     },
     message: schemaMessage(schema),
     ...(schema.ok ? {} : { hint: MIGRATE_HINT }),
+    ...(naoVerificado
+      ? {
+          scannersMessage: `Não deu para verificar os scanners em ${prazoDeChecagem()} ms. Isto NÃO quer dizer que estão ausentes — numa instância pequena a primeira sondagem depois de acordar pode passar do prazo. Consulte de novo em alguns segundos.`,
+        }
+      : {}),
     ...(faltando.length
       ? {
           scannersMessage: `Scanner(s) configurado(s) mas ausente(s) no host: ${faltando
             .map((b) => b.configured)
             .join(", ")}. O scan roda e não encontra nada.`,
+        }
+      : {}),
+    // Não entra em `scannersMessage` porque não é o mesmo problema e não tem a
+    // mesma resposta: aqui não há nada a instalar — a máquina estava ocupada
+    // quando perguntamos, e a análise segue rodando normalmente.
+    ...(semResposta.length
+      ? {
+          scannersBusyMessage: `Scanner(s) sem resposta na sondagem (máquina ocupada): ${semResposta
+            .map((b) => `${b.configured}${b.detail ? ` — ${b.detail}` : ""}`)
+            .join(", ")}. Não é ausência: a análise continua usando-os.`,
         }
       : {}),
   };

@@ -854,6 +854,8 @@ export const PT_BR = {
   "analyzer.reason.no_input": "Faltou a entrada que este analisador consome.",
   "analyzer.reason.binary_missing":
     "O executável {bin} não foi encontrado neste computador.",
+  "analyzer.reason.spawn_failed":
+    "O {bin} está instalado, mas este servidor não consegue mais iniciar processos. Reinicie o servidor do StarGuard.",
   "analyzer.reason.engine_off": "Desligado por configuração.",
   "analyzer.reason.no_ai_key":
     "Precisa de uma chave de IA e nenhuma foi configurada.",
@@ -872,6 +874,14 @@ export const PT_BR = {
   // indistinguível de uma barra travada — foi o que a extensão parecia.
   "scan.queuedAt": "na fila do servidor ({n}º) — sua vez já vem",
   "scan.scanning": "escaneando no servidor…",
+  // O scan que acontece NESTA máquina tem frase própria.
+  //
+  // Não é preciosismo de texto: `scan.scanning` diz "no servidor", e o painel
+  // web e o terminal rodam o opengrep aqui, localmente. A tela afirmava que o
+  // código tinha ido para um servidor quando ele não saiu do disco — e, num
+  // produto cujo transporte remoto existe justamente para ser uma ESCOLHA
+  // declarada, essa é a última frase que pode ser imprecisa.
+  "scan.scanningLocal": "escaneando o código…",
   "scan.slotQueued": "aguardando vaga de scanner ({n}º)",
   // O que NÃO coube no envio é dito em voz alta: um resultado parcial
   // silencioso passa por completo, e numa ferramenta de segurança isso é o
@@ -1060,6 +1070,11 @@ export const PT_BR = {
   "cli.doctor.analyzers": "Analisadores",
 
   "cli.doctor.aiRemote": "pela conta ({server})",
+  // Aviso, e não erro: o binário está no disco e a análise vai usá-lo. Só
+  // não deu para confirmar a versão agora — quase sempre porque um scan
+  // nosso está ocupando a máquina. Ver `binaries.ts`.
+  "cli.doctor.binBusy":
+    "{bin} não respondeu à sondagem (máquina ocupada). Não é ausência: a análise segue usando-o.",
   "cli.doctor.aiLocal": "chave local",
   "cli.doctor.aiNone": "sem chave local e sem login — rode `starguard login`",
 
@@ -1945,6 +1960,8 @@ const EN: Record<MessageKey, string> = {
   "analyzer.reason.no_workspace": "Needs code: provide a repository or a directory.",
   "analyzer.reason.no_input": "The input this analyzer consumes was not provided.",
   "analyzer.reason.binary_missing": "The {bin} executable was not found on this machine.",
+  "analyzer.reason.spawn_failed":
+    "{bin} is installed, but this server can no longer start processes. Restart the StarGuard server.",
   "analyzer.reason.engine_off": "Turned off by configuration.",
   "analyzer.reason.no_ai_key": "Needs an AI key and none is configured.",
   "analyzer.reason.cancelled": "Cancelled before it ran.",
@@ -1959,6 +1976,7 @@ const EN: Record<MessageKey, string> = {
   "scan.uploading": "uploading {n} files ({mb} MB) to the server…",
   "scan.queuedAt": "queued on the server (#{n}) — your turn is coming",
   "scan.scanning": "scanning on the server…",
+  "scan.scanningLocal": "scanning the code…",
   "scan.slotQueued": "waiting for a scanner slot (#{n})",
   "scan.truncated": "{n} files were left out of the upload (server limit)",
 
@@ -2118,6 +2136,8 @@ const EN: Record<MessageKey, string> = {
   "cli.doctor.analyzers": "Analyzers",
 
   "cli.doctor.aiRemote": "through your account ({server})",
+  "cli.doctor.binBusy":
+    "{bin} did not answer the probe (machine busy). This is not absence: the analysis still uses it.",
   "cli.doctor.aiLocal": "local key",
   "cli.doctor.aiNone": "no local key and not signed in — run `starguard login`",
 
@@ -3002,6 +3022,8 @@ const ES: Record<MessageKey, string> = {
   "analyzer.reason.no_workspace": "Necesita código: indica un repositorio o un directorio.",
   "analyzer.reason.no_input": "Falta la entrada que consume este analizador.",
   "analyzer.reason.binary_missing": "No se encontró el ejecutable {bin} en este equipo.",
+  "analyzer.reason.spawn_failed":
+    "{bin} está instalado, pero este servidor ya no puede iniciar procesos. Reinicie el servidor de StarGuard.",
   "analyzer.reason.engine_off": "Desactivado por configuración.",
   "analyzer.reason.no_ai_key": "Necesita una clave de IA y no hay ninguna configurada.",
   "analyzer.reason.cancelled": "Cancelado antes de ejecutarse.",
@@ -3016,6 +3038,7 @@ const ES: Record<MessageKey, string> = {
   "scan.uploading": "enviando {n} archivos ({mb} MB) al servidor…",
   "scan.queuedAt": "en cola en el servidor (nº {n}) — tu turno ya llega",
   "scan.scanning": "escaneando en el servidor…",
+  "scan.scanningLocal": "escaneando el código…",
   "scan.slotQueued": "esperando un puesto de escáner (nº {n})",
   "scan.truncated": "{n} archivos quedaron fuera del envío (límite del servidor)",
 
@@ -3175,6 +3198,8 @@ const ES: Record<MessageKey, string> = {
   "cli.doctor.analyzers": "Analizadores",
 
   "cli.doctor.aiRemote": "por tu cuenta ({server})",
+  "cli.doctor.binBusy":
+    "{bin} no respondió al sondeo (equipo ocupado). No es ausencia: el análisis lo sigue usando.",
   "cli.doctor.aiLocal": "clave local",
   "cli.doctor.aiNone": "sin clave local y sin sesión — ejecuta `starguard login`",
 

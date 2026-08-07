@@ -74,6 +74,14 @@ export type UnavailableReason =
   | "no_workspace" // precisa de código e ninguém informou repositório/caminho
   | "no_input" // precisa de entrada própria (descrição, skills) e não veio
   | "binary_missing" // o executável configurado não está no host
+  // O executável ESTÁ no disco e este processo não consegue mais iniciá-lo.
+  // Motivo próprio porque a saída é outra: não há nada a instalar, há um
+  // servidor a reiniciar. Medido: um `next dev` com uma hora de vida passou a
+  // devolver 0xC0000142 em TODO processo filho, enquanto um servidor recém
+  // subido na mesma máquina executava os mesmos binários sem hesitar. Dizer
+  // "não foi encontrado neste computador" ali é uma afirmação falsa sobre a
+  // máquina de quem lê. Ver `binaries.ts`.
+  | "spawn_failed"
   // O binário existe, mas não há RULESET para ele. Motivo próprio porque a
   // resposta é outra: não é "instale o opengrep", é "aponte as regras". Com
   // opengrep, `--config auto` não funciona (exit 2, saída vazia), então rodar

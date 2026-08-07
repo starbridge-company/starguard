@@ -438,6 +438,22 @@ export async function callRemoteScan(
 /** Chave da mensagem "na fila do cliente". Quem traduz é o analisador. */
 export const MSG_NA_FILA = "scan.queued";
 
+// ------------------------------------------------------------
+// As duas chaves que o scan LOCAL emite — e que o servidor LÊ
+// ------------------------------------------------------------
+//
+// `runSast`/`runSca` anunciam a transição por estas chaves, e `lib/scan-jobs.ts`
+// se baseia nelas para saber se o job está na fila ou trabalhando. Ou seja: não
+// são só texto de tela, são o PROTOCOLO entre o motor e o servidor.
+//
+// Vivem aqui, num lugar só, porque já quebraram uma vez do jeito mais silencioso
+// possível: a comparação do lado do servidor era uma string literal repetida, e
+// bastou renomear a chave no analisador para o job nunca mais sair de `queued` —
+// o cliente mostrando "na fila" enquanto o scan rodava até o fim. Tipo, lint e
+// testes passam os três diante de duas literais que deixaram de coincidir.
+export const MSG_ESCANEANDO_LOCAL = "scan.scanningLocal";
+export const MSG_VAGA_NA_FILA = "scan.slotQueued";
+
 /**
  * O que o servidor devolve ao aceitar o trabalho.
  *

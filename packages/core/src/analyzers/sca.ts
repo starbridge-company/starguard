@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
 import { parseTrivy } from "../parsers";
 import { ScanUnavailable } from "../git";
-import { comSocorroLocal, probeBinary } from "../binaries";
+import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
 import { empacotarParaScan } from "../bundle";
@@ -23,6 +23,8 @@ import {
   opcoesDeScanLocal,
   servidorRespondeu,
   usingRemoteScan,
+  MSG_ESCANEANDO_LOCAL,
+  MSG_VAGA_NA_FILA,
   RemoteScanError,
   type OpcoesDeScanLocal,
 } from "../scan-transport";
@@ -63,7 +65,7 @@ export async function runSca(
     const { stdout } = await comVaga(
       () => {
         // Ver o mesmo trecho em `sast.ts`: a transição é o que se anuncia.
-        opts.report?.("scan.scanning");
+        opts.report?.(MSG_ESCANEANDO_LOCAL);
         return pExecFile(BIN.trivy, args, {
           cwd: dir,
           timeout: 300_000,
@@ -71,7 +73,7 @@ export async function runSca(
           signal: opts.signal,
         });
       },
-      (posicao) => opts.report?.("scan.slotQueued", { n: posicao })
+      (posicao) => opts.report?.(MSG_VAGA_NA_FILA, { n: posicao })
     );
     return parseTrivy(JSON.parse(stdout));
   } catch (e: unknown) {
@@ -159,9 +161,16 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
     // não instalar nada — ver `scan-transport.ts`.
     if (usingRemoteScan()) return { ok: true, detail: "servidor" };
     const r = await probeBinary(BIN.trivy);
-    return r.present
-      ? { ok: true, detail: r.version }
-      : { ok: false, reason: "binary_missing", detail: BIN.trivy };
+    // Ver o mesmo trecho em `sast.ts`: sondagem inconclusiva é máquina ocupada,
+    // não binário ausente. O `sca` sofria pior que o `sast` — ele roda em
+    // PARALELO com o SAST, então a carga que estourava o teto dele era, quase
+    // sempre, o scan do vizinho.
+    if (pareceInstalado(r)) return { ok: true, detail: r.version || BIN.trivy };
+    return {
+      ok: false,
+      reason: r.reason === "spawn_failed" ? "spawn_failed" : "binary_missing",
+      detail: BIN.trivy,
+    };
   },
 
   async run(ctx) {

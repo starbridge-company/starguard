@@ -2369,6 +2369,151 @@ resposta em segundos, a análise leva minutos.
 | Correções por execução do webhook | **5**, severidade ≥ `high` | `WEBHOOK_MAX_FIXES`, `WEBHOOK_MIN_SEVERITY` |
 | Servidor padrão dos clientes | `https://app.starguard.dev` | **inventado por mim** — `STARGUARD_SERVER` / `starguard.server` |
 
+### BUG-26 · A análise parava de encontrar o SAST — e a tela culpava a máquina de quem usa ✅
+
+**Relato:** "a minha análise não está mais funcionando nem no painel, antes
+funcionava, agora quebrou tudo".
+
+> ✅ **Entregue em 07/08/2026.** Não havia um defeito: havia **dois**, e os dois
+> terminavam no mesmo lugar — um relatório sem scanner nenhum, com a tela
+> afirmando `O executável opengrep não foi encontrado neste computador` a
+> respeito de uma máquina que tinha o opengrep instalado, funcionando, a um
+> diretório de distância.
+>
+> Essa frase é o que torna este item caro. Ela não é um erro de diagnóstico: é
+> uma **afirmação falsa sobre o computador de quem lê**, feita por uma
+> ferramenta de segurança, no exato momento em que ela deixou de procurar. É o
+> UX-15 ("nunca confundir «não encontrou» com «não procurou»") no pior lugar
+> possível.
+>
+> #### Defeito 1 — a sondagem morria de fome, e o culpado éramos nós
+>
+> `probeBinary` executava `<binário> --version` com teto de **5 s** e tratava
+> QUALQUER falha como ausência. Medido nesta máquina (16 núcleos), com um scan
+> real em andamento:
+>
+> | Binário | Máquina ociosa | Durante um scan |
+> |---|---|---|
+> | `opengrep --version` | **1,8 s** | **5,1 s — morto pelo teto** |
+> | `trivy --version` | **0,1 s** | **5,1 s — morto pelo teto** |
+>
+> Quem cria essa carga é o **próprio StarGuard**: `runSast` abre
+> `--jobs <núcleos>` processos e o `runSca` roda em paralelo com ele. O ciclo
+> se alimentava sozinho:
+>
+> 1. a análise começa e satura a máquina;
+> 2. qualquer sondagem daquela janela estoura o teto e responde "ausente";
+> 3. a resposta ficava no cache por **60 s**;
+> 4. a análise SEGUINTE montava o plano com esse cache e **tirava o `sast` e o
+>    `sca` dela** — com os dois binários no disco, parados.
+>
+> Ou seja: quanto mais se tentava analisar, mais garantido ficava que a próxima
+> análise não analisaria nada.
+>
+> #### Defeito 2 — o processo que não cria mais filhos
+>
+> Medido no mesmo dia, e é o que estava quebrado NAQUELE instante: um
+> `next dev` com uma hora de vida passou a devolver **`exit 3221225794`**
+> (`0xC0000142`, `STATUS_DLL_INIT_FAILED`) ao criar **qualquer** processo
+> filho. Um servidor recém-subido, na mesma máquina, no mesmo minuto, com o
+> mesmo `.env.local`, executava os dois binários sem hesitar:
+>
+> ```
+> :3000 (1 h de vida)  sast present=false  "Command failed: …opengrep.exe --version · exit 3221225794"
+> :3001 (recém-subido) sast present=true   "1.25.0"
+> ```
+>
+> É condição do **processo pai**, não do binário, e não volta sozinha. A saída
+> é reiniciar o servidor — e era exatamente essa a informação que a tela não
+> dava, porque `probeBinary` engolia o erro num `catch {}` vazio.
+>
+> #### O conserto
+>
+> **1. Distinguir os três desfechos.** `ENOENT` é ausência; teto estourado é
+> desconhecimento; `0xC0000142` é o processo pai. Só o primeiro é uma
+> afirmação sobre o disco. `BinaryProbe` passou a carregar `reason` e `detail`.
+>
+> **2. Resposta boa não é apagada por desconhecimento.** Binário não se
+> desinstala no meio de um scan: uma vez vista a versão, um teto estourado
+> depois não a substitui.
+>
+> **3. "Não sei" vale segundos, não um minuto.** Era o TTL de 60 s que
+> contaminava a análise seguinte.
+>
+> **4. Sondagem inconclusiva NÃO tira o analisador do plano.** `pareceInstalado()`
+> é o que decide, e é a linha que devolve o SAST à análise: entre "sei que não
+> está" e "não consegui perguntar", só o primeiro justifica desistir. Quem roda
+> o scan de verdade descobre em segundos, com mensagem que aponta o binário, se
+> ele realmente não estiver lá.
+>
+> **5. O erro cru chega à tela.** `stderr` e código de saída entram no `detail`.
+> Sem eles, `Command failed: …` não diz nada — e foi essa falta que fez o
+> diagnóstico deste item levar uma hora.
+>
+> **6. Motivo próprio para `spawn_failed`**, nos três idiomas: *"o {bin} está
+> instalado, mas este servidor não consegue mais iniciar processos. Reinicie o
+> servidor"*. Acionável, e verdadeiro.
+>
+> **`/api/health` separa os dois casos.** `scannersMessage` (ausente de verdade)
+> e `scannersBusyMessage` (sem resposta, não é ausência) — porque mandar quem
+> opera reinstalar o que já está instalado é o pior conselho que essa rota pode
+> dar. O `starguard doctor` ganhou a mesma distinção, com `!` amarelo para
+> "ocupado" em vez de `✖` vermelho.
+>
+> #### Dois achados de tabela
+>
+> - **`scan.scanning` mentia no scan local.** A chave diz *"escaneando no
+>   servidor…"* e era emitida também por `runSast`/`runSca`, que rodam **nesta
+>   máquina**. O painel web e o terminal afirmavam que o código tinha ido para
+>   um servidor quando ele não saiu do disco — e num produto cujo transporte
+>   remoto existe justamente para ser uma escolha declarada, essa é a última
+>   frase que pode ser imprecisa. Agora há `scan.scanningLocal`.
+> - **A chave era protocolo, e estava duplicada como literal.** `lib/scan-jobs.ts`
+>   comparava `"scan.scanning"` escrito à mão para saber se o job estava na fila
+>   ou rodando. Renomear a chave no analisador teria deixado o job preso em
+>   `queued` para sempre, com o cliente mostrando fila eterna enquanto o scan
+>   terminava — e tipo, lint e testes passariam os três. Virou constante
+>   exportada (`MSG_ESCANEANDO_LOCAL`, `MSG_VAGA_NA_FILA`).
+
+**Como o sprint foi validado**
+
+| O que | Como | Resultado **medido** |
+|---|---|---|
+| Reprodução do defeito 1 | Script sondando os dois binários **durante** um scan real | `opengrep` 1,8 s → **5,1 s (killed)**; `trivy` 0,1 s → **5,1 s (killed)**. Ambos voltam a responder assim que a carga cai |
+| Reprodução do defeito 2 | `/api/health` nos dois servidores, mesma máquina, mesmo minuto | `:3000` (1 h de vida) **present=false, exit 3221225794**; `:3001` (novo) **present=true, 1.25.0** — e o `:3000` seguiu falso por **3,5 min de polling com a máquina ociosa** |
+| Teste falha ANTES da correção | `binaries.test.ts` contra o comportamento antigo | **6 de 13 falham**; com a correção, **13 passam** |
+| Caminho negativo | `binaries.test.ts` | `ENOENT` continua tirando do plano; `0xC0000142` sai com `spawn_failed`; teto estourado **mantém** `sast` e `sca` no plano |
+| Análise real, caminho do painel | `plan()` + `analyze()` do núcleo sobre este repositório | `sast` **done, 870 achados, 59,6 s**; `sca` **done, 20 achados, 27,4 s**; `ok=true` |
+| Velocidade do SAST | mesma execução | **59,6 s** — dentro da faixa já registrada (54,9 s), sem regressão: a correção não toca no caminho de scan, só na sondagem |
+| **Reprodução na FORMA DA PRODUÇÃO** | imagem de produção real, `--cpus=0.5 --memory=512m` (o `cpu.max` do contêiner respondeu `50000 100000`) | **`opengrep --version` na 1ª execução: 8116 ms — ESTOURA o teto antigo de 5 s.** 2ª e 3ª: ~3550 ms, com 1,4 s de margem. `trivy`: 1308 ms / ~230 ms. Com o teto novo de 20 s, todas cabem |
+| Health na produção, antes da correção | `GET /api/health` em `starguard-31l1.onrender.com`, instância fria | **`{"status":"ok", "scanners":[]}`** — luz verde com zero conhecimento. A 2ª chamada, com cache quente, trouxe os dois presentes |
+| Health no contêiner, depois da correção | mesma imagem, 0,5 CPU | `sast present=true 1.26.0`, `sca present=true 0.73.0` — detectados corretamente na caixa pequena |
+| Suíte | `npm test` | **842 testes** em 57 arquivos (eram 823 em 55) |
+| Tipos e lint | `npm run typecheck && npm run lint` | Limpos — **0 erros** |
+| Build do painel | `npm run build` | Compila; middleware Edge intacto |
+| Extensão | `build:packages` + `install:local` | **0.3.1** no disco, versão anterior removida |
+
+> #### Um terceiro, achado ao testar em Docker
+>
+> **A imagem de produção não compilava nesta máquina.** `docker build` morria em
+> `failed to checksum file packages/vscode/dist/extension.js: archive/tar: unknown
+> file mode ?rwxr-xr-x` — o esbuild grava o bundle com um modo que o tar do
+> BuildKit recusa quando o projeto vive numa pasta do OneDrive no Windows. O
+> sintoma não aponta para a causa (parece defeito do Docker) e impedia gerar a
+> imagem a partir de um clone que já tivesse compilado os pacotes uma vez.
+> `packages/*/dist` e `*.vsix` foram para o `.dockerignore`: nenhum deles faz
+> falta na imagem, porque o `next build` resolve `@starguard/core` pelo
+> código-fonte.
+
+**O que ficou de fora, e é preciso dizer**
+
+| Pendência | Por quê |
+|---|---|
+| **PEND-51 · A causa-raiz do `0xC0000142` não foi identificada** | Sabe-se que é do processo pai, que é permanente e que um processo novo não sofre dela. **Não** se sabe o que a dispara — esgotamento de *desktop heap*, antivírus ou limite de sessão do Windows são hipóteses **não confirmadas**. O que foi entregue trata o SINTOMA com honestidade (dizer o que houve e mandar reiniciar), não a causa. Se voltar a acontecer com frequência, é preciso instrumentar o `next dev` e contar processos filhos ao longo do tempo |
+| **PEND-53 · O SAST carrega 1094 regras para escanear TypeScript** | **Medido na imagem de produção, 0,5 CPU, os MESMOS 27 arquivos:** ruleset completo (1094 regras, 11 linguagens) = **348 s**; só as regras de JS/TS (181 regras) = **65 s**. **5,4× de diferença**, e as 913 regras descartadas são de python, java, go, php, ruby, csharp, c e html — não têm como casar com nada num repositório TypeScript. Um scan de 47 arquivos levou **423 s** nessa caixa. O conserto é escolher os diretórios de regra pelas linguagens PRESENTES no workspace, e ele **não foi feito de propósito**: estreitar ruleset troca cobertura por velocidade, e errar a detecção de linguagem faz o relatório encolher em silêncio — que é o pior desfecho possível aqui (UX-15). Precisa de decisão explícita e de `scan.rulesFound` declarando quais conjuntos entraram |
+| **PEND-52 · O SAST ainda usa todos os núcleos** | `--jobs 16` numa máquina de 16 núcleos é o que satura a caixa e deixa o Node sem CPU para responder HTTP durante o scan. Foi o gatilho do defeito 1, e continua lá: a correção impede que a saturação **apague o scanner**, mas não a reduz. Baixar para `núcleos − 1` é decisão de desempenho medida (há um número registrado: 62,7 s → 54,9 s) e não deve ser tomada de passagem |
+| **Não exercitado: o painel logado ponta a ponta** | O caminho foi validado por `plan()`/`analyze()` do núcleo, que é exatamente o que `lib/jobs.ts` chama, e pelo `/api/health` dos dois servidores. Não houve login no navegador com criação de análise gravada no Postgres — as credenciais de semente não valem no banco em uso |
+
 ---
 
 # Plano de execução sugerido

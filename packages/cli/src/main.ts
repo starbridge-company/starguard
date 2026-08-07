@@ -475,13 +475,30 @@ async function comandoDoctor(op: Opcoes): Promise<number> {
       continue;
     }
     const r = await probeBinary(b.bin!);
+    if (r.present) {
+      linhas.push(`  ${c.green("✔")} ${b.rotulo.padEnd(6)} ${b.bin}  ${c.gray(r.version ?? "")}`);
+      continue;
+    }
+    // O motivo REAL, e não "não encontrado" para tudo.
+    //
+    // O `doctor` é a primeira coisa que alguém roda quando a análise não sai, e
+    // até aqui ele respondia "instale o opengrep" para três situações
+    // diferentes — inclusive para a máquina que tem o opengrep instalado e
+    // estava apenas ocupada. Mandar reinstalar o que já está lá é o pior
+    // conselho que esta tela pode dar. Ver `binaries.ts`.
+    const chave =
+      r.reason === "spawn_failed"
+        ? "analyzer.reason.spawn_failed"
+        : r.reason === "busy"
+          ? "cli.doctor.binBusy"
+          : "analyzer.reason.binary_missing";
+    // "ocupado" é aviso, não falha: o binário está lá e a análise vai usá-lo.
+    const marca = r.reason === "busy" ? c.yellow("!") : c.red("✖");
+    const texto = t(chave, { bin: b.bin! });
     linhas.push(
-      r.present
-        ? `  ${c.green("✔")} ${b.rotulo.padEnd(6)} ${b.bin}  ${c.gray(r.version ?? "")}`
-        : // Diz QUAL binário falta: "instale o trivy" é acionável, "scanner
-          // indisponível" manda adivinhar.
-          `  ${c.red("✖")} ${b.rotulo.padEnd(6)} ${c.red(t("analyzer.reason.binary_missing", { bin: b.bin! }))}`
+      `  ${marca} ${b.rotulo.padEnd(6)} ${r.reason === "busy" ? c.yellow(texto) : c.red(texto)}`
     );
+    if (r.detail) linhas.push(`    ${c.gray(r.detail)}`);
   }
 
   const cred = await loadCredentials();

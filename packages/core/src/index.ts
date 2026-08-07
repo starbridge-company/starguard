@@ -51,7 +51,15 @@ export {
   maxTokensForFix,
   phaseMaxTokens,
 } from "./config";
-export { checkBinaries, probeBinary, clearProbeCache, type BinaryStatus } from "./binaries";
+export {
+  checkBinaries,
+  probeBinary,
+  pareceInstalado,
+  clearProbeCache,
+  type BinaryStatus,
+  type BinaryProbe,
+  type BinaryProbeReason,
+} from "./binaries";
 export { hasAnyAiKey, AIError, runAI, extractJSON } from "./ai";
 export {
   setAiTransport,
