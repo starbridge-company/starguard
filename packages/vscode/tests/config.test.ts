@@ -429,3 +429,23 @@ describe("cartão indisponível oferece a saída", () => {
     expect(manifestoProps["starguard.sastRules"]).toBeDefined();
   });
 });
+
+describe("correção em lote tem pré-voo e retorno visível", () => {
+  const fonte = readFileSync(join(aqui, "..", "src", "extension.ts"), "utf8");
+
+  it("prepara conta, workspace e IA antes de gerar", () => {
+    expect(fonte).toMatch(/async function prepararCorrecao[\s\S]*pedirContaComServidorPronto/);
+    expect(fonte).toMatch(/async function prepararCorrecao[\s\S]*configurarIa\(ctxGlobal\)/);
+    expect(fonte).toMatch(/async function corrigirLote[\s\S]*await prepararCorrecao\(\)/);
+  });
+
+  it("bloqueia lotes concorrentes e sempre encerra o estado ocupado", () => {
+    expect(fonte).toMatch(/if \(preparandoCorrecao \|\| abortarCorrecao\) return/);
+    expect(fonte).toMatch(/finally \{[\s\S]*preparandoCorrecao = false;[\s\S]*abortarCorrecao = undefined/);
+  });
+
+  it("resume falhas em notificação e oferece o canal de detalhes", () => {
+    expect(fonte).toContain('t("panel.fixFailed"');
+    expect(fonte).toContain("saida.show()");
+  });
+});

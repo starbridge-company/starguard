@@ -39,6 +39,7 @@ import { groupByFile, proposeForFile } from "@starguard/core/fix/batch";
 import { normPath } from "@starguard/core/dedup";
 import { StarGuardAuthProvider, definirLog, pedirLogin, sessaoAtual } from "./auth.js";
 import { setAiTransport } from "@starguard/core/ai-transport";
+import { hasAnyAiKey } from "@starguard/core";
 import { setScanTransport } from "@starguard/core/scan-transport";
 import { cfg, servidor, urlDeAcesso } from "./config.js";
 import { checkServerReadiness } from "./server-readiness.js";
@@ -223,6 +224,23 @@ async function pedirContaComServidorPronto(): Promise<vscode.AuthenticationSessi
 
 function raiz(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+/** Pré-voo comum às correções individual e em lote. */
+async function prepararCorrecao(): Promise<string | undefined> {
+  if (!(await pedirContaComServidorPronto())) return undefined;
+  const root = raiz();
+  if (!root) {
+    void vscode.window.showWarningMessage(t("analyzer.reason.no_workspace"));
+    return undefined;
+  }
+  aplicarConfiguracao();
+  await configurarIa(ctxGlobal);
+  if (!hasAnyAiKey()) {
+    void vscode.window.showWarningMessage(t("analyzer.reason.no_ai_key"));
+    return undefined;
+  }
+  return root;
 }
 
 // ------------------------------------------------------------
@@ -691,13 +709,13 @@ function paraFinding(a: Achado): FixableFinding {
 
 async function corrigir(chave: string): Promise<void> {
   const achado = achadosPorChave.get(chave);
-  const root = raiz();
-  if (!achado || !root) return;
+  if (!achado) return;
 
   const fixer = getAnalyzer(achado.analyzer)?.fix;
   if (!fixer) return;
 
-  aplicarConfiguracao();
+  const root = await prepararCorrecao();
+  if (!root) return;
   let ws: Workspace | undefined;
 
   // O `try` começa ANTES de abrir o workspace, não depois de propor.
@@ -865,6 +883,7 @@ interface PropostaGuardada {
 /** As propostas da rodada atual, por arquivo. Nada aqui foi gravado em disco. */
 const propostas = new Map<string, PropostaGuardada>();
 let abortarCorrecao: AbortController | undefined;
+let preparandoCorrecao = false;
 /** O PR da rodada. Um só, com tudo o que estiver pronto. */
 let prNaTela: PrNaTela = { abrindo: false };
 
@@ -894,8 +913,23 @@ function correcoesNaTela(): CorrecaoNaTela[] {
  * distintos (manifesto x fonte); a chave é a garantia de que continuam sendo.
  */
 async function corrigirLote(chaves: string[]): Promise<void> {
-  const root = raiz();
-  if (!root) return;
+  if (preparandoCorrecao || abortarCorrecao) return;
+  preparandoCorrecao = true;
+  await painel.atualizar();
+
+  let root: string | undefined;
+  try {
+    root = await prepararCorrecao();
+  } catch (e) {
+    preparandoCorrecao = false;
+    await painel.atualizar();
+    throw e;
+  }
+  if (!root) {
+    preparandoCorrecao = false;
+    await painel.atualizar();
+    return;
+  }
 
   // `paraFinding` preserva o `raw`, que é o payload que o corretor de cada
   // analisador sabe ler — e o `analyzer`, que diz de quem é o corretor.
@@ -906,7 +940,9 @@ async function corrigirLote(chaves: string[]): Promise<void> {
     .filter((f) => getAnalyzer(f.analyzer)?.fix?.can(f).ok);
 
   if (!alvos.length) {
+    preparandoCorrecao = false;
     void vscode.window.showWarningMessage(t("panel.fixNoneFixable"));
+    await painel.atualizar();
     return;
   }
 
@@ -932,7 +968,7 @@ async function corrigirLote(chaves: string[]): Promise<void> {
     }
   }
 
-  aplicarConfiguracao();
+  preparandoCorrecao = false;
   abortarCorrecao = new AbortController();
   propostas.clear();
   prNaTela = { abrindo: false };
@@ -1015,6 +1051,7 @@ async function corrigirLote(chaves: string[]): Promise<void> {
     saida.appendLine(`[fix] ${msg}`);
     void vscode.window.showErrorMessage(`StarGuard · ${msg}`);
   } finally {
+    preparandoCorrecao = false;
     abortarCorrecao = undefined;
     await ws?.dispose();
     // NENHUMA proposta pode sobrar em "gerando…".
@@ -1027,6 +1064,22 @@ async function corrigirLote(chaves: string[]): Promise<void> {
       if (p.estado === "gerando") p.estado = "cancelada";
     }
     await painel.atualizar();
+
+    const feitas = [...propostas.values()];
+    const falhas = feitas.filter((p) => p.estado === "erro");
+    const prontas = feitas.filter((p) => p.estado === "pronta");
+    if (falhas.length) {
+      const detalhes = t("common.details");
+      const mensagem = t("panel.fixFailed", { n: falhas.length, total: feitas.length });
+      const escolha = falhas.length === feitas.length
+        ? await vscode.window.showErrorMessage(mensagem, detalhes)
+        : await vscode.window.showWarningMessage(mensagem, detalhes);
+      if (escolha === detalhes) saida.show();
+    } else if (prontas.length) {
+      void vscode.window.showInformationMessage(
+        t("panel.fixReady", { n: prontas.length, total: feitas.length })
+      );
+    }
   }
 }
 
@@ -1335,6 +1388,7 @@ function textosDoPainel(): TextosDoPainel {
     correcoes: t("panel.fixes"),
     correcoesAjuda: t("panel.fixGroupHint"),
     gerandoCorrecoes: t("panel.fixGenerating"),
+    preparandoCorrecoes: t("panel.fixPreparing"),
     estadoGerando: t("panel.fixState.generating"),
     estadoPronta: t("panel.fixState.ready"),
     estadoAplicada: t("panel.fixState.applied"),
@@ -1598,6 +1652,7 @@ function ganchosDoPainel(): GanchosDoPainel {
           ? selecao
           : (cfg().get<AnalyzerId[]>("analyzers.enabled") ?? ["sast", "sca"]),
         rodando,
+        corrigindo: preparandoCorrecao || !!abortarCorrecao,
         progresso: progressoDaAnalise,
         resultado: ultimoResultado,
         correcoes: correcoesNaTela(),

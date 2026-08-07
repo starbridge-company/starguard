@@ -82,6 +82,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setThemeState(getTheme());
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   // Mantém a sessão viva enquanto a aba estiver em uso. O access token dura
   // 15 min; renovamos a cada 5 (se já tiver mais de 10 de idade) e ao voltar
   // para a aba, para que ninguém seja expulso no meio do trabalho.
@@ -123,7 +137,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className={`app-shell ${open ? "sidebar-open" : ""}`}>
       <aside
+        id="app-sidebar"
         className="sidebar"
+        aria-label={t("nav.menu")}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("a")) setOpen(false);
         }}
@@ -182,6 +198,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         className="mobile-menu-toggle"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-controls="app-sidebar"
       >
         {open ? t("nav.close") : t("nav.menu")}
       </button>

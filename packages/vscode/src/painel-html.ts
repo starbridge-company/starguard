@@ -46,6 +46,7 @@ export interface TextosDoPainel {
   correcoes: string;
   correcoesAjuda: string;
   gerandoCorrecoes: string;
+  preparandoCorrecoes: string;
   estadoGerando: string;
   estadoPronta: string;
   estadoAplicada: string;
@@ -137,14 +138,15 @@ export function htmlDoPainel(opts: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
-    --gap: 10px;
-    --raio: 6px;
+    --gap: 12px;
+    --raio: 8px;
     --borda: var(--vscode-widget-border, rgba(128,128,128,.35));
+    --superficie: var(--vscode-editorWidget-background, rgba(128,128,128,.06));
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 12px;
+    padding: 14px;
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size);
     color: var(--vscode-foreground);
@@ -158,14 +160,20 @@ export function htmlDoPainel(opts: {
     text-transform: uppercase;
     color: var(--vscode-descriptionForeground);
   }
-  .linha { display: flex; align-items: center; gap: 8px; }
+  .linha { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .entre { justify-content: space-between; }
   .muted { color: var(--vscode-descriptionForeground); font-size: 12px; }
+  :where(button, textarea, [role="button"], [role="checkbox"]):focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+  }
 
   /* ---- Cabeçalho ---- */
   .conta {
     display: flex; align-items: center; gap: 8px;
-    padding-bottom: 10px; margin-bottom: 12px;
+    padding: 9px 10px; margin: -2px -2px 16px;
+    border-radius: var(--raio);
+    background: var(--superficie);
     border-bottom: 1px solid var(--borda);
   }
   .conta .email {
@@ -182,19 +190,19 @@ export function htmlDoPainel(opts: {
   /* ---- Cartões de analisador ----
      Cartão inteiro clicável, e não só a caixinha: alvo de clique de 16px é
      desconfortável numa barra lateral estreita. */
-  .cartoes { display: grid; gap: 6px; }
+  .cartoes { display: grid; gap: 8px; }
   .cartao {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 2px 10px;
-    padding: 9px 11px;
+    padding: 11px 12px;
     border: 1px solid var(--borda);
     border-radius: var(--raio);
     cursor: pointer;
     background: var(--vscode-editorWidget-background, transparent);
-    transition: border-color .12s, background .12s;
+    transition: border-color .12s, background .12s, transform .12s;
   }
-  .cartao:hover:not(.off) { border-color: var(--vscode-focusBorder); }
+  .cartao:hover:not(.off) { border-color: var(--vscode-focusBorder); transform: translateY(-1px); }
   .cartao.on {
     border-color: var(--vscode-focusBorder);
     background: var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background));
@@ -281,7 +289,8 @@ export function htmlDoPainel(opts: {
   /* ---- Botões ---- */
   button {
     font-family: inherit; font-size: 13px;
-    border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;
+    min-height: 34px;
+    border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer;
     color: var(--vscode-button-foreground);
     background: var(--vscode-button-background);
   }
@@ -290,7 +299,7 @@ export function htmlDoPainel(opts: {
   button.fantasma {
     background: transparent;
     color: var(--vscode-textLink-foreground);
-    padding: 3px 6px; font-size: 11px;
+    min-height: 28px; padding: 5px 8px; font-size: 11px;
   }
   button.fantasma:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.15)); }
   #rodar { width: 100%; margin-top: 12px; font-weight: 600; padding: 10px; }
@@ -318,7 +327,7 @@ export function htmlDoPainel(opts: {
   .achado {
     display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px;
     align-items: start;
-    padding: 6px 8px; border-radius: 4px; cursor: pointer;
+    padding: 8px; border-radius: 6px; cursor: pointer;
   }
   .achado:hover { background: var(--vscode-list-hoverBackground); }
   .achado .tit { font-size: 12px; }
@@ -327,8 +336,8 @@ export function htmlDoPainel(opts: {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .achado .bolinha { margin-top: 5px; }
-  .achado .fix { opacity: 0; }
-  .achado:hover .fix { opacity: 1; }
+  .achado .fix { opacity: .25; transition: opacity .12s; }
+  .achado:hover .fix, .achado:focus-within .fix { opacity: 1; }
   .achado.marcado { background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
 
   /* ---- Seleção para correção em lote ----
@@ -355,9 +364,11 @@ export function htmlDoPainel(opts: {
      de ficar no fim de dezenas de achados. */
   .barra-acoes {
     position: sticky; top: 0; z-index: 2;
-    margin-bottom: 10px; padding: 8px 0;
+    margin: 0 -4px 10px; padding: 10px;
     background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-    border-bottom: 1px solid var(--borda);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    box-shadow: 0 3px 12px rgba(0,0,0,.1);
   }
   .barra-acoes button { width: 100%; }
   .barra-acoes .fantasma { width: auto; }
@@ -386,6 +397,13 @@ export function htmlDoPainel(opts: {
   .correcao .acoes { grid-row: 1 / span 2; display: flex; gap: 4px; }
   .correcao.erro { border-color: var(--vscode-charts-red, #f85149); }
   .correcao.aplicada { opacity: .6; }
+  .bloco-correcoes {
+    margin: 10px 0 14px;
+    padding: 11px;
+    border: 1px solid var(--borda);
+    border-radius: var(--raio);
+    background: var(--superficie);
+  }
 
   /* ---- Barra de progresso ----
      Determinada: o plano sabe quantos analisadores vão rodar antes de o
@@ -462,6 +480,22 @@ export function htmlDoPainel(opts: {
     border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-charts-red, #f85149));
   }
   .hidden { display: none !important; }
+
+  @media (max-width: 360px) {
+    body { padding: 10px; }
+    .conta { flex-wrap: wrap; }
+    .conta .email { flex-basis: calc(100% - 18px); }
+    .achado { grid-template-columns: auto auto minmax(0, 1fr); }
+    .achado .fix { grid-column: 3; width: fit-content; opacity: 1; }
+    .correcao { grid-template-columns: minmax(0, 1fr); }
+    .correcao .acoes, .correcao .meta { grid-column: 1; grid-row: auto; }
+    .progresso .legenda { display: grid; }
+    .progresso .cronometro { justify-self: end; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    .cartao:hover:not(.off) { transform: none; }
+  }
 </style>
 </head>
 <body>
@@ -471,7 +505,7 @@ export function htmlDoPainel(opts: {
 (function () {
   const vscode = acquireVsCodeApi();
   const T = ${jsonSeguroEmScript(opts.textos)};
-  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, progresso: null, resultado: null, correcoes: [], pr: { abrindo: false }, erro: null };
+  let estado = { logado: false, analisadores: [], selecionados: [], descricao: "", skills: [], rodando: false, corrigindo: false, progresso: null, resultado: null, correcoes: [], pr: { abrindo: false }, erro: null };
 
   const h = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -563,7 +597,7 @@ export function htmlDoPainel(opts: {
         ).join('')
       : '';
 
-    return '<div class="cartao ' + (on ? 'on ' : '') + (off ? 'off' : '') + '" data-id="' + h(a.id) + '"' + sobre + '>' +
+    return '<div class="cartao ' + (on ? 'on ' : '') + (off ? 'off' : '') + '" data-id="' + h(a.id) + '" role="checkbox" tabindex="' + (off ? '-1' : '0') + '" aria-checked="' + (on ? 'true' : 'false') + '" aria-disabled="' + (off ? 'true' : 'false') + '"' + sobre + '>' +
       '<div class="marca">' + (on ? '✓' : '') + '</div>' +
       '<div class="linha entre"><span class="nome">' + h(a.nome) + marcaAjuda + '</span><span class="estado">' + estadoTxt + '</span></div>' +
       '<div><div class="sub">' + sub + '</div></div>' +
@@ -601,7 +635,7 @@ export function htmlDoPainel(opts: {
         // A caixa some para quem não tem correção — mas o LUGAR dela não, e o
         // motivo vai no title. Ver UX-15.
         const caixa = f.corrigivel
-          ? '<span class="caixa ' + (marcados.has(f.chave) ? 'on' : '') + '" data-marca="' + h(f.chave) + '" role="checkbox" aria-checked="' + (marcados.has(f.chave) ? 'true' : 'false') + '">' +
+          ? '<span class="caixa ' + (marcados.has(f.chave) ? 'on' : '') + '" data-marca="' + h(f.chave) + '" role="checkbox" tabindex="0" aria-checked="' + (marcados.has(f.chave) ? 'true' : 'false') + '">' +
               (marcados.has(f.chave) ? '✓' : '') + '</span>'
           : '<span class="caixa off" title="' + h(f.motivo || '') + '" aria-hidden="true"></span>';
         return '<div class="achado ' + (marcados.has(f.chave) ? 'marcado' : '') + '" data-chave="' + h(f.chave) + '">' +
@@ -673,8 +707,8 @@ export function htmlDoPainel(opts: {
           '<button class="fantasma" data-acao="' + (todos ? 'desmarcarTudo' : 'marcarTudo') + '">' +
             h(todos ? T.desmarcar : T.marcarTudo) + '</button>' +
         '</div>' +
-        '<button data-acao="corrigirLote"' + (marcadosVisiveis ? '' : ' disabled') + '>' +
-          h(marcadosVisiveis ? fmt(T.corrigirSelecionados, { n: marcadosVisiveis }) : T.nadaMarcado) +
+        '<button data-acao="corrigirLote" aria-busy="' + (estado.corrigindo ? 'true' : 'false') + '"' + (marcadosVisiveis && !estado.corrigindo ? '' : ' disabled') + '>' +
+          h(estado.corrigindo ? T.preparandoCorrecoes : marcadosVisiveis ? fmt(T.corrigirSelecionados, { n: marcadosVisiveis }) : T.nadaMarcado) +
         '</button>';
     }
 
@@ -749,7 +783,7 @@ export function htmlDoPainel(opts: {
       '</div>';
     }).join('');
 
-    return '<div style="margin-top:16px">' +
+    return '<section id="correcoes" class="bloco-correcoes" aria-live="polite" aria-busy="' + (gerando ? 'true' : 'false') + '">' +
       '<div class="linha entre"><h2>' + h(T.correcoes) + '</h2>' +
         '<button class="fantasma" data-acao="descartarCorrecoes">' + h(T.descartar) + '</button>' +
       '</div>' +
@@ -757,7 +791,7 @@ export function htmlDoPainel(opts: {
         ? '<p class="muted">' + h(fmt(T.gerandoCorrecoes, { done: lista.length - gerando, total: lista.length })) + '</p>'
         : '<p class="muted">' + h(T.correcoesAjuda) + '</p>') +
       itens +
-    '</div>';
+    '</section>';
     // Sem "Aplicar tudo" e sem o botão de PR aqui: os dois subiram para a
     // barra de ações. Dois botões fazendo a mesma coisa em lugares diferentes
     // é o erro que o modal do painel web já documentou.
@@ -872,14 +906,13 @@ export function htmlDoPainel(opts: {
       // uma lista de dezenas de achados.
       html += placar(estado.resultado) +
         barraDeAcoes() +
+        blocoDeCorrecoes() +
         contexto(estado.resultado) +
         grupos(estado.resultado);
     } else {
       html += '<div class="vazio">' + h(T.aindaNaoRodou) + '</div>';
     }
     html += '</div>';
-
-    html += blocoDeCorrecoes();
 
     html += '<p class="muted" style="margin-top:16px;font-size:11px;line-height:1.5">' + h(T.privacidade) + '</p>';
     return html;
@@ -1023,11 +1056,15 @@ export function htmlDoPainel(opts: {
       for (const a of achadosVisiveis()) marcados.delete(a.chave);
       desenhar();
     } else if (acao === 'corrigirLote') {
+      if (estado.corrigindo) return;
       // A ordem da TELA é a que vai: é a que a pessoa está vendo, e o
       // agrupamento por arquivo acontece do outro lado.
       const chaves = achadosVisiveis()
         .filter((a) => a.corrigivel && marcados.has(a.chave))
         .map((a) => a.chave);
+      if (!chaves.length) return;
+      estado.corrigindo = true;
+      desenhar();
       vscode.postMessage({ tipo: 'corrigirLote', chaves: chaves });
     } else {
       vscode.postMessage({ tipo: acao });
@@ -1042,6 +1079,15 @@ export function htmlDoPainel(opts: {
       estado.descricao = e.target.value;
       vscode.postMessage({ tipo: 'salvarDescricao', texto: e.target.value });
     }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target.closest('button, a, input, textarea, summary')) return;
+    const alvo = e.target.closest('.cartao, [data-marca], [data-sev]');
+    if (!alvo) return;
+    e.preventDefault();
+    alvo.click();
   });
 
   window.addEventListener('message', (ev) => {

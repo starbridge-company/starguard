@@ -22,7 +22,7 @@ const TEXTOS = Object.fromEntries(
     "nenhumSelecionado", "privacidade", "skills", "skillsAjuda", "skillsVazio",
     "skillsAdicionar", "skillsRemover", "skillsDoEditor", "marcarTudo",
     "desmarcar", "corrigirSelecionados", "correcoes", "correcoesAjuda",
-    "gerandoCorrecoes", "estadoGerando", "estadoPronta", "estadoAplicada",
+    "gerandoCorrecoes", "preparandoCorrecoes", "estadoGerando", "estadoPronta", "estadoAplicada",
     "estadoSemMudanca", "estadoErro", "estadoCancelada", "verDiff", "aplicar",
     "aplicarTudo", "descartar", "umAchado", "nAchados", "maisArquivos",
     "nadaMarcado", "filtrarTudo", "filtrarAjuda", "degradado", "requisitos",
@@ -121,6 +121,21 @@ describe("correção em lote (UX-24)", () => {
 
   it("existe o botão que corrige o que está marcado", () => {
     expect(pagina()).toContain('data-acao="corrigirLote"');
+  });
+
+  it("dá feedback imediato e bloqueia clique duplicado enquanto gera", () => {
+    const html = pagina();
+    expect(html).toContain("estado.corrigindo = true");
+    expect(html).toContain('aria-busy="');
+    expect(html).toContain("if (estado.corrigindo) return");
+  });
+
+  it("mostra as propostas junto da barra, antes dos achados", () => {
+    const html = pagina();
+    expect(html.indexOf("blocoDeCorrecoes()")).toBeLessThan(
+      html.indexOf("grupos(estado.resultado)")
+    );
+    expect(html).toContain('id="correcoes"');
   });
 
   it("a proposta pronta tem ver-diff e aplicar, e o lote tem aplicar-tudo", () => {

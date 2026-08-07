@@ -157,6 +157,8 @@ export interface GanchosDoPainel {
      * girando para sempre depois que tudo tinha terminado. Ver UX-24.
      */
     rodando: boolean;
+    /** Evita cliques duplicados e mantém feedback durante autenticação/IA. */
+    corrigindo: boolean;
     /** Andamento da execução em curso. `null` quando não há nenhuma. */
     progresso: ProgressoNaTela | null;
     resultado?: ResultadoNaTela | null;
