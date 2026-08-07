@@ -92,7 +92,10 @@ export function collidesWithSca(
   if (!depSignal) return false;
   return sca.some((d) => {
     const pkg = d.package.toLowerCase();
-    if (pkg.length < 3) return false;
+    // Limita o tamanho do nome do pacote antes de usá-lo na regex dinâmica:
+    // além de já ser escapado (escapeRe), isso evita que uma entrada
+    // anormalmente longa gere um padrão custoso de avaliar (CWE-1333).
+    if (pkg.length < 3 || pkg.length > 100) return false;
     const re = new RegExp(`(^|[^a-z0-9_.@/-])${escapeRe(pkg)}([^a-z0-9_.@/-]|$)`, "i");
     return re.test(lower);
   });

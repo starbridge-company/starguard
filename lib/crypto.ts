@@ -13,6 +13,7 @@ import {
 
 const ALG = "aes-256-gcm";
 const IV_BYTES = 12; // recomendado para GCM
+const AUTH_TAG_BYTES = 16; // tamanho padrão do tag do GCM, exigido explicitamente
 
 let cachedKey: Buffer | null = null;
 
@@ -56,7 +57,8 @@ export function decryptToken(t: EncryptedToken): string {
   const decipher = createDecipheriv(
     ALG,
     getKey(),
-    Buffer.from(t.iv, "base64")
+    Buffer.from(t.iv, "base64"),
+    { authTagLength: AUTH_TAG_BYTES } // define explicitamente o tamanho esperado do auth tag (evita truncamento/forjamento)
   );
   decipher.setAuthTag(Buffer.from(t.authTag, "base64"));
   const dec = Buffer.concat([

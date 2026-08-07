@@ -30,15 +30,24 @@ const FUNDO = "#0f1512";
 /** `--accent` do `globals.css`, em hex. */
 const DESTAQUE = "#5cb69f";
 
+// Escapa valores antes de interpolá-los no SVG (mesmo sendo constantes
+// internas, evita que caracteres especiais quebrem/injetem markup — CWE-116).
+const escapeXmlAttr = (valor) =>
+  String(valor)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
 // Escudo com visto, na mesma família do `HiOutlineShieldCheck` que o app usa.
 // Traço grosso de propósito: linha fina desaparece quando a Marketplace
 // reduz o ícone para a listagem.
-const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${LADO}" height="${LADO}" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="26" fill="${FUNDO}"/>
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${escapeXmlAttr(LADO)}" height="${escapeXmlAttr(LADO)}" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="26" fill="${escapeXmlAttr(FUNDO)}"/>
   <path d="M64 20 C 52 30, 38 33, 28 33 C 26 40, 25 47, 25 54 c 0 26, 16 45, 39 53 c 23 -8, 39 -27, 39 -53 c 0 -7, -1 -14, -3 -21 c -10 0, -24 -3, -36 -13 z"
-        fill="none" stroke="${DESTAQUE}" stroke-width="7" stroke-linejoin="round"/>
+        fill="none" stroke="${escapeXmlAttr(DESTAQUE)}" stroke-width="7" stroke-linejoin="round"/>
   <path d="M48 63 l 12 12 l 22 -24"
-        fill="none" stroke="${DESTAQUE}" stroke-width="9"
+        fill="none" stroke="${escapeXmlAttr(DESTAQUE)}" stroke-width="9"
         stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 

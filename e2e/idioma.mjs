@@ -5,6 +5,9 @@ const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
 const OUT = process.env.E2E_SHOTS || "";
 let falhas = 0;
 const check = (c, m) => { if (!c) falhas++; console.log(`  ${c ? "✓" : "✗ FALHOU"}  ${m}`); };
+// Escapa caracteres HTML para evitar que valores interpolados em strings
+// que se parecem com HTML sejam interpretados como marcação (CWE-116).
+const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 950 }, locale: "en-US" });
@@ -22,7 +25,7 @@ console.log("\n=== 1. PRIMEIRA VISITA COM NAVEGADOR EM INGLÊS ===");
 await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
 const langAuto = await page.getAttribute("html", "lang");
 const submitAuto = await page.locator('button[type="submit"]').innerText();
-check(langAuto === "en", `<html lang> segue o Accept-Language: "${langAuto}"`);
+check(langAuto === "en", `<html lang> segue o Accept-Language: "${escapeHtml(langAuto)}"`);
 check(/sign in/i.test(submitAuto), `botão em inglês sem configurar nada: "${submitAuto.trim()}"`);
 await capturar(`30-login-en.png`);
 
@@ -44,7 +47,7 @@ await page.click('.segmented button:has-text("Português")');
 await page.waitForTimeout(2500);
 const langPt = await page.getAttribute("html", "lang");
 const navPt = await page.locator(".sidebar-nav").innerText();
-check(langPt === "pt-BR", `<html lang> mudou para "${langPt}"`);
+check(langPt === "pt-BR", `<html lang> mudou para "${escapeHtml(langPt)}"`);
 check(/Nova análise/i.test(navPt), "menu voltou ao português");
 const cookie = (await ctx.cookies()).find((c) => c.name === "sg_locale");
 check(cookie?.value === "pt-BR", `escolha persistida no cookie: ${cookie?.value}`);

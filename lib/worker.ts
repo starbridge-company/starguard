@@ -69,12 +69,17 @@ const WORKER_ID = `${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
 
 type Handler = (job: JobRow) => Promise<void>;
 
-const HANDLERS: Record<string, () => Promise<Handler>> = {
+// Map em vez de objeto literal: `job.kind` vem do banco (dado não confiável) e
+// indexar um objeto plano com uma chave arbitrária pode alcançar propriedades
+// herdadas da cadeia de prototype (ex.: "constructor", "__proto__"), abrindo
+// caminho para CWE-94. Um `Map` não tem prototype chain de propriedades e só
+// devolve o que foi explicitamente registrado.
+const HANDLERS: Map<string, () => Promise<Handler>> = new Map([
   // Import dinâmico: o handler de análise puxa o orquestrador inteiro, e o
   // worker não pode pagar esse custo só por existir.
-  analysis: async () => (await import("@/lib/handlers/analysis")).handleAnalysis,
-  webhook: async () => (await import("@/lib/handlers/webhook")).handleWebhook,
-};
+  ["analysis", async () => (await import("@/lib/handlers/analysis")).handleAnalysis],
+  ["webhook", async () => (await import("@/lib/handlers/webhook")).handleWebhook],
+]);
 
 const g = globalThis as unknown as { __sg_worker?: boolean };
 
@@ -132,7 +137,7 @@ async function umaVolta(): Promise<boolean> {
   const job = await pegarProximo(WORKER_ID);
   if (!job) return false;
 
-  const handlerFactory = HANDLERS[job.kind];
+  const handlerFactory = HANDLERS.get(job.kind);
   if (!handlerFactory) {
     // Tipo desconhecido não deve ficar girando na fila até esgotar tentativas:
     // nenhuma tentativa vai fazer aparecer um handler que não existe.
