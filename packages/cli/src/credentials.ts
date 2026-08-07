@@ -63,9 +63,20 @@ export async function clearCredentials(): Promise<void> {
   await rm(credentialsPath(), { force: true });
 }
 
-/** Servidor do StarGuard. `--server` e a variável cobrem quem auto-hospeda. */
+/**
+ * Servidor do StarGuard. `--server` e a variável cobrem quem auto-hospeda.
+ *
+ * O padrão apontava para `https://app.starguard.dev`, um endereço que **nunca
+ * existiu** — foi inventado quando o cliente de terminal nasceu e ficou. Quem
+ * rodasse `starguard login` sem configurar nada batia num domínio que não
+ * resolve, e o erro falava de rede, não de configuração.
+ *
+ * Precisa ser o MESMO endereço da extensão (`SERVIDOR_PADRAO`, em
+ * `packages/vscode/src/config.ts`): os dois clientes falam com o mesmo
+ * servidor, e é ele que emite os tokens.
+ */
 export function serverUrl(): string {
   return (
-    process.env.STARGUARD_SERVER?.replace(/\/+$/, "") || "https://app.starguard.dev"
+    process.env.STARGUARD_SERVER?.replace(/\/+$/, "") || "https://starguard.starbridge.com.br"
   );
 }

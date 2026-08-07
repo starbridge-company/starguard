@@ -13,6 +13,7 @@
 // ============================================================
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, stat, writeFile, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -139,5 +140,44 @@ describe("servidor", () => {
     // CLI para outra instância mandaria a credencial de uma para a outra.
     await saveCredentials(cred);
     expect((await loadCredentials())?.server).toBe("https://exemplo.starguard");
+  });
+});
+
+// ============================================================
+// O terminal e a extensão têm de apontar para o MESMO servidor.
+//
+// Existia um desvio silencioso: o padrão do terminal era
+// `https://app.starguard.dev` — um domínio **que nunca existiu**, inventado
+// quando o cliente nasceu — enquanto a extensão apontava para o servidor real.
+// Quem rodasse `starguard login` sem configurar nada batia num endereço que
+// não resolve, e o erro falava de rede, não de configuração.
+//
+// Sobreviveu porque nada comparava os dois. A extensão já tinha um teste
+// travando `SERVIDOR_PADRAO` contra o `default` do manifesto; faltava a outra
+// ponta. Este arquivo é a ponte, e é o que faz a próxima troca de domínio
+// falhar aqui em vez de na máquina de quem usa.
+// ============================================================
+describe("o padrão do terminal acompanha o da extensão", () => {
+  const raiz = join(import.meta.dirname, "..", "..");
+  const configDaExtensao = readFileSync(
+    join(raiz, "vscode", "src", "config.ts"),
+    "utf8"
+  );
+  const daExtensao = configDaExtensao.match(/SERVIDOR_PADRAO = "([^"]+)"/)?.[1];
+
+  it("os dois clientes falam com o mesmo endereço", () => {
+    delete process.env.STARGUARD_SERVER;
+    expect(daExtensao).toBeTruthy();
+    expect(serverUrl()).toBe(daExtensao);
+  });
+
+  it("é HTTPS — o token de acesso viaja por aí", () => {
+    delete process.env.STARGUARD_SERVER;
+    expect(serverUrl()).toMatch(/^https:\/\//);
+  });
+
+  it("não termina em barra: o cliente concatena `/api/...` direto", () => {
+    delete process.env.STARGUARD_SERVER;
+    expect(serverUrl().endsWith("/")).toBe(false);
   });
 });

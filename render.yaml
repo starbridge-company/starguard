@@ -1,5 +1,26 @@
 # ============================================================
-# Infraestrutura do StarGuard no Render, declarada em código.
+# ⚠️  A PRODUÇÃO NÃO ESTÁ MAIS AQUI.
+#
+# Desde 07/08/2026 o StarGuard roda num servidor dedicado, em
+# `https://starguard.starbridge.com.br`. Este arquivo fica no repositório
+# porque continua sendo a descrição mais completa do que o serviço PRECISA —
+# variáveis, disco, health check, limites de CPU e memória — e porque voltar
+# para uma PaaS (ou subir um ambiente de teste) é copiar daqui.
+#
+# **Não é mais a fonte da verdade do que está no ar.** Se você mudar uma
+# variável de ambiente no servidor dedicado, ela não chega aqui sozinha. Os
+# valores abaixo valem como referência do que o serviço espera encontrar.
+#
+# O que MUDOU ao sair do Render, e importa para quem administra o servidor:
+#
+#   - `PORT` não é mais injetada pela plataforma. O contêiner traz 3003 como
+#     padrão (ver o `Dockerfile`); quem faz proxy reverso aponta para ela.
+#   - `TRUSTED_PROXY_HOPS` (ver `lib/ratelimit.ts`) vale 1 por padrão, que é o
+#     certo para UM proxy à frente. Com nginx + Cloudflare são DOIS, e errar
+#     esse número faz o rate limit e o log de auditoria enxergarem o IP errado.
+#   - o TLS deixou de ser da plataforma: é do seu proxy agora.
+#
+# ---- O que este arquivo resolvia, e continua explicando ----
 #
 # Existe por um sintoma concreto: o serviço foi criado à mão no painel e subiu
 # pelo buildpack de Node, que instala dependências npm e mais nada. O resultado

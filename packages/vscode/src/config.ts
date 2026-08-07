@@ -21,7 +21,7 @@ import * as vscode from "vscode";
  * `default`). Quem já instalou continua no antigo até atualizar a extensão, a
  * menos que tenha a configuração preenchida à mão.
  */
-export const SERVIDOR_PADRAO = "https://starguard-31l1.onrender.com";
+export const SERVIDOR_PADRAO = "https://starguard.starbridge.com.br";
 
 /** Onde quem não tem conta pede acesso. */
 export const URL_ACESSO_PADRAO = `${SERVIDOR_PADRAO}/login`;

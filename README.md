@@ -35,7 +35,7 @@ npm run dev        # gera chaves JWT automaticamente (predev) e sobe em :3000
 Acesse **http://localhost:3000** → login → onboarding → painel → relatório.
 
 > O `:3000` acima é do `next dev`. **O deploy é na porta 3003** — a imagem de
-> produção traz `PORT=3003` e o `render.yaml` declara o mesmo número:
+> produção traz `PORT=3003`, e é para ela que o proxy reverso aponta:
 >
 > ```bash
 > docker build -t starguard .
@@ -43,6 +43,12 @@ Acesse **http://localhost:3000** → login → onboarding → painel → relató
 > ```
 >
 > `PORT` continua mandando: quem hospeda pode injetar a sua e ela vence o padrão.
+>
+> **Produção:** `https://starguard.starbridge.com.br` (servidor dedicado). É o
+> endereço que a extensão do VS Code e o `starguard` do terminal usam por
+> padrão — `starguard.server` e `STARGUARD_SERVER` cobrem quem auto-hospeda.
+> Atrás de proxy reverso, confira `TRUSTED_PROXY_HOPS` (padrão 1): ele decide
+> qual IP o rate limit e o log de auditoria enxergam.
 
 **Credenciais demo** (já preenchidas na tela de login):
 

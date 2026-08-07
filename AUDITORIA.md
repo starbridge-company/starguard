@@ -2603,6 +2603,54 @@ aplicados pelo próprio entrypoint.
 | Sem `git` no contêiner | 3 testes puros passam, **8 pulados com aviso**, a suíte NÃO falha |
 | Job da imagem | `docker build --target deps` monta com o lock novo |
 
+### BUG-28 · A porta do deploy passou a ser 3003 — e o CRLF quase levou junto ✅
+
+> ✅ **Feito em 07/08/2026.** `PORT` passou de 3000 para **3003** nos quatro
+> lugares que o definem: `ENV PORT` e `EXPOSE` no Dockerfile, o padrão do
+> `docker-entrypoint.sh` e o exemplo do `docker run` no cabeçalho. O
+> `render.yaml` passou a **declarar** `PORT: 3003` em vez de depender da
+> detecção do Render, e o README ganhou a distinção que faltava (`:3000` é do
+> `next dev`; o deploy é 3003).
+>
+> `PORT` continua vencendo o padrão — confirmado subindo a mesma imagem com
+> `-e PORT=8080`: o entrypoint respondeu `subindo em 0.0.0.0:8080` e o health
+> voltou 200 ali. É o que faz a imagem continuar servindo qualquer host que
+> injete a própria porta.
+
+**O defeito que a mudança revelou, e que era meu**
+
+> O contêiner subiu e morreu na hora:
+>
+> ```
+> [FATAL tini (7)] exec /usr/local/bin/docker-entrypoint.sh failed:
+> No such file or directory
+> ```
+>
+> Sobre um arquivo que ESTÁ lá, com permissão de execução. A causa: eu editei o
+> `docker-entrypoint.sh` por uma ferramenta que escreve em modo texto no
+> Windows, e o LF virou **CRLF**. O shebang passou a ser `#!/bin/sh`, e o
+> Linux foi procurar um interpretador chamado `sh`.
+>
+> O que torna isto perigoso é o formato do sintoma: a mensagem acusa o SCRIPT
+> quando o ausente é o INTERPRETADOR, e o `docker build` não reclama de nada —
+> a imagem monta, o `ls -la` mostra o arquivo, e a quebra só aparece ao subir.
+> **28 arquivos** tinham sido convertidos do mesmo jeito na sessão; todos
+> voltaram para LF.
+>
+> O conserto de verdade é o `.gitattributes`, que não existia: `* text=auto
+> eol=lf`, com `*.sh`, `Dockerfile` e `*.yml` travados explicitamente. Uma
+> linha impede a classe inteira, em qualquer máquina — a minha e a de quem
+> clonar o repositório no Windows.
+
+| O que | Resultado **medido** |
+|---|---|
+| Imagem | `EXPOSE` grava `{"3003/tcp":{}}` e `ENV` grava `PORT=3003` |
+| Contêiner de pé | `[entrypoint] StarGuard subindo em 0.0.0.0:3003` · `/api/health` **200 em 0,024 s**, com `opengrep 1.26.0` e `trivy 0.73.0` presentes |
+| `PORT` injetado | `-e PORT=8080` → sobe em 8080 e responde 200 ali: o padrão não amarra o host |
+| Shebang na imagem | `# ! / b i n / s h 
+` — LF, como tem de ser |
+| Suíte | `typecheck` 0 erros · `lint` 0 erros · **856 testes + 2 skipped** |
+
 ## As 8 pendências que sobraram, e o que cada uma precisa de você
 
 Esta sprint fechou **24 das 32** pendências abertas. As oito que restam têm uma

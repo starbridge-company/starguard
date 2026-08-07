@@ -42,3 +42,39 @@ describe("redact · SEC-01", () => {
     expect(() => redactError({ estranho: true })).not.toThrow();
   });
 });
+
+// ============================================================
+// Senha de banco em erro de CONEXÃO — AUDITORIA.md#BUG-29
+// ============================================================
+//
+// A regra de credencial em URL cobria só `https?://`. Num deploy novo, o erro
+// mais comum de todos é o de conexão — e ele carrega a string inteira:
+//
+//   connection failed: postgres://sg:SenhaSuperSecreta@db.interno:5432/starguard
+//
+// Ia para o stdout em texto claro. Ficou mais urgente quando o logger passou a
+// seguir a corrente de `cause`, porque é exatamente ali que o erro do `pg`
+// aparece: a correção de diagnóstico teria ampliado o vazamento.
+describe("credencial em URL de qualquer esquema", () => {
+  it("postgres:// não vaza a senha", () => {
+    const s = redact("connection failed: postgres://sg:SenhaSuperSecreta@db.interno:5432/starguard");
+    expect(s).not.toContain("SenhaSuperSecreta");
+    expect(s).toContain("postgres://***@");
+  });
+
+  it("postgresql://, redis:// e mongodb:// também", () => {
+    expect(redact("postgresql://u:p4ss@h/db")).not.toContain("p4ss");
+    expect(redact("redis://:segredo@127.0.0.1:6379")).not.toContain("segredo");
+    expect(redact("mongodb://admin:m0ng0@cluster/db")).not.toContain("m0ng0");
+  });
+
+  it("o host e o banco continuam legíveis — é o que serve para depurar", () => {
+    const s = redact("postgres://sg:senha@db.interno:5432/starguard");
+    expect(s).toContain("db.interno:5432/starguard");
+  });
+
+  it("URL sem credencial não é tocada", () => {
+    const s = "postgres://db.interno:5432/starguard";
+    expect(redact(s)).toBe(s);
+  });
+});

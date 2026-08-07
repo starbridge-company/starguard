@@ -38,10 +38,60 @@ const MIN = ORDER[(process.env.LOG_LEVEL as Level) || "info"] ?? 20;
  * provedores de IA) — o mesmo texto que já obrigou a redação em `redact.ts`
  * quando ia para o banco. Um PAT no stdout é vazamento igual.
  */
+/**
+ * Quantos elos da corrente de `cause` são seguidos.
+ *
+ * Três bastam para o caso real (Drizzle → pg → erro do socket) e impedem que
+ * um ciclo de `cause` — que existe — transforme o log num laço infinito.
+ */
+const CAUSAS_MAX = 3;
+
 function safe(v: unknown): unknown {
   if (typeof v === "string") return redact(v);
-  if (v instanceof Error) return redact(v.message);
+  if (v instanceof Error) return redact(mensagemComCausa(v));
   return v;
+}
+
+/**
+ * A mensagem do erro **mais a corrente de `cause`**.
+ *
+ * Pegar só `error.message` foi um buraco caro de diagnóstico. O Drizzle embrulha
+ * toda falha de consulta num erro cuja mensagem é o SQL:
+ *
+ *   Failed query:
+ *     UPDATE starguard.jobs SET status = 'running' … RETURNING id, kind, …
+ *   params: 7-a35963f3
+ *
+ * …e guarda o motivo REAL em `cause` — `relation "starguard.jobs" does not
+ * exist`, `password authentication failed`, `connection refused`. Sem ele, o
+ * log repetia a consulta a cada 15 segundos sem dizer nada sobre a causa, e
+ * quem estava depurando tinha um paredão de SQL e zero informação. Três
+ * problemas diferentes (schema atrasado, credencial errada, banco fora do ar)
+ * saíam com a MESMA linha.
+ *
+ * Cada elo passa por `redact`: um erro de conexão do `pg` costuma trazer a URL
+ * do banco, com senha. Ver `redact.ts`.
+ */
+function mensagemComCausa(e: Error): string {
+  const partes: string[] = [e.message];
+  let atual: unknown = e.cause;
+  const vistos = new Set<unknown>([e]);
+
+  for (let i = 0; i < CAUSAS_MAX && atual; i++) {
+    if (vistos.has(atual)) break;
+    vistos.add(atual);
+    if (atual instanceof Error) {
+      // `code` é o que identifica o erro do Postgres (`42P01` = tabela não
+      // existe) e do socket (`ECONNREFUSED`). Vale mais que a frase.
+      const codigo = (atual as { code?: unknown }).code;
+      partes.push(`${codigo ? `[${String(codigo)}] ` : ""}${atual.message}`);
+      atual = atual.cause;
+    } else {
+      partes.push(String(atual));
+      break;
+    }
+  }
+  return partes.join(" ← ");
 }
 
 function emit(level: Level, event: string, ctx: LogContext = {}): void {

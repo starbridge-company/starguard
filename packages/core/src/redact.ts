@@ -12,7 +12,22 @@ const PATTERNS: { re: RegExp; to: string }[] = [
   // Credenciais embutidas em URL: https://user:senha@host, https://token@host.
   // É o caso do `git clone` — a mensagem "fatal: Authentication failed for
   // 'https://x-access-token:ghp_...@github.com/o/r.git'" traz o PAT inteiro.
-  { re: /(https?:\/\/)[^/\s:@]+(?::[^/\s@]*)?@/gi, to: "$1***@" },
+  //
+  // ---- Por que QUALQUER esquema, e não só http(s) ----
+  //
+  // A regra cobria `https?://` e deixava passar `postgres://sg:senha@host`,
+  // `redis://:senha@host`, `mongodb://…` — exatamente as URLs que aparecem em
+  // erro de CONEXÃO, que é o erro mais comum de todos num deploy novo. A senha
+  // do banco ia para o stdout em texto claro.
+  //
+  // Ficou mais urgente quando o logger passou a seguir a corrente de `cause`
+  // (ver `logger.ts`): o motivo real do Drizzle é justamente o erro do `pg`, e
+  // é ele que carrega a string de conexão. A correção de diagnóstico teria
+  // ampliado o vazamento se esta linha continuasse só com `https?`.
+  // Tudo entre `://` e o primeiro `@` some. Sem exigir usuário: `redis://:senha@host`
+  // tem o usuário VAZIO, e a versão anterior — que pedia ao menos um caractere
+  // antes dos dois-pontos — deixava justamente esse passar.
+  { re: /\b([a-z][a-z0-9+.-]*:\/\/)[^/\s@]*@/gi, to: "$1***@" },
   // Tokens do GitHub (clássico, fine-grained, OAuth, app, refresh).
   { re: /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g, to: "gh*_***" },
   { re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, to: "github_pat_***" },
