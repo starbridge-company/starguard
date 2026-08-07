@@ -2746,6 +2746,40 @@ aplicados pelo próprio entrypoint.
 | Suíte | `typecheck` 0 erros · `lint` **0 erros** (12 avisos, todos anteriores) · **912 testes + 2 skipped, 61 arquivos** (eram 902) |
 | Build de produção | `next build` OK |
 
+**Continuação, no mesmo dia: o impasse voltou pela porta do entrypoint**
+
+> Com a rede consertada, o login passou a recusar com *"faltam migrações"* — o
+> banco estava vazio. O conserto é `RUN_MIGRATIONS=true`, e foi ao ligá-lo que
+> apareceu o resto:
+>
+> **`set -e` + `node scripts/migrate.mjs` = contêiner morto no boot.** Migração
+> que falha encerrava o entrypoint, o contêiner morria antes do `next start`, o
+> healthcheck nunca passava e o Coolify revertia. **Exatamente o impasse que o
+> `?probe=live` tinha acabado de resolver, entrando por outra porta** — e pior,
+> porque um contêiner morto não responde `/api/health`, não roda o `db-doctor` e
+> não diz a ninguém o que houve. As duas chamadas de banco viraram guardadas:
+> o servidor sobe, recusa login com o texto acionável do ARQ-12 e deixa o
+> `AVISO` no log. Fixado em `tests/entrypoint-migracoes.test.ts`, que lê o script.
+>
+> **`migrate.mjs` não dizia em qual banco migrou.** É o que torna visível o caso
+> em que quem administra migra pela porta pública e o contêiner usa o endereço
+> interno da rede Docker: dois bancos, os dois lados jurando estar certos, e
+> nenhuma mensagem capaz de mostrar a divergência. Agora imprime
+> `host:porta/base` no sucesso e no erro, sem credencial, com a corrente de
+> `cause` em vez do SQL.
+>
+> **Um `*/` dentro de bloco de comentário quebrou o script.** A frase explicativa
+> citava `packages/*/dist` dentro de `/* … */`; o `*/` fechou o comentário e o
+> resto virou código. `node scripts/migrate.mjs` passou a morrer com
+> `SyntaxError` — num script que só roda no boot do contêiner. O `npm run lint`
+> pega (o ESLint cobre `scripts/**`), e foi o gate que pegou.
+
+| O que | Resultado **medido** |
+|---|---|
+| Migração aplicada, caminho feliz | `[migrate] schema em dia em 177.101.153.200:5430/user_starbridge.` — o alvo nomeado, sem credencial |
+| Migração contra banco inalcançável | `[migrate] falhou em 10.255.255.1:5432/starguard: Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle" ← Connection terminated due to connection timeout` · exit 1 · **o contêiner sobe assim mesmo** |
+| Sintaxe de todos os `scripts/*.mjs` | `node --check` em 8 arquivos, todos OK |
+
 **O que NÃO foi verificado, e por quê**
 
 > O deploy em si não subiu: juntar aplicação e banco na mesma rede Docker do

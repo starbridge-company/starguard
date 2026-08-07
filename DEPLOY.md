@@ -246,6 +246,51 @@ O worker repete o erro com backoff (1×, 2×, 4×… até 1 min) e só registra 
 as potências de dois. **Se você vê poucas linhas, não quer dizer que passou** —
 quer dizer que ele parou de gritar. Ver `lib/worker.ts`.
 
+### "Faltam migrações" com o banco já migrado: são DOIS bancos
+
+O login recusa com *"O banco de dados está desatualizado em relação à
+aplicação"* e você tem certeza de ter migrado. Quase sempre são dois bancos
+diferentes, e nada na tela pode dizer isso — o app só conhece a
+`DATABASE_URL` que recebeu.
+
+O que separa os dois: **a máquina de quem administra alcança o Postgres pela
+porta pública** (`177.101.153.200:5430`, por exemplo) e o **contêiner o alcança
+pelo endereço interno da rede Docker**. Se esses dois endereços não forem o
+mesmo Postgres — ou apontarem para bases diferentes dentro dele — migrar de um
+lado não migra o outro, e ambos os lados juram estar certos.
+
+Por isso `migrate.mjs` e `db-doctor.mjs` **imprimem o alvo**, sem credencial:
+
+```bash
+# o que o CONTÊINER enxerga
+docker exec -it <app> node scripts/db-doctor.mjs | head -3
+#   ok   db-abc123:5432/user_starbridge   <- o alvo dele
+
+# o que a SUA máquina enxerga
+npm run db:doctor | head -3
+#   ok   177.101.153.200:5430/user_starbridge
+```
+
+Host diferente com a **mesma base** costuma ser o mesmo Postgres por duas
+portas — aí o problema é outro. **Base diferente** (o trecho depois da barra) é a
+resposta: são dois bancos.
+
+Seja qual for, o conserto é migrar aquele que o contêiner usa:
+
+```bash
+docker exec -it <app> node scripts/migrate.mjs
+#   [migrate] schema em dia em db-abc123:5432/user_starbridge.
+```
+
+E `RUN_MIGRATIONS=true` no painel, para o próximo deploy fazer isso sozinho. Não
+é preciso semear usuários: o seed do `admin@starguard.local` roda sozinho no
+primeiro login (`lib/auth.ts`), depois que o schema existe.
+
+> **Migração que falha não derruba mais o contêiner.** Ele sobe, recusa login
+> com o texto acionável e deixa o `AVISO` no log — porque um contêiner morto não
+> responde `/api/health`, não roda o `db-doctor` e faz o orquestrador reverter o
+> deploy. Fixado em `tests/entrypoint-migracoes.test.ts`.
+
 ---
 
 ## Voltar para uma PaaS, ou subir um ambiente de teste

@@ -44,14 +44,33 @@ if [ -n "${SAST_RULES:-}" ] && [ ! -e "${SAST_RULES}" ]; then
 fi
 
 # ---- 3. Banco (opt-in por env) ----
+#
+# Falha aqui é AVISO, não morte do contêiner — e isso é deliberado.
+#
+# Com `set -e`, `node scripts/migrate.mjs` saindo diferente de zero encerra este
+# script, o contêiner morre no boot, o healthcheck nunca passa e o orquestrador
+# reverte o deploy. É o MESMO impasse que o `?probe=live` foi resolver, entrando
+# por outra porta: enquanto o banco não estiver acessível, nenhum deploy entra —
+# nem o que conserta a configuração. E um contêiner morto não responde
+# `/api/health`, não roda o `db-doctor` e não diz a ninguém o que houve.
+#
+# Subir com o schema atrasado NÃO é fingir que deu certo: o login recusa com
+# 503 e texto acionável, `/api/health` lista as migrações pendentes e o aviso
+# abaixo fica no log. Ver AUDITORIA.md#BUG-30 e DEPLOY.md.
 if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
   echo "[entrypoint] aplicando migrações..."
-  node scripts/migrate.mjs
+  if ! node scripts/migrate.mjs; then
+    echo "[entrypoint] AVISO: as migrações FALHARAM (motivo acima). O servidor vai subir"
+    echo "[entrypoint] e RECUSAR login enquanto isso não for resolvido. Diagnóstico:"
+    echo "[entrypoint]   node scripts/db-doctor.mjs"
+  fi
 fi
 
 if [ "${RUN_SEED:-false}" = "true" ]; then
   echo "[entrypoint] semeando usuários iniciais..."
-  node scripts/seed.mjs
+  if ! node scripts/seed.mjs; then
+    echo "[entrypoint] AVISO: o seed falhou (motivo acima) — mesma razão de não derrubar o contêiner."
+  fi
 fi
 
 # ---- 4. App ----
