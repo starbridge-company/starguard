@@ -66,6 +66,7 @@ export interface PipelineStep {
   status: StepStatus;
   ai?: StepAIConfig;
   engines?: string[];
+  message?: string;
   metrics?: StepMetric[];
 }
 
@@ -82,6 +83,9 @@ export default function PipelineStepper({ steps }: { steps: PipelineStep[] }) {
           <span className="pipe-tip">
             <span className="pipe-tip-phase">{t(meta.phaseKey)}</span>
             <span className="pipe-tip-desc">{t(meta.descKey)}</span>
+            {step.status === "running" && step.message && (
+              <span className="pipe-tip-desc">{step.message}</span>
+            )}
             <span className="pipe-tip-engines">
               {isSoftware ? (
                 (step.engines || []).map((e) => (

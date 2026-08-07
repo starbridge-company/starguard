@@ -7,11 +7,9 @@
 // que ninguém espere pela outra. É o padrão que substitui um Redis inteiro
 // quando o volume é o deste produto.
 //
-// **Nenhum segredo entra no `payload`.** Ele é gravado em claro e fica no
-// banco depois do job terminar. Token do GitHub e conteúdo de skill continuam
-// no mapa em memória (`lib/jobs.ts`) ou vêm do installation token do App, que
-// é gerado na hora e vale uma hora. O que vai no payload é referência: qual
-// análise, qual repositório, qual PR.
+// Segredo só entra no `payload` dentro de um envelope AES-256-GCM e é removido
+// no estado terminal. Isso permite retomar uma análise após restart sem deixar
+// token/skill em claro nem conservá-los no histórico da fila.
 //
 // NODE-ONLY.
 // ============================================================
@@ -140,8 +138,26 @@ export async function pegarProximo(workerId: string): Promise<JobRow | null> {
 export async function concluir(jobId: string): Promise<void> {
   await db
     .update(jobs)
-    .set({ status: "done", finishedAt: new Date(), lockedBy: null, lockedAt: null })
+    .set({
+      status: "done",
+      payload: sql`${jobs.payload} - 'transient'`,
+      finishedAt: new Date(),
+      lockedBy: null,
+      lockedAt: null,
+    })
     .where(eq(jobs.id, jobId));
+}
+
+/** Renova a posse; impede outro worker de retomar um scan legitimamente longo. */
+export async function renovarLock(jobId: string, workerId: string): Promise<boolean> {
+  const rows = await db
+    .update(jobs)
+    .set({ lockedAt: new Date() })
+    .where(
+      and(eq(jobs.id, jobId), eq(jobs.status, "running"), eq(jobs.lockedBy, workerId))
+    )
+    .returning({ id: jobs.id });
+  return rows.length > 0;
 }
 
 /**
@@ -161,6 +177,7 @@ export async function falhar(job: JobRow, erro: string): Promise<void> {
     .update(jobs)
     .set({
       status: acabou ? "dead" : "queued",
+      ...(acabou ? { payload: sql`${jobs.payload} - 'transient'` } : {}),
       lastError: erro.slice(0, 2000),
       lockedBy: null,
       lockedAt: null,

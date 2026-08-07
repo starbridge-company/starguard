@@ -107,6 +107,25 @@ export function memoriaDisponivelMb(): number | null {
   return Number.isFinite(host) && host > 0 ? host : null;
 }
 
+export type ScannerNativo = "sast" | "sca";
+
+/** Piso para o processo Node e o scanner nativo coexistirem sem OOM. */
+export function memoriaMinimaDoScanner(scanner: ScannerNativo): number {
+  const nome = scanner === "sast" ? "SAST_MIN_SERVER_MEMORY_MB" : "SCA_MIN_SERVER_MEMORY_MB";
+  const configurado = Number(process.env[nome]);
+  if (Number.isFinite(configurado) && configurado > 0) return Math.floor(configurado);
+  return scanner === "sast" ? 1024 : 768;
+}
+
+/** `null` quando cabe; números reais quando iniciar seria arriscado. */
+export function memoriaInsuficienteParaScanner(
+  scanner: ScannerNativo
+): { actual: number; min: number } | null {
+  const actual = memoriaDisponivelMb();
+  const min = memoriaMinimaDoScanner(scanner);
+  return actual !== null && actual < min ? { actual, min } : null;
+}
+
 /** Origem da memória publicada no health, para o número não aparecer sem causa. */
 export function origemDaMemoria(): "cgroup" | "hospedeiro" | "desconhecida" {
   const cgroup =

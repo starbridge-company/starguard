@@ -19,5 +19,5 @@ export async function handleAnalysis(job: JobRow): Promise<void> {
     throw new Error("Job de análise sem `analysisId` no payload.");
   }
   const { runJob } = await import("@/lib/jobs");
-  await runJob(analysisId);
+  await runJob(analysisId, job.payload.transient);
 }

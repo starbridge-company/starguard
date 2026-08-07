@@ -10,6 +10,7 @@ import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot"
 import { limitesDaCaixa } from "@starguard/core/container";
 import { jobsAtivos, recolherAbandonados, totalDeJobs } from "@/lib/scan-jobs";
 import { processInstance } from "@/lib/process-instance";
+import { contarPresos, estatisticas } from "@/lib/queue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,7 +117,7 @@ export async function GET(req: Request) {
   // um scan órfão fica pendurado ocupando a caixa. Ver `lib/scan-jobs.ts`.
   recolherAbandonados();
 
-  const [schema, binaries] = await Promise.all([
+  const [schema, binaries, queue] = await Promise.all([
     comPrazo(checkSchema(), {
       ok: false,
       // O journal está no bundle mesmo quando o banco não responde. Zero aqui
@@ -143,6 +144,13 @@ export async function GET(req: Request) {
     // "Não consegui verificar" é uma resposta legítima; "está tudo bem" quando
     // não se olhou, não é. Ver AUDITORIA.md#BUG-26.
     comPrazo<BinaryStatus[] | null>(checkBinaries(), null),
+    comPrazo(
+      Promise.all([estatisticas(), contarPresos()]).then(([stats, stuck]) => ({
+        ...stats,
+        stuck,
+      })),
+      null
+    ),
   ]);
 
   // Distinguimos "atrasado" de "inalcançável": são consertos diferentes.
@@ -178,6 +186,9 @@ export async function GET(req: Request) {
     // `null` viaja como `null`: quem consome vê "não sei", não "nada a relatar".
     scanners: binaries,
     process: processInstance(),
+    // Fila persistente do PAINEL. Sem estes números, uma análise aguardando
+    // worker e um scanner lento tinham exatamente a mesma aparência externa.
+    queue,
     /**
      * O estado da fila, em números.
      *

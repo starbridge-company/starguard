@@ -431,7 +431,7 @@ export const jobs = starguard.table(
     /** "analysis" | "webhook" — o que este job faz. */
     kind: text("kind").notNull(),
     status: jobStatusEnum("status").notNull().default("queued"),
-    /** Payload do trabalho. NUNCA segredo: ver a nota em `lib/queue.ts`. */
+    /** Referências + eventual envelope AES-GCM transitório; nunca segredo em claro. */
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     userId: uuid("user_id").references(() => users.id),
     /**

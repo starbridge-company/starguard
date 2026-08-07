@@ -17,7 +17,7 @@
 // ============================================================
 import "server-only";
 import crypto from "node:crypto";
-import { concluir, falhar, pegarProximo, type JobRow } from "@/lib/queue";
+import { concluir, falhar, pegarProximo, renovarLock, type JobRow } from "@/lib/queue";
 import { log, timed } from "@starguard/core/logger";
 import { redactError } from "@starguard/core/redact";
 
@@ -26,6 +26,7 @@ const OCIOSO_MS = Number(process.env.QUEUE_POLL_MS || 5_000);
 
 /** Teto da espera quando a fila está INALCANÇÁVEL (banco fora do ar). */
 const BACKOFF_MAX_MS = Number(process.env.QUEUE_BACKOFF_MAX_MS || 60_000);
+const LOCK_HEARTBEAT_MS = Number(process.env.QUEUE_LOCK_HEARTBEAT_MS || 30_000);
 
 /**
  * Quanto esperar depois de `falhas` tentativas seguidas de falar com a fila.
@@ -141,7 +142,19 @@ async function umaVolta(): Promise<boolean> {
 
   try {
     const handler = await handlerFactory();
-    await timed("job", { jobId: job.id, phase: job.kind }, () => handler(job));
+    const heartbeat = setInterval(() => {
+      void renovarLock(job.id, WORKER_ID)
+        .then((ok) => {
+          if (!ok) log.warn("worker.lock.lost", { jobId: job.id });
+        })
+        .catch((error) => log.warn("worker.lock.heartbeat.failed", { jobId: job.id, error }));
+    }, LOCK_HEARTBEAT_MS);
+    heartbeat.unref();
+    try {
+      await timed("job", { jobId: job.id, phase: job.kind }, () => handler(job));
+    } finally {
+      clearInterval(heartbeat);
+    }
     await concluir(job.id);
   } catch (e) {
     // Redigido: a mensagem é PERSISTIDA em `last_error` e aparece no

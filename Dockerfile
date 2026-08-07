@@ -151,6 +151,7 @@ RUN set -eu; \
       echo "AVISO: opengrep-rules nao clonado — SAST usara o registro remoto (auto)."; \
     fi
 ENV SAST_RULES=/opt/opengrep-rules
+ENV STARGUARD_SERVER_RUNTIME=1
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
@@ -171,14 +172,21 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
  && chown -R node:node /app/.next/cache /home/node
 
 USER node
+ENV TRIVY_CACHE_DIR=/home/node/.cache/trivy
 
 # Pré-aquece o opengrep JÁ COMO `node`: ele se auto-extrai em $HOME/.cache na 1ª
 # execução (214 MB), o que fora do build cairia dentro do timeout de 300s do
 # execFile. Rodar isto antes do USER node custaria a mesma coisa duas vezes —
 # uma na extração como root, outra no chown para node.
 #
-# A base do Trivy NÃO é pré-carregada de propósito: são 1.2 GB em disco que ele
-# considera vencida em ~6h e rebaixa no primeiro scan de qualquer forma.
+# O Trivy é só o motor; a base de vulnerabilidades vem separada. Baixá-la no
+# build popula o cache para o primeiro SCA não cobrar esse download inteiro de
+# quem clicou em Analisar. Em runtime o Trivy continua atualizando quando a DB
+# vence. Falha de registry no build não inutiliza a imagem: o primeiro scan
+# ainda tem o fallback automático do próprio Trivy.
+RUN command -v trivy >/dev/null 2>&1 && trivy image --download-db-only >/dev/null 2>&1 \
+      || echo "AVISO: base do Trivy nao pre-carregada - sera baixada no primeiro SCA."
+
 RUN command -v opengrep >/dev/null 2>&1 && opengrep --version >/dev/null 2>&1 \
       || echo "AVISO: opengrep indisponivel — SAST cai em erro explicativo em runtime."
 

@@ -5,11 +5,12 @@
 // saíram daqui — quem decide o que roda, em que ordem e com quanto paralelismo
 // é `@starguard/core/orchestrator`, o mesmo que o terminal e a extensão do VS
 // Code usam. O que sobrou é o que só existe no painel: criar a linha no banco,
-// guardar os segredos em memória enquanto o job vive, disparar sem bloquear a
-// resposta HTTP e recolher análises abandonadas.
+// guardar o plaintext só durante o uso, selar o contexto para a fila, disparar
+// sem bloquear a resposta HTTP e recolher análises abandonadas.
 //
-// Segredos (token do GitHub decifrado + conteúdo das skills) vivem APENAS num
-// mapa em memória durante o job e são apagados no fim — nunca são persistidos.
+// Segredos (token do GitHub + conteúdo das skills) nunca são persistidos em
+// claro: ficam num Map durante a requisição e num envelope AES-256-GCM dentro
+// do job até o estado terminal, quando o envelope é removido.
 // ============================================================
 import "server-only";
 import { engineSummary } from "@/lib/config";
@@ -24,6 +25,7 @@ import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "@/lib/i18n/config"
 import { translate } from "@/lib/i18n/translate";
 import { ANALYZER_IDS, type AnalyzerId } from "@/types";
 import type { Job, JobInput, JobInputPublic, PhaseState } from "@/types";
+import { decryptToken, encryptToken, type EncryptedToken } from "@/lib/crypto";
 
 // Segredos transitórios (nunca vão ao BD).
 interface Transient {
@@ -41,6 +43,48 @@ interface Transient {
 const g = globalThis as unknown as { __sg_secrets?: Map<string, Transient> };
 g.__sg_secrets ||= new Map();
 const secrets = g.__sg_secrets!;
+
+/**
+ * Recupera o contexto autenticado que viajou cifrado na fila.
+ *
+ * AES-GCM garante autenticidade; a validação abaixo garante também o shape,
+ * para uma linha antiga/corrompida nunca virar entrada arbitrária no motor.
+ */
+function abrirTransient(valor: unknown): Transient | undefined {
+  if (!valor || typeof valor !== "object") return undefined;
+  const enc = valor as Partial<EncryptedToken>;
+  if (
+    typeof enc.ciphertext !== "string" ||
+    typeof enc.iv !== "string" ||
+    typeof enc.authTag !== "string"
+  ) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(decryptToken(enc as EncryptedToken)) as Partial<Transient>;
+    if (typeof raw.systemDescription !== "string" || !Array.isArray(raw.selected)) {
+      return undefined;
+    }
+    const validos = new Set<string>(ANALYZER_IDS);
+    const selected = raw.selected.filter((id): id is AnalyzerId => validos.has(id));
+    const skills = Array.isArray(raw.skills)
+      ? raw.skills.filter(
+          (s): s is { name: string; content: string } =>
+            !!s && typeof s.name === "string" && typeof s.content === "string"
+        )
+      : [];
+    return {
+      systemDescription: raw.systemDescription,
+      locale: raw.locale ? normalizeLocale(raw.locale) : undefined,
+      repoUrl: typeof raw.repoUrl === "string" ? raw.repoUrl : undefined,
+      token: typeof raw.token === "string" ? raw.token : undefined,
+      skills,
+      selected,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Resolve o token a usar: por id de token salvo (decifra) ou token inline.
@@ -111,6 +155,10 @@ export async function createAnalysis(
 export async function getAnalysis(id: string): Promise<Job | undefined> {
   const row = await analysesRepo.getById(id);
   if (!row) return undefined;
+  return jobFromRow(row);
+}
+
+function jobFromRow(row: NonNullable<Awaited<ReturnType<typeof analysesRepo.getById>>>): Job {
   const phases = (row.phases as Job["phases"]) ?? initialPhases();
   const skillNames = phases.skills?.result?.map((s) => s.skillName) ?? [];
   const input: JobInputPublic = {
@@ -131,6 +179,15 @@ export async function getAnalysis(id: string): Promise<Job | undefined> {
     progress: row.progress,
     phases,
   };
+}
+
+/** Job e dono na mesma leitura — `/api/status` é consultado repetidamente. */
+export async function getAnalysisWithOwner(
+  id: string
+): Promise<{ job: Job; owner: string } | undefined> {
+  const row = await analysesRepo.getById(id);
+  if (!row) return undefined;
+  return { job: jobFromRow(row), owner: row.userId };
 }
 
 /** Retorna o dono da análise (para checagem de acesso na rota). */
@@ -186,10 +243,9 @@ async function ownerLocale(userId: string | null | undefined): Promise<Locale> {
 const STALE_AFTER_MS = Number(process.env.ANALYSIS_STALE_MS || 20 * 60_000);
 
 /**
- * Encerra análises abandonadas. Os segredos do job vivem num Map em memória e
- * o disparo é fire-and-forget: um restart do processo (todo deploy no Render é
- * um) deixa a linha em `running` para sempre, sem timeout e sem mensagem.
- * Ver AUDITORIA.md#BUG-11 — a solução definitiva é a fila do #ARQ-04.
+ * Encerra análises abandonadas de gerações antigas ou falhas irrecuperáveis.
+ * A fila e o contexto cifrado retomam jobs atuais; esta varredura continua
+ * sendo a última defesa para linhas que nunca mais receberam heartbeat.
  */
 export async function expireStaleAnalyses(): Promise<number> {
   // O MESMO corte na leitura e na escrita: se o job voltar a escrever entre as
@@ -230,15 +286,17 @@ function sweepIfDue(): void {
   void expireStaleAnalyses().catch(() => {});
 }
 
-export async function runJob(id: string): Promise<void> {
-  const raw = secrets.get(id);
+export async function runJob(id: string, transientCifrado?: unknown): Promise<void> {
+  // Idempotência: se o processo morreu depois de finalizar a análise mas antes
+  // de confirmar a fila, a retomada não pode cobrar IA e escanear tudo de novo.
+  const row = await analysesRepo.getById(id).catch(() => undefined);
+  if (!row || row.finishedAt) return;
+
+  const raw = secrets.get(id) ?? abrirTransient(transientCifrado);
   // Segredos ausentes = o processo que criou a análise morreu antes de rodar.
   // Retornar em silêncio deixava a linha `pending` para sempre (#BUG-11).
   if (!raw) {
-    const dono = await analysesRepo
-      .getById(id)
-      .then((r) => r?.userId)
-      .catch(() => undefined);
+    const dono = row.userId;
     const phases = failUnfinishedPhases(
       initialPhases(),
       translate(await ownerLocale(dono), "job.orphan")
@@ -256,10 +314,7 @@ export async function runJob(id: string): Promise<void> {
   }
 
   const locale = raw.locale || DEFAULT_LOCALE;
-  const userId = await analysesRepo
-    .getById(id)
-    .then((r) => r?.userId)
-    .catch(() => undefined);
+  const userId = row.userId;
   audit("analyze.start", { jobId: id });
 
   const sink = postgresSink({
@@ -269,6 +324,14 @@ export async function runJob(id: string): Promise<void> {
     repoUrl: raw.repoUrl,
     selected: raw.selected,
   });
+
+  // Um SAST/SCA pode passar vários minutos dentro do processo nativo sem
+  // emitir evento. Sem heartbeat, `expireStaleAnalyses` confundia trabalho
+  // lento com processo morto e encerrava uma análise ainda viva.
+  const heartbeat = setInterval(() => {
+    void analysesRepo.touchAnalysis(id).catch(() => {});
+  }, Number(process.env.ANALYSIS_HEARTBEAT_MS) || 30_000);
+  heartbeat.unref();
 
   try {
     await analyze({
@@ -304,6 +367,7 @@ export async function runJob(id: string): Promise<void> {
       .catch(() => {});
     log.error("job.failed", { jobId: id, error: e });
   } finally {
+    clearInterval(heartbeat);
     // Token e skills só vivem em memória durante o job.
     secrets.delete(id);
   }
@@ -316,19 +380,31 @@ export async function runJob(id: string): Promise<void> {
  * restart do processo (todo deploy é um) deixava a linha em `running` para
  * sempre — o BUG-11. Agora o trabalho vive no banco e alguém volta a pegá-lo.
  *
- * **O que a fila NÃO resolve**, e continua aberto no ARQ-06: os SEGREDOS do
- * job (token do GitHub decifrado, conteúdo das skills) seguem num mapa em
- * memória. Se o job for retomado por outro processo, eles não estarão lá e a
- * análise termina como órfã, com a mensagem explicando. Resolver isso exige
- * decidir onde guardar segredo transitório — e guardá-lo em lugar nenhum foi
- * uma escolha deliberada de segurança, não um esquecimento.
+ * O contexto transitório vai cifrado com AES-256-GCM. Assim outro processo
+ * pode retomar o job sem que token ou conteúdo de skill apareçam em claro no
+ * banco; `concluir`/`falhar` removem o envelope no estado terminal.
  */
 export async function startJob(id: string): Promise<void> {
   const { enqueue } = await import("@/lib/queue");
+  const raw = secrets.get(id);
+  // Diferentemente do código-fonte clonado, este contexto precisa sobreviver
+  // ao restart para a fila persistente ser realmente persistente. Viaja no
+  // JSONB apenas como AES-256-GCM e é removido assim que o job termina/morre.
+  let transient: EncryptedToken | undefined;
+  try {
+    transient = raw ? encryptToken(JSON.stringify(raw)) : undefined;
+  } catch (e) {
+    // Configuração criptográfica quebrada não pode deixar a linha `pending`
+    // eternamente. Executa no processo atual (menos resiliente) e registra a
+    // causa; o plaintext continua sem ser persistido.
+    log.error("job.seal.failed", { jobId: id, error: e });
+    void runJob(id).catch((err) => log.error("job.failed", { jobId: id, error: err }));
+    return;
+  }
   await enqueue({
     kind: "analysis",
     // Só a REFERÊNCIA: o payload é gravado em claro e sobrevive ao job.
-    payload: { analysisId: id },
+    payload: { analysisId: id, ...(transient ? { transient } : {}) },
     // Mesma análise enfileirada duas vezes é engano de quem chamou.
     dedupeKey: `analysis:${id}`,
   }).catch((e) => {

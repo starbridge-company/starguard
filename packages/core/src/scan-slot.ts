@@ -33,18 +33,25 @@ export function scanSlots(): number {
   return scanSlotsSugeridos();
 }
 
-let emUso = 0;
-/** Quem chegou e não coube. FIFO: a vaga vai para quem espera há mais tempo. */
-const esperando: (() => void)[] = [];
+/**
+ * `globalThis`, não estado de módulo: o Next pode empacotar painel e rota da
+ * extensão em chunks distintos. Duas cópias do módulo com contadores próprios
+ * deixariam cada endpoint iniciar seu scanner e anulavam a fila compartilhada.
+ */
+const g = globalThis as unknown as {
+  __sg_scan_slots?: { emUso: number; esperando: (() => void)[] };
+};
+g.__sg_scan_slots ||= { emUso: 0, esperando: [] };
+const estado = g.__sg_scan_slots;
 
 /** Quantos scanners estão rodando agora. */
 export function vagasEmUso(): number {
-  return emUso;
+  return estado.emUso;
 }
 
 /** Quantos estão esperando vaga. */
 export function naFilaDeVagas(): number {
-  return esperando.length;
+  return estado.esperando.length;
 }
 
 /**
@@ -59,18 +66,18 @@ export async function comVaga<T>(
   fn: () => Promise<T>,
   aoEsperar?: (posicao: number) => void
 ): Promise<T> {
-  if (emUso >= scanSlots()) {
-    aoEsperar?.(esperando.length + 1);
-    await new Promise<void>((libera) => esperando.push(libera));
+  if (estado.emUso >= scanSlots()) {
+    aoEsperar?.(estado.esperando.length + 1);
+    await new Promise<void>((libera) => estado.esperando.push(libera));
   }
-  emUso++;
+  estado.emUso++;
   try {
     return await fn();
   } finally {
-    emUso--;
+    estado.emUso--;
     // O `shift` é o que faz a fila ser FIFO. Um `pop` deixaria quem chegou
     // primeiro esperando indefinidamente enquanto os recém-chegados passam.
-    esperando.shift()?.();
+    estado.esperando.shift()?.();
   }
 }
 
@@ -80,6 +87,6 @@ export async function comVaga<T>(
  * vazamento em vez de revelá-lo.
  */
 export function resetScanSlots(): void {
-  emUso = 0;
-  while (esperando.length) esperando.shift()?.();
+  estado.emUso = 0;
+  while (estado.esperando.length) estado.esperando.shift()?.();
 }

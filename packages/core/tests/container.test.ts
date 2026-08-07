@@ -17,6 +17,7 @@ import {
   cpusDeCgroupV1,
   cpusDeCgroupV2,
   memoriaDeCgroup,
+  memoriaMinimaDoScanner,
   processosPara,
   processosDeScan,
   scanSlotsParaRecursos,
@@ -104,6 +105,28 @@ describe("memória do contêiner", () => {
 
   it("ausente é nulo", () => {
     expect(memoriaDeCgroup(null)).toBeNull();
+  });
+});
+
+describe("piso de segurança dos scanners no servidor", () => {
+  it("SAST reserva mais memória que SCA e ambos são configuráveis", () => {
+    const antesSast = process.env.SAST_MIN_SERVER_MEMORY_MB;
+    const antesSca = process.env.SCA_MIN_SERVER_MEMORY_MB;
+    try {
+      delete process.env.SAST_MIN_SERVER_MEMORY_MB;
+      delete process.env.SCA_MIN_SERVER_MEMORY_MB;
+      expect(memoriaMinimaDoScanner("sast")).toBe(1024);
+      expect(memoriaMinimaDoScanner("sca")).toBe(768);
+      process.env.SAST_MIN_SERVER_MEMORY_MB = "1536";
+      process.env.SCA_MIN_SERVER_MEMORY_MB = "896";
+      expect(memoriaMinimaDoScanner("sast")).toBe(1536);
+      expect(memoriaMinimaDoScanner("sca")).toBe(896);
+    } finally {
+      if (antesSast === undefined) delete process.env.SAST_MIN_SERVER_MEMORY_MB;
+      else process.env.SAST_MIN_SERVER_MEMORY_MB = antesSast;
+      if (antesSca === undefined) delete process.env.SCA_MIN_SERVER_MEMORY_MB;
+      else process.env.SCA_MIN_SERVER_MEMORY_MB = antesSca;
+    }
   });
 });
 

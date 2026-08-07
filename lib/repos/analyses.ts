@@ -118,6 +118,11 @@ export async function patchAnalysis(id: string, patch: AnalysisPatch): Promise<v
   await db.update(analyses).set(patchToSet(patch)).where(eq(analyses.id, id));
 }
 
+/** Atualiza somente o batimento de um job longo, sem regravar o JSONB pesado. */
+export async function touchAnalysis(id: string): Promise<void> {
+  await db.update(analyses).set({ updatedAt: new Date() }).where(eq(analyses.id, id));
+}
+
 /**
  * Igual ao `patchAnalysis`, mas só grava se a linha continuar sem sinal de
  * vida desde `since`. Se o job voltou a escrever entre a leitura e a escrita,

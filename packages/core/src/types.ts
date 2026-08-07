@@ -292,6 +292,8 @@ export interface PhaseState<T = unknown> {
   engines?: string[];
   startedAt?: number;
   finishedAt?: number;
+  /** Último progresso útil enquanto a fase está em execução. */
+  message?: string;
   error?: string;
   result?: T;
 }

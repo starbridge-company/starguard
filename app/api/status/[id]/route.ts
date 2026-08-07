@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, requireSession, canAccess } from "@/lib/http";
-import { getAnalysis, getAnalysisOwner } from "@/lib/jobs";
+import { getAnalysisWithOwner } from "@/lib/jobs";
 import { validate, uuidField } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -17,12 +17,11 @@ export async function GET(
   const idCheck = validate(uuidField, id);
   if (!idCheck.ok) return jsonError(404, "Análise não encontrada.");
 
-  const owner = await getAnalysisOwner(id);
-  if (!owner) return jsonError(404, "Análise não encontrada.");
+  const analysis = await getAnalysisWithOwner(id);
+  if (!analysis) return jsonError(404, "Análise não encontrada.");
   // Dono ou superadmin (que enxerga tudo de todos).
-  if (!canAccess(session, owner)) return jsonError(404, "Análise não encontrada.");
-
-  const job = await getAnalysis(id);
-  if (!job) return jsonError(404, "Análise não encontrada.");
-  return jsonOk(job);
+  if (!canAccess(session, analysis.owner)) {
+    return jsonError(404, "Análise não encontrada.");
+  }
+  return jsonOk(analysis.job);
 }

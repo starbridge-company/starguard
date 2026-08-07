@@ -199,7 +199,9 @@ describe("o resultado não passa mais pelo cano", () => {
         new URL(`../src/analyzers/${f}.ts`, import.meta.url),
         "utf8"
       );
-      expect(fonte).toMatch(/\} finally \{\s*[\s\S]{0,400}?rm\(dirname\(saida\)/);
+      expect(fonte).toMatch(
+        /\} finally \{\s*[\s\S]{0,400}?rm\((?:dirname\(saida\)|trabalho)/
+      );
     }
   });
 });

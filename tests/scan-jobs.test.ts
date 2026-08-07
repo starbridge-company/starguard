@@ -388,13 +388,13 @@ describe("o SAST não pode aceitar um job que derrubará o servidor", () => {
     const fonte = await import("node:fs/promises").then((fs) =>
       fs.readFile("app/api/scan/route.ts", "utf8")
     );
-    const confere = fonte.indexOf('if (analyzer === "sast")');
+    const confere = fonte.indexOf("memoriaInsuficienteParaScanner(analyzer)");
     const grava = fonte.indexOf("await prepararDiretorio(aprovados)");
     const cria = fonte.indexOf("job = criarJob({");
     expect(confere).toBeGreaterThan(0);
     expect(confere).toBeLessThan(grava);
     expect(confere).toBeLessThan(cria);
-    expect(fonte).toContain("SAST_MIN_SERVER_MEMORY_MB");
+    expect(fonte).toContain("memoriaInsuficienteParaScanner");
     expect(fonte).toContain("scan.serverMemoryTooLow");
   });
 });

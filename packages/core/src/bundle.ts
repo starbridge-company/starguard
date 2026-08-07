@@ -22,8 +22,8 @@
 // Essa separação é o ponto: quem quer só saber de CVE nas dependências não
 // precisa mandar código nenhum, e a interface deixa isso explícito.
 // ============================================================
-import { readdir, readFile, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { dirname, extname, join } from "node:path";
 
 export interface ArquivoEmpacotado {
   path: string;
@@ -149,6 +149,27 @@ export async function nomesDeManifesto(raiz: string): Promise<string[]> {
 
   await andar(raiz, "", 0);
   return achados;
+}
+
+/**
+ * Materializa apenas manifestos/lockfiles em outra raiz, sem carregar seu
+ * conteúdo no heap. O painel clona o repositório inteiro, mas o Trivy de CVE
+ * não precisa atravessar fontes, artefatos e assets para resolver dependências.
+ */
+export async function copiarManifestosPara(raiz: string, destino: string): Promise<string[]> {
+  const nomes = await nomesDeManifesto(raiz);
+  const copiados: string[] = [];
+  for (const rel of nomes) {
+    const alvo = join(destino, rel);
+    try {
+      await mkdir(dirname(alvo), { recursive: true });
+      await copyFile(join(raiz, rel), alvo);
+      copiados.push(rel);
+    } catch {
+      /* arquivo mudou/sumiu durante a cópia: os demais ainda são úteis */
+    }
+  }
+  return copiados;
 }
 
 export interface OpcoesDePacote {

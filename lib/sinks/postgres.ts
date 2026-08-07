@@ -139,6 +139,8 @@ export function postgresSink(opts: PostgresSinkOptions): Sink & {
 } {
   const phases = initialPhases();
   const outcomes: Record<string, AnalyzerOutcome> = {};
+  const iniciados = new Set<AnalyzerId>();
+  const mensagens: Partial<Record<AnalyzerId, string>> = {};
 
   // As fases que nenhum analisador selecionado alimenta já nascem `skipped`:
   // sem isto elas ficariam `pending` para sempre e a tela mostraria uma
@@ -171,13 +173,25 @@ export function postgresSink(opts: PostgresSinkOptions): Sink & {
   const refreshPhase = (id: AnalyzerId) => {
     const key = analyzerToPhase(id);
     const ph = phases[key] as PhaseState<unknown>;
+    const esperados = phaseAnalyzers(key).filter((x) => selecionados.has(x));
     const irmaos = phaseAnalyzers(key)
       .map((x) => outcomes[x])
       .filter(Boolean);
 
-    ph.status = phaseStatusFrom(irmaos);
+    // Uma fase composta não termina quando o PRIMEIRO analisador termina.
+    // SAST, SCA e revisão compartilham `software`; antes, o primeiro `done`
+    // fechava a fase enquanto os outros dois ainda trabalhavam.
+    const todosTerminaram = esperados.every((x) => !!outcomes[x]);
+    ph.status = todosTerminaram
+      ? phaseStatusFrom(irmaos)
+      : esperados.some((x) => iniciados.has(x))
+        ? "running"
+        : "pending";
     const errado = irmaos.find((o) => o.status === "error");
-    ph.error = errado?.error;
+    ph.error = todosTerminaram ? errado?.error : undefined;
+    ph.message = todosTerminaram
+      ? undefined
+      : [...esperados].reverse().map((x) => mensagens[x]).find(Boolean);
     ph.startedAt = irmaos.map((o) => o.startedAt).filter(Boolean).sort()[0];
     ph.finishedAt = irmaos
       .map((o) => o.finishedAt)
@@ -222,6 +236,8 @@ export function postgresSink(opts: PostgresSinkOptions): Sink & {
           break;
 
         case "analyzer:start": {
+          iniciados.add(event.id);
+          mensagens[event.id] = undefined;
           const key = analyzerToPhase(event.id);
           // `running` só se a fase ainda não terminou por outro analisador:
           // com sast, sca e business na mesma fase, o último a começar não
@@ -234,7 +250,16 @@ export function postgresSink(opts: PostgresSinkOptions): Sink & {
           break;
         }
 
+        case "analyzer:progress": {
+          iniciados.add(event.id);
+          mensagens[event.id] = event.message;
+          refreshPhase(event.id);
+          await persist();
+          break;
+        }
+
         case "analyzer:done":
+          mensagens[event.id] = undefined;
           outcomes[event.id] = {
             id: event.id,
             status: "done",
@@ -249,6 +274,7 @@ export function postgresSink(opts: PostgresSinkOptions): Sink & {
           break;
 
         case "analyzer:error":
+          mensagens[event.id] = undefined;
           outcomes[event.id] = {
             id: event.id,
             status: "error",

@@ -445,6 +445,7 @@ export default function ResultsPage() {
     status: job.phases[k].status,
     ai: job.phases[k].ai,
     engines: job.phases[k].engines,
+    message: job.phases[k].message,
     metrics: stepMetrics(k),
   }));
 
@@ -527,7 +528,7 @@ export default function ResultsPage() {
             className="button-spinner"
             style={{ borderTopColor: "hsl(var(--accent))" }}
           />
-          <p>{running}</p>
+          <p>{job.phases[key].message || running}</p>
         </div>
       );
     if (st === "pending")

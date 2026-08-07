@@ -18,7 +18,12 @@ import { BIN, ENGINES } from "../config";
 import { regrasDoSast, regrasParaOCodigo, regrasUsaveis } from "../sast-rules";
 // Do `container`, e não do `config`: as duas leem o cgroup, e `config.ts`
 // precisa continuar importável do Edge runtime. Ver o cabeçalho de ambos.
-import { sastJobs, sastMaxMemoryMb, tetoDeSaidaMb } from "../container";
+import {
+  memoriaInsuficienteParaScanner,
+  sastJobs,
+  sastMaxMemoryMb,
+  tetoDeSaidaMb,
+} from "../container";
 import { parseSemgrep } from "../parsers";
 import { ScanUnavailable } from "../git";
 import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
@@ -144,6 +149,19 @@ export async function runSast(
 ): Promise<Vulnerability[]> {
   const engine = ENGINES.sast;
   if (engine === "none") return [];
+
+  if (process.env.STARGUARD_SERVER_RUNTIME === "1") {
+    const memoria = memoriaInsuficienteParaScanner("sast");
+    if (memoria) {
+      throw new ScanUnavailable(
+        translate(opts.locale ?? DEFAULT_LOCALE, "scan.serverMemoryTooLow", {
+          scanner: "SAST",
+          min: memoria.min,
+          actual: memoria.actual,
+        })
+      );
+    }
+  }
 
   const bin = engine === "semgrep" ? BIN.semgrep : BIN.opengrep;
   // execFile com argumentos em array — o `dir` é caminho controlado por nós.

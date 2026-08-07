@@ -42,6 +42,11 @@ vi.mock("@/lib/scan-jobs", () => ({
   totalDeJobs: () => 0,
 }));
 
+vi.mock("@/lib/queue", () => ({
+  estatisticas: async () => ({ queued: 0, running: 0, dead: 0 }),
+  contarPresos: async () => 0,
+}));
+
 const { GET } = await import("@/app/api/health/route");
 
 /** O prazo da rota é 8 s; um valor curto mantém a suíte honesta e rápida. */
@@ -60,6 +65,7 @@ async function corpo() {
     scannersMessage?: string;
     scannersBusyMessage?: string;
     process: { id: string; startedAt: string; uptimeSeconds: number };
+    queue: { queued: number; running: number; dead: number; stuck: number } | null;
     scan: {
       memory: {
         rssMb: number;
@@ -116,6 +122,11 @@ describe("sondagem que respondeu", () => {
     expect(processInfo.id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(processInfo.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(processInfo.uptimeSeconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it("publica a fila persistente do painel separada da fila de scanners", async () => {
+    checkBinaries.mockResolvedValue([]);
+    expect((await corpo()).queue).toEqual({ queued: 0, running: 0, dead: 0, stuck: 0 });
   });
 
   it("os dois presentes = «ok»", async () => {
@@ -209,5 +220,14 @@ describe("Dockerfile: o healthcheck espera mais que o prazo da rota", () => {
   it("`curl` está instalado — o healthcheck depende dele", () => {
     // O próprio Coolify avisa: "The healthcheck needs a curl or wget command".
     expect(dockerfile).toMatch(/apt-get install[^\n]*curl/);
+  });
+
+  it("pré-carrega a base do Trivy no cache do usuário de runtime", () => {
+    const user = dockerfile.indexOf("USER node");
+    const cache = dockerfile.indexOf("ENV TRIVY_CACHE_DIR=/home/node/.cache/trivy");
+    const download = dockerfile.indexOf("trivy image --download-db-only");
+    expect(user).toBeGreaterThan(0);
+    expect(cache).toBeGreaterThan(user);
+    expect(download).toBeGreaterThan(cache);
   });
 });

@@ -19,7 +19,10 @@ import { apiGet, isAbortError } from "@/lib/client";
 import { useApiError } from "@/lib/i18n";
 import type { Job } from "@/types";
 
-const TERMINAL = new Set(["done", "error"]);
+// `skipped` também terminou: Correção é sob demanda e, por desenho, nasce
+// pulada. Ignorá-la mantinha o polling de /api/status ativo para sempre após
+// toda análise saudável.
+const TERMINAL = new Set(["done", "error", "skipped"]);
 
 export function allTerminal(job: Job): boolean {
   return (Object.values(job.phases) as { status: string }[]).every((p) =>

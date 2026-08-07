@@ -7,12 +7,12 @@
 // NODE-ONLY.
 // ============================================================
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
-import { tetoDeSaidaMb } from "../container";
+import { memoriaInsuficienteParaScanner, tetoDeSaidaMb } from "../container";
 import { parseTrivy } from "../parsers";
 import { ScanUnavailable } from "../git";
 // `morreuNoTeto` mora em `sast.ts` porque foi lá que o defeito foi medido, e
@@ -22,7 +22,12 @@ import { erroDeTeto, morreuNoTeto } from "./sast";
 import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
-import { empacotarParaScan, faltaLockfile, nomesDeManifesto } from "../bundle";
+import {
+  copiarManifestosPara,
+  empacotarParaScan,
+  faltaLockfile,
+  nomesDeManifesto,
+} from "../bundle";
 import { comVaga } from "../scan-slot";
 import {
   callRemoteScan,
@@ -70,10 +75,34 @@ export async function runSca(
   const engine = ENGINES.sca;
   if (engine === "none") return [];
 
-  // Pelo ARQUIVO, e não pelo cano — ver o mesmo trecho, com a medição, em
-  // `sast.ts`. Aqui pesa ainda mais: o JSON do trivy carrega a descrição
-  // completa de cada CVE, e um lockfile grande rende dezenas de MB.
-  const saida = join(await mkdtemp(join(tmpdir(), "sg-sca-")), "deps.json");
+  if (process.env.STARGUARD_SERVER_RUNTIME === "1") {
+    const memoria = memoriaInsuficienteParaScanner("sca");
+    if (memoria) {
+      throw new ScanUnavailable(
+        translate(opts.locale ?? DEFAULT_LOCALE, "scan.serverMemoryTooLow", {
+          scanner: "SCA",
+          min: memoria.min,
+          actual: memoria.actual,
+        })
+      );
+    }
+  }
+
+  // O painel entrega um clone completo, mas o SCA de vulnerabilidades só usa
+  // manifestos e lockfiles. Copiar esses poucos arquivos evita o Trivy andar
+  // por todo o repositório (incluindo assets/gerados não ignorados) e não
+  // bufferiza lockfiles no Node: `copyFile` trabalha fora do heap.
+  const trabalho = await mkdtemp(join(tmpdir(), "sg-sca-"));
+  const entrada = join(trabalho, "input");
+  await mkdir(entrada, { recursive: true });
+  const manifestos = await copiarManifestosPara(dir, entrada);
+  if (manifestos.length === 0) {
+    await rm(trabalho, { recursive: true, force: true }).catch(() => {});
+    return [];
+  }
+
+  // Pelo ARQUIVO, e não pelo cano — o JSON do Trivy pode ter dezenas de MB.
+  const saida = join(trabalho, "deps.json");
 
   const args = [
     "fs",
@@ -93,7 +122,7 @@ export async function runSca(
         // Ver o mesmo trecho em `sast.ts`: a transição é o que se anuncia.
         opts.report?.(MSG_ESCANEANDO_LOCAL);
         return pExecFile(BIN.trivy, args, {
-          cwd: dir,
+          cwd: entrada,
           timeout: TETO_SCA_MS,
           // Com `-o` o cano só carrega aviso. Ver `sast.ts`.
           maxBuffer: 1024 * 1024,
@@ -122,7 +151,7 @@ export async function runSca(
     }
     throw new ScanUnavailable(`Falha no SCA: ${(err.message || "").slice(0, 200)}`);
   } finally {
-    await rm(dirname(saida), { recursive: true, force: true }).catch(() => {});
+    await rm(trabalho, { recursive: true, force: true }).catch(() => {});
   }
 }
 

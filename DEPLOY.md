@@ -159,6 +159,8 @@ variável daqui contorna um cgroup.
 | `SCAN_MAX_OUTPUT_MB` | derivado (5% da caixa, entre 8 e 64) | Teto do JSON de resultado. Um JSON de N bytes custa **3 a 4× N** no V8 — é a única coisa deste caminho cujo tamanho não se conhece de antemão |
 | `SCAN_MAX_FINDINGS` | `5000` | Achados guardados por scan. Acima disso ficam os mais graves e o corte é dito na tela |
 | `SAST_MIN_SERVER_MEMORY_MB` | `1024` | Piso de segurança: abaixo dele o servidor responde 503 antes de iniciar o Opengrep, evitando OOM e permitindo fallback local |
+| `SCA_MIN_SERVER_MEMORY_MB` | `768` | Piso equivalente do Trivy; evita que a atualização/carregamento da base derrube o Node |
+| `QUEUE_LOCK_HEARTBEAT_MS` / `ANALYSIS_HEARTBEAT_MS` | `30000` | Mantêm lock da fila e `updated_at` vivos durante scanners longos; devem ficar bem abaixo de `QUEUE_LOCK_STALE_MS`/`ANALYSIS_STALE_MS` |
 
 Baixar `SCAN_MAX_FILES` é a alavanca mais direta quando não há CPU a dar: menos
 arquivos por scan, dentro do mesmo teto de tempo. O que fica de fora é dito na

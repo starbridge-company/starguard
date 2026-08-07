@@ -62,7 +62,7 @@ import {
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { normalizeLocale } from "@/lib/i18n/config";
 import { translateIn } from "@starguard/core/i18n/translate";
-import { memoriaDisponivelMb } from "@starguard/core/container";
+import { memoriaInsuficienteParaScanner } from "@starguard/core/container";
 import { processInstanceId } from "@/lib/process-instance";
 import {
   acharJob,
@@ -121,8 +121,6 @@ const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 8;
  * padrao conservador: rejeitar com 503 preserva o servidor e habilita o
  * fallback local; aceitar e sofrer OOM apaga o job e todas as requisicoes.
  */
-const SAST_MIN_SERVER_MEMORY_MB = Number(process.env.SAST_MIN_SERVER_MEMORY_MB) || 1024;
-
 /**
  * O caminho relativo, ou `null` se ele tentar sair da raiz.
  *
@@ -227,14 +225,15 @@ export async function POST(req: NextRequest) {
   // criar um job. Em producao, o host tem 4 GB, mas o cgroup antigo ainda
   // entrega apenas 512 MB ao container: o Opengrep derruba o Node e o Map em
   // memoria desaparece, que chega ao cliente como um 404 misterioso.
-  if (analyzer === "sast") {
-    const memoriaMb = memoriaDisponivelMb();
-    if (memoriaMb !== null && memoriaMb < SAST_MIN_SERVER_MEMORY_MB) {
+  {
+    const memoria = memoriaInsuficienteParaScanner(analyzer);
+    if (memoria) {
       return jsonError(
         503,
         translateIn(locale, "scan.serverMemoryTooLow", {
-          min: SAST_MIN_SERVER_MEMORY_MB,
-          actual: memoriaMb,
+          scanner: analyzer.toUpperCase(),
+          min: memoria.min,
+          actual: memoria.actual,
         }),
         null
       );
