@@ -9,8 +9,11 @@ import { fileURLToPath } from "node:url";
 const DIR = dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
 
+// `run.mjs` é o runner e `comum.mjs` é biblioteca compartilhada — nenhum dos
+// dois é suíte. O prefixo `_` fica reservado para rascunho local.
+const NAO_SAO_SUITES = new Set(["run.mjs", "comum.mjs"]);
 const suites = readdirSync(DIR)
-  .filter((f) => f.endsWith(".mjs") && f !== "run.mjs")
+  .filter((f) => f.endsWith(".mjs") && !NAO_SAO_SUITES.has(f) && !f.startsWith("_"))
   .sort();
 
 // Falha cedo e com mensagem clara se a app não estiver no ar — sem isto, cada

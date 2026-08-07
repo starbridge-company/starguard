@@ -14,7 +14,7 @@ import { ScanUnavailable } from "../git";
 import { comSocorroLocal, pareceInstalado, probeBinary } from "../binaries";
 import { enrichDependencies } from "../enrich";
 import { makeDepsFixer } from "../fix/deps-fixer";
-import { empacotarParaScan } from "../bundle";
+import { empacotarParaScan, faltaLockfile, nomesDeManifesto } from "../bundle";
 import { comVaga } from "../scan-slot";
 import {
   callRemoteScan,
@@ -176,6 +176,24 @@ export const scaAnalyzer: Analyzer<DependencyVuln[]> = {
   async run(ctx) {
     const dir = ctx.workspace!.root;
     ctx.report?.(usingRemoteScan() ? translate(ctx.locale, "scan.server") : ENGINES.sca);
+
+    // ---- Sem lockfile, "0 vulnerabilidades" não quer dizer nada ----
+    //
+    // Medido na imagem de produção, com `lodash 4.17.11` e `minimist 0.0.8`
+    // (as duas com CVE conhecido): só `package.json` → **0 achados**; com
+    // `package-lock.json` → **9 achados**.
+    //
+    // A recusa do Trivy é legítima — `"^4.17.11"` é faixa, não versão, e ele
+    // prefere calar a chutar. O que não podia continuar é o que isso virava na
+    // nossa tela: um relatório dizendo "nenhuma dependência vulnerável" para um
+    // projeto que ninguém conseguiu resolver. "Não encontrou" e "não procurou"
+    // saindo iguais, numa ferramenta de segurança. Ver AUDITORIA.md#UX-15.
+    //
+    // Este é o MESMO recurso do `scan.truncated`: o que ficou de fora é dito em
+    // voz alta, em vez de sumir dentro de um número que parece bom.
+    if (faltaLockfile(await nomesDeManifesto(dir))) {
+      ctx.report?.(translate(ctx.locale, "scan.noLockfile"));
+    }
 
     // Dependência não passa por IA: o texto é montado por template — o Trivy
     // já diz o pacote, a versão instalada e a que corrige. Ver o princípio do

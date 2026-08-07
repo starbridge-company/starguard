@@ -18,6 +18,7 @@ import {
   cpusDeCgroupV2,
   memoriaDeCgroup,
   processosPara,
+  processosDeScan,
 } from "../src/container";
 
 describe("fatia de CPU no cgroup v2", () => {
@@ -100,5 +101,34 @@ describe("memória do contêiner", () => {
 
   it("ausente é nulo", () => {
     expect(memoriaDeCgroup(null)).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------
+// Guardar um núcleo para o Node — AUDITORIA.md#BUG-26
+// ------------------------------------------------------------
+//
+// O scanner não é o único morador da caixa: o MESMO processo Node responde
+// `/api/status`, `/api/scan?job=…` e o health check enquanto o opengrep roda.
+// Com `--jobs` igual a todos os núcleos, o scan tomava a máquina inteira e o
+// servidor parava de responder no meio da própria análise — que é como um scan
+// lento vira um scan que "travou" para quem está olhando.
+describe("processosDeScan — o scanner não pode tomar a caixa inteira", () => {
+  it("numa máquina grande, sobra um núcleo para o servidor responder", () => {
+    expect(processosDeScan(16)).toBe(15);
+    expect(processosDeScan(8)).toBe(7);
+    expect(processosDeScan(4)).toBe(3);
+  });
+
+  it("na caixa pequena nada é reservado — não há o que dividir", () => {
+    // É o caso da produção (meia CPU → 1). Reservar ali deixaria ZERO processo
+    // de scanner, que é não analisar nada.
+    expect(processosDeScan(1)).toBe(1);
+    expect(processosDeScan(2)).toBe(2);
+  });
+
+  it("nunca devolve menos de 1, nem com entrada absurda", () => {
+    expect(processosDeScan(0)).toBe(1);
+    expect(processosDeScan(-3)).toBe(1);
   });
 });

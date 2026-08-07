@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { BIN, ENGINES } from "../config";
 // As regras saem daqui, e não de `config.ts`: a busca no disco usa `node:fs`,
 // e `config.ts` precisa continuar carregável no Edge runtime.
-import { regrasDoSast, regrasUsaveis } from "../sast-rules";
+import { regrasDoSast, regrasParaOCodigo, regrasUsaveis } from "../sast-rules";
 // Do `container`, e não do `config`: as duas leem o cgroup, e `config.ts`
 // precisa continuar importável do Edge runtime. Ver o cabeçalho de ambos.
 import { sastJobs, sastMaxMemoryMb } from "../container";
@@ -104,9 +104,20 @@ export async function runSast(
   const jobs = sastJobs();
   const memoria = sastMaxMemoryMb();
   const regras = regrasDoSast();
+
+  // Só as regras das linguagens que ESTÃO aqui — ver `sast-rules.ts`.
+  //
+  // Medido na imagem de produção com meia CPU, os mesmos 27 arquivos: ruleset
+  // inteiro 348 s, só javascript+typescript 65 s. As regras de python, java,
+  // go, php, ruby, csharp, c e html não casam com nada num repositório
+  // TypeScript, e pagá-las é espera que não compra achado.
+  //
+  // Quando não dá para estreitar com segurança, `configs` volta com a raiz
+  // inteira e `linguagens` volta vazio — e aí nada é dito, porque nada mudou.
+  const escolha = regrasParaOCodigo(regras.config, dir);
+  const config = escolha.configs.flatMap((c) => ["--config", c]);
   const args = [
-    "--config",
-    regras.config,
+    ...config,
     "--json",
     "--quiet",
     "--timeout",
@@ -125,6 +136,20 @@ export async function runSast(
   // em vez de um palpite. Ver AUDITORIA.md#ARQ-18.
   if (regras.origem === "detectado") {
     opts.report?.("scan.rulesFound", { dir: regras.config });
+  }
+
+  // O estreitamento é DITO, sempre que acontece.
+  //
+  // É o que separa "5× mais rápido" de "relatório menor sem explicação": quem
+  // lê sabe que rodaram as regras de javascript e typescript, e não as de
+  // python — e pode conferir. Silenciar isto seria mudar a cobertura por baixo,
+  // que é a falta que este projeto trata como a mais cara de todas (UX-15).
+  if (escolha.linguagens.length) {
+    opts.report?.("scan.rulesNarrowed", {
+      langs: escolha.linguagens.join(", "),
+      n: escolha.linguagens.length,
+      total: escolha.disponiveis,
+    });
   }
 
   try {

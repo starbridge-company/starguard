@@ -1,12 +1,19 @@
 import { chromium } from "playwright";
 const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
-const OUT = "C:/Users/Nelson/AppData/Local/Temp/claude/c--Users-Nelson-OneDrive-Projetos-starguard/dc4fad7c-7a2d-4b9b-bde4-efbf334544c5/scratchpad/shots";
+// Diretório de sessão de outra máquina, que não existe mais. Sem `E2E_SHOTS`
+// não se captura nada: a suíte afirma pelo DOM, a imagem é para depurar.
+const OUT = process.env.E2E_SHOTS || "";
 let falhas = 0;
 const check = (c, m) => { if (!c) falhas++; console.log(`  ${c ? "✓" : "✗ FALHOU"}  ${m}`); };
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 950 }, locale: "en-US" });
 const page = await ctx.newPage();
+
+/** Captura só quando `E2E_SHOTS` aponta um diretório. A afirmação é do DOM. */
+const capturar = async (nome) => {
+  if (OUT) await page.screenshot({ path: `${OUT}/${nome}` });
+};
 const erros = [];
 page.on("pageerror", (e) => erros.push(String(e)));
 page.on("console", (m) => m.type() === "error" && erros.push(m.text()));
@@ -17,7 +24,7 @@ const langAuto = await page.getAttribute("html", "lang");
 const submitAuto = await page.locator('button[type="submit"]').innerText();
 check(langAuto === "en", `<html lang> segue o Accept-Language: "${langAuto}"`);
 check(/sign in/i.test(submitAuto), `botão em inglês sem configurar nada: "${submitAuto.trim()}"`);
-await page.screenshot({ path: `${OUT}/30-login-en.png` });
+await capturar(`30-login-en.png`);
 
 console.log("\n=== 2. LOGIN E NAVEGAÇÃO EM INGLÊS ===");
 await page.fill("#email", "admin@starguard.local");
@@ -28,11 +35,11 @@ const nav = await page.locator(".sidebar-nav").innerText();
 check(/New analysis/i.test(nav) && /Account/i.test(nav), `menu traduzido: ${nav.split("\n").slice(0,3).join(" · ")}`);
 const logout = await page.locator(".sidebar-actions").innerText();
 check(/Sign out/i.test(logout), "ações do rodapé traduzidas");
-await page.screenshot({ path: `${OUT}/31-home-en.png` });
+await capturar(`31-home-en.png`);
 
 console.log("\n=== 3. TROCA EXPLÍCITA PARA PORTUGUÊS ===");
 await page.goto(`${BASE}/account`, { waitUntil: "networkidle" });
-await page.screenshot({ path: `${OUT}/32-conta-en.png` });
+await capturar(`32-conta-en.png`);
 await page.click('.segmented button:has-text("Português")');
 await page.waitForTimeout(2500);
 const langPt = await page.getAttribute("html", "lang");
@@ -41,7 +48,7 @@ check(langPt === "pt-BR", `<html lang> mudou para "${langPt}"`);
 check(/Nova análise/i.test(navPt), "menu voltou ao português");
 const cookie = (await ctx.cookies()).find((c) => c.name === "sg_locale");
 check(cookie?.value === "pt-BR", `escolha persistida no cookie: ${cookie?.value}`);
-await page.screenshot({ path: `${OUT}/33-conta-pt.png` });
+await capturar(`33-conta-pt.png`);
 
 console.log("\n=== 4. A ESCOLHA SOBREVIVE À RECARGA ===");
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });

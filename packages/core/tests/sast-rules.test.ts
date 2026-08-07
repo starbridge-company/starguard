@@ -17,7 +17,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { limparCacheDeRegras, regrasDoSast, regrasUsaveis } from "../src/sast-rules";
+import {
+  limparCacheDeRegras,
+  linguagensEm,
+  regrasDoSast,
+  regrasParaOCodigo,
+  regrasUsaveis,
+} from "../src/sast-rules";
 
 const criados: string[] = [];
 
@@ -136,5 +142,135 @@ describe("o cache não engana", () => {
     // Sem invalidar à mão: a chave do cache inclui a variável, porque a
     // extensão troca essa configuração com o processo já de pé.
     expect(regrasDoSast().config).toBe("/segundo");
+  });
+});
+
+// ============================================================
+// Só as regras das linguagens PRESENTES — AUDITORIA.md#BUG-26
+// ============================================================
+//
+// Medido na imagem de produção, meia CPU, os MESMOS 27 arquivos TypeScript:
+//
+//   ruleset inteiro (1094 regras, 11 linguagens) → 348 s
+//   só javascript + typescript (181 regras)      →  65 s
+//
+// 5,4× de diferença, e as 913 regras descartadas — python, java, go, php,
+// ruby, csharp, c, html — não têm como casar com nada num repositório
+// TypeScript. Pagá-las é espera que não compra achado nenhum.
+//
+// O RISCO desta otimização é o relatório encolher em silêncio, que é a falta
+// mais cara que esta ferramenta pode cometer (UX-15). Por isso a maioria dos
+// testes abaixo é do caminho conservador: quando NÃO estreitar.
+describe("estreitar o ruleset sem perder cobertura", () => {
+  /** Monta um `opengrep-rules` de mentira, com uma regra em cada linguagem. */
+  function rulesetFalso(langs: string[]): string {
+    const base = dirTemporario();
+    for (const l of langs) {
+      mkdirSync(join(base, l), { recursive: true });
+      writeFileSync(join(base, l, "r.yaml"), "rules: []");
+    }
+    return base;
+  }
+
+  /** Um projeto de mentira, com os arquivos indicados. */
+  function projeto(arquivos: string[]): string {
+    const base = dirTemporario();
+    for (const a of arquivos) {
+      const destino = join(base, a);
+      mkdirSync(join(destino, ".."), { recursive: true });
+      writeFileSync(destino, "// nada");
+    }
+    return base;
+  }
+
+  it("num repo TypeScript, entram typescript, javascript e generic", () => {
+    const rules = rulesetFalso(["javascript", "typescript", "python", "java", "generic"]);
+    const code = projeto(["src/a.ts", "src/b.tsx"]);
+
+    const r = regrasParaOCodigo(rules, code);
+
+    // `javascript` junto porque as regras de JS valem para TS — e são 163
+    // contra 18. Estreitar para `typescript` puro jogaria fora a cobertura
+    // real de um projeto Node.
+    expect(r.linguagens).toContain("typescript");
+    expect(r.linguagens).toContain("javascript");
+    // `generic` SEMPRE: é onde moram segredo em código e chave privada
+    // commitada, que não dependem de linguagem nenhuma.
+    expect(r.linguagens).toContain("generic");
+    expect(r.linguagens).not.toContain("python");
+    expect(r.linguagens).not.toContain("java");
+    expect(r.configs).toHaveLength(3);
+  });
+
+  it("repo poliglota recebe as regras de TODAS as linguagens que tem", () => {
+    const rules = rulesetFalso(["javascript", "typescript", "python", "go", "generic"]);
+    const code = projeto(["api/main.go", "scripts/x.py", "web/app.ts"]);
+
+    const r = regrasParaOCodigo(rules, code);
+
+    // O estreitamento nunca ESCOLHE entre linguagens presentes: só descarta as
+    // ausentes.
+    for (const esperada of ["go", "python", "typescript", "javascript", "generic"]) {
+      expect(r.linguagens).toContain(esperada);
+    }
+  });
+
+  it("ruleset que NÃO tem pastas por linguagem é devolvido inteiro", () => {
+    // Diretório de regras próprio, escrito à mão. Estreitar aqui jogaria fora
+    // o ruleset de quem o montou.
+    const base = dirTemporario();
+    writeFileSync(join(base, "minhas.yaml"), "rules: []");
+    const code = projeto(["src/a.ts"]);
+
+    const r = regrasParaOCodigo(base, code);
+
+    expect(r.configs).toEqual([base]);
+    // Vazio é o sinal de "não estreitei" — e é o que impede a tela de anunciar
+    // um estreitamento que não houve.
+    expect(r.linguagens).toEqual([]);
+  });
+
+  it("projeto sem linguagem reconhecida roda o ruleset INTEIRO", () => {
+    const rules = rulesetFalso(["javascript", "python", "generic"]);
+    const code = projeto(["dados/tabela.csv", "leia-me.txt"]);
+
+    const r = regrasParaOCodigo(rules, code);
+
+    // Mais lento e não perde nada — que é a direção certa de errar.
+    expect(r.configs).toEqual([rules]);
+    expect(r.linguagens).toEqual([]);
+  });
+
+  it("dá para desligar por variável, e aí nada muda", () => {
+    const rules = rulesetFalso(["javascript", "typescript", "generic"]);
+    const code = projeto(["src/a.ts"]);
+    process.env.SAST_NARROW_RULES = "0";
+    try {
+      const r = regrasParaOCodigo(rules, code);
+      expect(r.configs).toEqual([rules]);
+      expect(r.linguagens).toEqual([]);
+    } finally {
+      delete process.env.SAST_NARROW_RULES;
+    }
+  });
+
+  it("node_modules não conta como linguagem do projeto", () => {
+    const rules = rulesetFalso(["javascript", "typescript", "python", "generic"]);
+    const code = projeto(["src/a.ts", "node_modules/pacote/script.py"]);
+
+    // Uma dependência com um `.py` dentro não pode arrastar 264 regras de
+    // Python para um projeto que não tem Python nenhum.
+    expect(regrasParaOCodigo(rules, code).linguagens).not.toContain("python");
+  });
+
+  it("linguagensEm enxerga o que existe e ignora o resto", () => {
+    const code = projeto(["a.ts", "b.py", "dist/velho.go", "node_modules/x/y.java"]);
+    const langs = linguagensEm(code);
+
+    expect(langs.has("typescript")).toBe(true);
+    expect(langs.has("python")).toBe(true);
+    // `dist` e `node_modules` são artefato e dependência, não código de ninguém.
+    expect(langs.has("go")).toBe(false);
+    expect(langs.has("java")).toBe(false);
   });
 });

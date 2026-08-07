@@ -869,6 +869,11 @@ export const PT_BR = {
   "scan.server": "no servidor",
   "scan.probing": "verificando se o servidor responde…",
   "scan.rulesFound": "usando as regras encontradas em {dir}",
+  // O estreitamento do ruleset é DITO, nunca silencioso: quem lê precisa saber
+  // que rodaram as regras de {langs} e não as das outras linguagens, e poder
+  // conferir. Ver `sast-rules.ts`.
+  "scan.rulesNarrowed":
+    "regras de {langs} ({n} de {total} conjuntos) — as linguagens que existem neste repositório",
   "scan.uploading": "enviando {n} arquivos ({mb} MB) ao servidor…",
   // A posição transforma espera em previsão. Uma barra sem número é
   // indistinguível de uma barra travada — foi o que a extensão parecia.
@@ -887,6 +892,11 @@ export const PT_BR = {
   // silencioso passa por completo, e numa ferramenta de segurança isso é o
   // pior tipo de mentira. Ver UX-15.
   "scan.truncated": "{n} arquivos ficaram fora do envio (teto do servidor)",
+  // Sem versão resolvida o Trivy não acha NADA, e "0 vulnerabilidades" passa a
+  // significar "não deu para procurar". Medido: só package.json → 0 achados;
+  // com package-lock.json → 9. Ver `bundle.ts`.
+  "scan.noLockfile":
+    "sem arquivo de versões travadas (package-lock.json, yarn.lock, poetry.lock…) — o scanner de dependências não consegue resolver as versões, e o resultado NÃO significa ausência de vulnerabilidade",
 
   // Rodou, mas com menos contexto do que teria em conjunto. É dito em voz
   // alta: um resultado degradado silencioso passa por resultado completo.
@@ -1973,12 +1983,16 @@ const EN: Record<MessageKey, string> = {
   "scan.server": "on the server",
   "scan.probing": "checking whether the server answers…",
   "scan.rulesFound": "using the rules found at {dir}",
+  "scan.rulesNarrowed":
+    "{langs} rules ({n} of {total} sets) — the languages present in this repository",
   "scan.uploading": "uploading {n} files ({mb} MB) to the server…",
   "scan.queuedAt": "queued on the server (#{n}) — your turn is coming",
   "scan.scanning": "scanning on the server…",
   "scan.scanningLocal": "scanning the code…",
   "scan.slotQueued": "waiting for a scanner slot (#{n})",
   "scan.truncated": "{n} files were left out of the upload (server limit)",
+  "scan.noLockfile":
+    "no lockfile found (package-lock.json, yarn.lock, poetry.lock…) — the dependency scanner cannot resolve versions, so this result does NOT mean there are no vulnerabilities",
 
   "analyzer.degraded.threat":
     "Threat modeling was not part of this run: there were no declared requirements to check.",
@@ -3035,12 +3049,16 @@ const ES: Record<MessageKey, string> = {
   "scan.server": "en el servidor",
   "scan.probing": "comprobando si el servidor responde…",
   "scan.rulesFound": "usando las reglas encontradas en {dir}",
+  "scan.rulesNarrowed":
+    "reglas de {langs} ({n} de {total} conjuntos) — los lenguajes presentes en este repositorio",
   "scan.uploading": "enviando {n} archivos ({mb} MB) al servidor…",
   "scan.queuedAt": "en cola en el servidor (nº {n}) — tu turno ya llega",
   "scan.scanning": "escaneando en el servidor…",
   "scan.scanningLocal": "escaneando el código…",
   "scan.slotQueued": "esperando un puesto de escáner (nº {n})",
   "scan.truncated": "{n} archivos quedaron fuera del envío (límite del servidor)",
+  "scan.noLockfile":
+    "sin archivo de versiones fijadas (package-lock.json, yarn.lock, poetry.lock…) — el escáner de dependencias no puede resolver las versiones, y este resultado NO significa ausencia de vulnerabilidades",
 
   "analyzer.degraded.threat":
     "El modelado de amenazas no formó parte de esta ejecución: no había requisitos declarados que verificar.",

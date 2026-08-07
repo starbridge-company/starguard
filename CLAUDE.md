@@ -271,6 +271,24 @@ AUDITORIA.md            achados, o que foi entregue e as pendências abertas
   chamar. O seletor de analisadores existe pelo mesmo motivo: rodar só o que se
   precisa é a economia mais direta que há.
 
+## Regra que vale mais que a auditoria: RESOLVA, não registre
+
+**Bug ou pendência que você encontrar, você conserta — na mesma sprint.** Não
+existe "anoto agora e resolvo depois". A sprint não termina com item aberto.
+
+Isto é correção de rumo, não preferência: o `AUDITORIA.md` acumulou mais de
+trinta pendências abertas, e registrar virou substituto de consertar. O
+documento passou a dar impressão de rigor enquanto o produto seguia quebrado.
+Uma `PEND-nn` nova é quase sempre trabalho que você decidiu não fazer.
+
+A **única** exceção é depender de algo que você não tem como obter — credencial
+de terceiro, GitHub App, publicação em marketplace, navegador com pessoa na
+frente. Nesse caso diga o motivo concreto ("preciso de um App ID que só você
+cria"), nunca "fica para a próxima".
+
+Achou um defeito no meio de outra tarefa? Conserte junto, com teste. É mais
+barato que a ida e volta de registrar, explicar e retomar o contexto depois.
+
 ## Ao mexer na auditoria
 
 `AUDITORIA.md` é o documento vivo do projeto. Ao entregar um item:
@@ -278,6 +296,5 @@ AUDITORIA.md            achados, o que foi entregue e as pendências abertas
 1. Marque o item com o que foi feito e a data.
 2. Preencha a tabela "Como o sprint foi validado" com o resultado **medido**,
    não com a intenção.
-3. Registre como `PEND-nn` tudo que ficou de fora — inclusive o que você não
-   conseguiu exercitar. Uma pendência declarada vale mais que uma entrega que
-   parece completa.
+3. O que ficou de fora entra como pendência **só** se cair na exceção acima.
+   Fora dela, resolva antes de dizer que terminou.

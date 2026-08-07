@@ -138,7 +138,26 @@ export function memoriaDisponivelMb(): number | null {
 export function sastJobs(): number {
   const env = Number(process.env.SAST_JOBS);
   if (Number.isFinite(env) && env >= 1) return Math.floor(env);
-  return paralelismoDisponivel();
+  return processosDeScan(paralelismoDisponivel());
+}
+
+/**
+ * Quantos processos de scanner abrir, deixando o Node RESPIRAR.
+ *
+ * O scanner não é o único morador desta caixa: o mesmo processo Node responde
+ * `/api/status`, `/api/scan?job=…` e o health check enquanto o opengrep roda. Com
+ * `--jobs` igual a todos os núcleos, o scan tomava a máquina inteira e o servidor
+ * parava de responder no meio da própria análise — que é como um scan lento vira
+ * um scan que "travou" para quem está olhando.
+ *
+ * Guardar um núcleo é barato: numa caixa de 16, é 1/16 do paralelismo do
+ * scanner em troca de o servidor continuar atendendo. Numa caixa pequena
+ * (1 ou 2 núcleos, que é o caso da produção) nada muda — não há o que reservar,
+ * e o piso de 1 continua valendo.
+ */
+export function processosDeScan(nucleos: number): number {
+  if (nucleos <= 2) return Math.max(1, nucleos);
+  return nucleos - 1;
 }
 
 /**

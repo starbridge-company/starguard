@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
-const BASE = process.env.E2E_BASE_URL || "http://127.0.0.1:3020";
-const ID = "8a9feefe-cd91-4dcf-9584-d4773905678c";
+// A análise é DESCOBERTA, não escrita no código: ver o cabeçalho de `comum.mjs`.
+import { BASE, acharAnalise, entrar, semAnalise } from "./comum.mjs";
 let falhas = 0;
 const check = (c, m) => { if (!c) falhas++; console.log(`  ${c ? "✓" : "✗ FALHOU"}  ${m}`); };
 
@@ -13,11 +13,12 @@ page.on("response", (r) => {
   if (u.includes("/api/")) reqs.push(`${r.status()} ${u.replace(BASE, "")}`);
 });
 
-await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-await page.fill("#email", "admin@starguard.local");
-await page.fill("#password", "StarGuard!2026");
-await page.click('button[type="submit"]');
-await page.waitForURL(`${BASE}/`);
+// `entrar` fixa o idioma junto: sem isso a suíte depende do que a `idioma.mjs`
+// tiver deixado salvo na conta. Ver o cabeçalho de `comum.mjs`.
+await entrar(page);
+
+const ID = await acharAnalise(page);
+if (!ID) semAnalise();
 await page.goto(`${BASE}/results/${ID}`, { waitUntil: "networkidle" });
 await page.click('button:has-text("Correções")');
 await page.waitForTimeout(1000);

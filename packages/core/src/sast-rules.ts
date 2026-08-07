@@ -186,3 +186,189 @@ export function regrasUsaveis(): boolean {
   if (ENGINES.sast === "semgrep") return true;
   return regrasDoSast().origem !== "auto";
 }
+
+// ============================================================
+// Só as regras das linguagens QUE ESTÃO no repositório
+// ============================================================
+//
+// Medido na imagem de produção, com meia CPU, sobre os MESMOS 27 arquivos
+// TypeScript:
+//
+//   ruleset inteiro (1094 regras, 11 linguagens) → 348 s
+//   só javascript + typescript (181 regras)      →  65 s
+//
+// **5,4× de diferença.** As 913 regras descartadas são de python, java, go,
+// php, ruby, csharp, c e html: num repositório TypeScript elas não têm como
+// casar com nada. O tempo gasto com elas não compra achado nenhum — compra
+// espera, e num contêiner de meia CPU essa espera é a diferença entre uma
+// análise que termina e uma que estoura o teto.
+//
+// ---- A regra que impede isto de virar um relatório menor ----
+//
+// Estreitar ruleset troca cobertura por velocidade, e errar a detecção faz o
+// relatório encolher EM SILÊNCIO — o pior desfecho possível numa ferramenta de
+// segurança (UX-15). Por isso o desenho é conservador em três pontos:
+//
+//   1. **Na dúvida, não estreita.** Layout que não parece o `opengrep-rules`
+//      (sem diretórios por linguagem) devolve a raiz inteira, como antes.
+//   2. **`generic` entra SEMPRE.** É onde moram as regras que não dependem de
+//      linguagem — segredo em código, chave privada commitada. São 250 regras
+//      que valem para qualquer repositório.
+//   3. **É DECLARADO.** Quem roda vê quais conjuntos entraram, na tela e no
+//      terminal. Ninguém precisa deduzir por que o número de achados mudou.
+
+/**
+ * Extensão de arquivo → diretório de regra do `opengrep-rules`.
+ *
+ * `.ts`/`.tsx` levam junto o `javascript`: as regras de JS valem para TS (é o
+ * mesmo runtime e a mesma API), e o `typescript` do ruleset tem só 18 regras
+ * contra 163 do `javascript`. Estreitar para `typescript` puro jogaria fora a
+ * maior parte da cobertura real de um projeto Node — que é este aqui.
+ */
+const DIR_POR_EXTENSAO: Record<string, string[]> = {
+  ".js": ["javascript"],
+  ".jsx": ["javascript"],
+  ".mjs": ["javascript"],
+  ".cjs": ["javascript"],
+  ".ts": ["typescript", "javascript"],
+  ".tsx": ["typescript", "javascript"],
+  ".mts": ["typescript", "javascript"],
+  ".cts": ["typescript", "javascript"],
+  ".py": ["python"],
+  ".pyi": ["python"],
+  ".java": ["java"],
+  ".go": ["go"],
+  ".php": ["php"],
+  ".rb": ["ruby"],
+  ".erb": ["ruby"],
+  ".cs": ["csharp"],
+  ".c": ["c"],
+  ".h": ["c"],
+  ".html": ["html"],
+  ".htm": ["html"],
+  ".vue": ["javascript"],
+  ".svelte": ["javascript"],
+};
+
+/** Vale para qualquer repositório: segredo, chave privada, configuração. */
+const SEMPRE = "generic";
+
+/** Pastas que não são código de ninguém — varrê-las é custo sem achado. */
+const IGNORAR = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  "vendor",
+  "coverage",
+  "__pycache__",
+  ".venv",
+  "target",
+]);
+
+/** Teto da varredura: a pergunta é "que linguagens há aqui?", não "quantos arquivos". */
+const ARQUIVOS_MAX = 4000;
+
+/**
+ * Que linguagens existem neste diretório, pelo sufixo dos arquivos.
+ *
+ * Não abre arquivo nenhum: extensão basta e custa um `readdir`. Um repositório
+ * poliglota devolve várias e recebe todas as regras correspondentes — o
+ * estreitamento nunca decide entre linguagens, só descarta as ausentes.
+ */
+export function linguagensEm(raiz: string): Set<string> {
+  const achadas = new Set<string>();
+  let vistos = 0;
+
+  const andar = (dir: string, fundo: number) => {
+    if (fundo > 8 || vistos > ARQUIVOS_MAX) return;
+    let entradas;
+    try {
+      entradas = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entradas) {
+      if (vistos > ARQUIVOS_MAX) return;
+      if (e.name.startsWith(".") && e.name !== ".") continue;
+      if (e.isDirectory()) {
+        if (!IGNORAR.has(e.name)) andar(join(dir, e.name), fundo + 1);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      vistos++;
+      const ponto = e.name.lastIndexOf(".");
+      if (ponto <= 0) continue;
+      const dirs = DIR_POR_EXTENSAO[e.name.slice(ponto).toLowerCase()];
+      if (dirs) for (const d of dirs) achadas.add(d);
+    }
+  };
+
+  andar(raiz, 0);
+  return achadas;
+}
+
+export interface RegrasEscolhidas {
+  /** O que vai para `--config`. Um por diretório escolhido. */
+  configs: string[];
+  /** Os nomes escolhidos, para DIZER na tela. Vazio = ruleset inteiro. */
+  linguagens: string[];
+  /** Quantos diretórios de linguagem o ruleset tem ao todo. */
+  disponiveis: number;
+}
+
+/**
+ * As regras que interessam para o código de `raiz`.
+ *
+ * Devolve `configs` com UM item (a raiz do ruleset) quando não dá para estreitar
+ * com segurança — que é o comportamento de sempre. `linguagens` vazio é o sinal
+ * de "não estreitei", e é o que a mensagem na tela usa para não mentir.
+ */
+export function regrasParaOCodigo(ruleset: string, raiz: string): RegrasEscolhidas {
+  const inteiro: RegrasEscolhidas = { configs: [ruleset], linguagens: [], disponiveis: 0 };
+
+  // `SAST_NARROW_RULES=0` desliga tudo isto. Existe porque a troca é real: quem
+  // preferir pagar o tempo para não depender da detecção tem como escolher.
+  if (process.env.SAST_NARROW_RULES === "0") return inteiro;
+
+  let entradas;
+  try {
+    entradas = readdirSync(ruleset, { withFileTypes: true });
+  } catch {
+    return inteiro;
+  }
+
+  // Só estreita um layout que RECONHECE. Um diretório de regras próprio, sem
+  // pastas por linguagem, é devolvido inteiro — o contrário jogaria fora o
+  // ruleset de quem o escreveu à mão.
+  const porLinguagem = new Set(
+    entradas
+      .filter((e) => e.isDirectory() && (e.name in NOMES_DE_LINGUAGEM || e.name === SEMPRE))
+      .map((e) => e.name)
+  );
+  if (porLinguagem.size < 2) return inteiro;
+
+  const presentes = linguagensEm(raiz);
+  // Nenhuma linguagem conhecida no repositório: pode ser um projeto de algo que
+  // não mapeamos. Rodar o ruleset inteiro é mais lento e não perde nada.
+  if (presentes.size === 0) return inteiro;
+
+  const escolhidos = [...presentes].filter((l) => porLinguagem.has(l)).sort();
+  if (escolhidos.length === 0) return inteiro;
+
+  // O `generic` entra sempre que existir — ver o item 2 do cabeçalho.
+  const comGenerico = porLinguagem.has(SEMPRE) ? [...escolhidos, SEMPRE] : escolhidos;
+
+  return {
+    configs: comGenerico.map((l) => join(ruleset, l)),
+    linguagens: comGenerico,
+    disponiveis: porLinguagem.size,
+  };
+}
+
+/** Os nomes de pasta que o `opengrep-rules` usa. Fonte do reconhecimento acima. */
+const NOMES_DE_LINGUAGEM: Record<string, true> = Object.fromEntries(
+  [...new Set(Object.values(DIR_POR_EXTENSAO).flat())].map((n) => [n, true])
+) as Record<string, true>;

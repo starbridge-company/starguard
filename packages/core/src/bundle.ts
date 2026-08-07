@@ -75,6 +75,82 @@ function ehManifesto(nome: string): boolean {
   return MANIFESTOS.has(nome) || /\.(csproj|fsproj|vbproj)$/i.test(nome);
 }
 
+/**
+ * Os arquivos com VERSÃO RESOLVIDA. Sem um destes, o Trivy não acha nada.
+ *
+ * Medido na imagem de produção, com `lodash 4.17.11` e `minimist 0.0.8` (as duas
+ * com CVE conhecido):
+ *
+ *   só `package.json`         → **0 vulnerabilidades**
+ *   com `package-lock.json`   → **9 vulnerabilidades**
+ *
+ * A razão é do Trivy, e é legítima: `"lodash": "^4.17.11"` é uma FAIXA, não uma
+ * versão — sem o lockfile ele não sabe o que está instalado e prefere calar a
+ * chutar. O problema não é esse; o problema é o que isso vira na nossa tela.
+ *
+ * Um relatório dizendo "nenhuma dependência vulnerável" para um projeto que tem
+ * `package.json` e nenhum lockfile é a confusão entre "não encontrou" e "não
+ * procurou" no lugar mais caro possível — e sem nada na tela que permita
+ * desconfiar. É o UX-15, e é por isso que existe `faltaLockfile`.
+ */
+const LOCKFILES = new Set([
+  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json",
+  "Pipfile.lock", "poetry.lock", "uv.lock",
+  "go.sum",
+  "Cargo.lock",
+  "gradle.lockfile",
+  "Gemfile.lock",
+  "composer.lock",
+  "packages.lock.json",
+  "mix.lock", "pubspec.lock", "conan.lock",
+]);
+
+/**
+ * Há manifesto mas NÃO há versão resolvida?
+ *
+ * `true` é o único caso que merece aviso: sem manifesto nenhum o analisador já
+ * responde "não há o que resolver", e com lockfile está tudo certo.
+ */
+export function faltaLockfile(nomes: readonly string[]): boolean {
+  const base = nomes.map((n) => n.split("/").pop() ?? n);
+  const temManifesto = base.some(ehManifesto);
+  return temManifesto && !base.some((n) => LOCKFILES.has(n));
+}
+
+/**
+ * Os nomes dos manifestos deste projeto — **sem ler o conteúdo de nenhum**.
+ *
+ * Existe separado de `empacotarParaScan` porque a pergunta é outra e o custo
+ * também: aqui basta saber QUE arquivos existem, e empacotar leria megabytes
+ * para responder isso. O caminho local do SCA precisa da resposta e nunca
+ * empacota nada.
+ */
+export async function nomesDeManifesto(raiz: string): Promise<string[]> {
+  const achados: string[] = [];
+
+  async function andar(dir: string, rel: string, fundo: number): Promise<void> {
+    if (fundo > 20 || achados.length > 500) return;
+    let entradas;
+    try {
+      entradas = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entradas) {
+      const relPath = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (PULAR.has(e.name) || e.name.startsWith(".")) continue;
+        await andar(join(dir, e.name), relPath, fundo + 1);
+        continue;
+      }
+      if (e.isFile() && ehManifesto(e.name)) achados.push(relPath);
+    }
+  }
+
+  await andar(raiz, "", 0);
+  return achados;
+}
+
 export interface OpcoesDePacote {
   /** Teto de arquivos. O excesso é contado, não escondido. */
   maxFiles?: number;

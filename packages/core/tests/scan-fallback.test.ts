@@ -25,6 +25,7 @@ import {
   usingRemoteScan,
 } from "../src/scan-transport";
 import { comSocorroLocal } from "../src/binaries";
+import { faltaLockfile } from "../src/bundle";
 
 afterEach(() => setScanTransport({ kind: "local" }));
 
@@ -504,5 +505,46 @@ describe("fila do CLIENTE: marcar os dois e rodar junto continua valendo (ARQ-15
     const segundo = callRemoteScan(t, { analyzer: "sca", files: [], locale: "pt-BR" });
     await primeiro;
     await expect(segundo).resolves.toEqual([{ id: "V" }]);
+  });
+});
+
+// ============================================================
+// Sem lockfile, "0 vulnerabilidades" não é resposta — AUDITORIA.md#BUG-26
+// ============================================================
+//
+// Medido na imagem de produção, com `lodash 4.17.11` e `minimist 0.0.8` (as
+// duas com CVE conhecido):
+//
+//   só `package.json`        →  0 vulnerabilidades
+//   com `package-lock.json`  →  9 vulnerabilidades
+//
+// A recusa do Trivy é legítima: `"^4.17.11"` é FAIXA, não versão, e ele prefere
+// calar a chutar. O que não podia continuar é o que isso virava na nossa tela —
+// "nenhuma dependência vulnerável" para um projeto que ninguém resolveu. É a
+// confusão entre "não encontrou" e "não procurou" (UX-15) no lugar mais caro.
+describe("falta de lockfile é DITA, não engolida", () => {
+  it("manifesto sem lockfile pede aviso", () => {
+    expect(faltaLockfile(["package.json"])).toBe(true);
+    expect(faltaLockfile(["requirements.txt"])).toBe(true);
+    expect(faltaLockfile(["app/composer.json"])).toBe(true);
+  });
+
+  it("com versão resolvida, nada a avisar", () => {
+    expect(faltaLockfile(["package.json", "package-lock.json"])).toBe(false);
+    expect(faltaLockfile(["package.json", "yarn.lock"])).toBe(false);
+    expect(faltaLockfile(["package.json", "pnpm-lock.yaml"])).toBe(false);
+    expect(faltaLockfile(["Pipfile", "Pipfile.lock"])).toBe(false);
+    expect(faltaLockfile(["go.mod", "go.sum"])).toBe(false);
+  });
+
+  it("o lockfile vale mesmo em subpasta — é o basename que conta", () => {
+    expect(faltaLockfile(["web/package.json", "web/package-lock.json"])).toBe(false);
+  });
+
+  it("projeto SEM manifesto nenhum não gera aviso", () => {
+    // Aqui o analisador já responde "não há o que resolver"; um aviso a mais
+    // seria ruído, e ruído treina as pessoas a ignorar o aviso de verdade.
+    expect(faltaLockfile([])).toBe(false);
+    expect(faltaLockfile(["README.md", "src/a.ts"])).toBe(false);
   });
 });
