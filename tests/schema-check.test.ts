@@ -102,3 +102,86 @@ describe("schemaMessage", () => {
     expect(schemaMessage(await checkSchema(true))).toBe("Schema em dia.");
   });
 });
+
+// ============================================================
+// "A tabela não existe" NÃO é "banco fora do ar" — AUDITORIA.md#BUG-29
+// ============================================================
+//
+// Os dois caíam no mesmo `catch` e saíam idênticos: `error` preenchido,
+// `db: "unreachable"` no health e SILÊNCIO no aviso de subida (que ignora
+// `error` de propósito, para não alarmar por oscilação de rede).
+//
+// Só que pedem ações opostas — uma é rede ou credencial, a outra é
+// `npm run db:migrate` — e a segunda é a que acontece em TODO servidor novo.
+// Foi o caso de um deploy em máquina dedicada: o banco respondia, a migração
+// nunca tinha rodado, e a única pista era o worker repetindo de 15 em 15
+// segundos a consulta que falhava, sem dizer por quê.
+describe("banco vazio é schema ATRASADO, não banco inalcançável", () => {
+  /** O erro do Drizzle: mensagem = SQL, código do Postgres em `cause`. */
+  const comoDrizzleEmbrulha = (code: string, msg: string) =>
+    Object.assign(new Error("Failed query: select created_at from drizzle.__drizzle_migrations"), {
+      cause: Object.assign(new Error(msg), { code }),
+    });
+
+  it("42P01 (tabela não existe) vira «faltam migrações», com todas pendentes", async () => {
+    execute.mockRejectedValue(
+      comoDrizzleEmbrulha("42P01", 'relation "drizzle.__drizzle_migrations" does not exist')
+    );
+
+    const s = await checkSchema(true);
+
+    expect(s.ok).toBe(false);
+    // O que muda tudo: sem `error`, o aviso de subida FALA e o health para de
+    // dizer "unreachable" sobre um banco que está respondendo.
+    expect(s.error).toBeUndefined();
+    expect(s.pending).toHaveLength(3);
+    expect(schemaMessage(s)).not.toMatch(/não foi possível verificar/i);
+  });
+
+  it("3F000 (schema não existe) idem — é o banco novo, sem o `starguard`", async () => {
+    execute.mockRejectedValue(comoDrizzleEmbrulha("3F000", 'schema "drizzle" does not exist'));
+
+    const s = await checkSchema(true);
+    expect(s.error).toBeUndefined();
+    expect(s.pending).toHaveLength(3);
+  });
+
+  it("banco fora do ar CONTINUA sendo inalcançável — não vira «migre»", async () => {
+    // Mandar rodar migração num banco que não responde é o conselho errado, e
+    // era o risco de generalizar demais este caminho.
+    execute.mockRejectedValue(
+      Object.assign(new Error("Failed query: select ..."), {
+        cause: Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:5432"), {
+          code: "ECONNREFUSED",
+        }),
+      })
+    );
+
+    const s = await checkSchema(true);
+
+    expect(s.error).toBeTruthy();
+    expect(s.pending).toEqual([]);
+    expect(schemaMessage(s)).toMatch(/não foi possível verificar/i);
+  });
+
+  it("credencial errada também continua inalcançável", async () => {
+    execute.mockRejectedValue(
+      Object.assign(new Error("Failed query: select ..."), {
+        cause: Object.assign(new Error("password authentication failed for user \"sg\""), {
+          code: "28P01",
+        }),
+      })
+    );
+
+    expect((await checkSchema(true)).error).toBeTruthy();
+  });
+
+  it("sem código, a frase do Postgres serve de rede de segurança", async () => {
+    execute.mockRejectedValue(new Error('relation "drizzle.__drizzle_migrations" does not exist'));
+    expect((await checkSchema(true)).error).toBeUndefined();
+  });
+
+  it("a dica de migração continua sendo a mesma", () => {
+    expect(MIGRATE_HINT).toContain("db:migrate");
+  });
+});

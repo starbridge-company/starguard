@@ -21,6 +21,8 @@
 // Ver AUDITORIA.md#BUG-26.
 // ============================================================
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const checkBinaries = vi.fn();
 vi.mock("@starguard/core/binaries", () => ({ checkBinaries: () => checkBinaries() }));
@@ -130,5 +132,53 @@ describe("sondagem que respondeu", () => {
     // Mas é DITO, em campo próprio: some do status, não da resposta.
     expect(b.scannersBusyMessage).toContain("opengrep");
     expect(b.scannersMessage).toBeUndefined();
+  });
+});
+
+// ============================================================
+// O HEALTHCHECK do Dockerfile precisa esperar mais que a rota
+// ============================================================
+//
+// Dois números acoplados que estavam invertidos: o `--timeout` do HEALTHCHECK
+// era 5 s e o prazo interno da rota é 8 s. Com o banco pendurado, a rota espera
+// os 8 s de propósito (para responder o que CONSEGUIU medir) — e o `curl` já
+// tinha sido morto aos 5. A checagem não tinha como passar.
+//
+// No Coolify isso derrubou o deploy, com uma saída que não menciona banco:
+//
+//   Attempt 2 of 3 | Healthcheck logs: Health check exceeded timeout (5s)
+//   New container is not healthy, rolling back to the old container.
+//
+// Nenhum teste podia pegar isso, porque a relação mora entre um arquivo de
+// build e um de runtime. Este lê os dois. Ver AUDITORIA.md#BUG-29.
+describe("Dockerfile: o healthcheck espera mais que o prazo da rota", () => {
+  const dockerfile = readFileSync(
+    join(import.meta.dirname, "..", "Dockerfile"),
+    "utf8"
+  );
+
+  it("o `--timeout` do HEALTHCHECK é MAIOR que o prazo interno de /api/health", () => {
+    const doCheck = Number(dockerfile.match(/HEALTHCHECK[^\n]*--timeout=(\d+)s/)?.[1]);
+    const daRota = Number(
+      readFileSync(join(import.meta.dirname, "..", "app", "api", "health", "route.ts"), "utf8")
+        .match(/HEALTH_TIMEOUT_MS\) \|\| ([\d_]+)/)?.[1]
+        ?.replace(/_/g, "")
+    );
+
+    expect(doCheck).toBeGreaterThan(0);
+    expect(daRota).toBeGreaterThan(0);
+    // 8 s de rota contra 5 s de checagem era a inversão que derrubava o deploy.
+    expect(doCheck * 1000).toBeGreaterThan(daRota);
+  });
+
+  it("o healthcheck usa `$PORT`, e não um número fixo", () => {
+    // A porta é do host: fixar 3000 aqui faria a checagem bater no lugar errado
+    // assim que alguém injetasse outra — que é o que o Coolify faz.
+    expect(dockerfile).toMatch(/HEALTHCHECK[\s\S]{0,400}?\$\{PORT\}/);
+  });
+
+  it("`curl` está instalado — o healthcheck depende dele", () => {
+    // O próprio Coolify avisa: "The healthcheck needs a curl or wget command".
+    expect(dockerfile).toMatch(/apt-get install[^\n]*curl/);
   });
 });

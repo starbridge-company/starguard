@@ -188,7 +188,27 @@ EXPOSE 3003
 # Clones descartáveis da Fase 3/4 vão para o tmpdir do SO.
 ENV TMPDIR=/tmp
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+# ---- O timeout daqui TEM de ser maior que o prazo interno da rota ----
+#
+# Estes dois números são acoplados, e estavam invertidos. `/api/health` tem
+# prazo próprio de 8 s (`HEALTH_TIMEOUT_MS`, em `app/api/health/route.ts`): com
+# o banco pendurado ele ESPERA até esse limite para então responder o que
+# conseguiu medir. Com `--timeout=5s`, o `curl` era morto aos 5 — antes de a
+# rota responder — e a checagem não tinha como passar. Nunca.
+#
+# O sintoma no Coolify é exatamente esse, e não menciona banco nenhum:
+#
+#   Attempt 1 of 3 | Healthcheck logs: curl: (22) … returned error: 503
+#   Attempt 2 of 3 | Healthcheck logs: Health check exceeded timeout (5s)
+#   New container is not healthy, rolling back to the old container.
+#
+# 15 s dá folga sobre os 8 s e continua curto para um health check. O
+# `start-period` sobe junto: numa máquina fria, o Next e a primeira conexão ao
+# banco não cabem em 40 s com sobra.
+#
+# Se você mudar `HEALTH_TIMEOUT_MS`, mude este `--timeout` junto — sempre para
+# um valor MAIOR.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]

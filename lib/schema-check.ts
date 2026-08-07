@@ -60,6 +60,26 @@ async function appliedTimestamps(): Promise<number[]> {
 const TTL_MS = 15_000;
 let cache: { at: number; status: SchemaStatus } | null = null;
 
+/**
+ * O erro é "a tabela/schema não existe" — ou seja, migração nunca aplicada?
+ *
+ * Percorre a corrente de `cause` porque o Drizzle EMBRULHA o erro do `pg`: a
+ * mensagem de fora é o SQL que falhou, e o código do Postgres fica um nível
+ * abaixo. Olhar só o erro de cima não encontra `42P01` nunca.
+ */
+export function semSchema(e: unknown): boolean {
+  const CODIGOS = new Set(["42P01", "3F000"]);
+  let atual: unknown = e;
+  for (let i = 0; i < 4 && atual; i++) {
+    const codigo = (atual as { code?: unknown }).code;
+    if (typeof codigo === "string" && CODIGOS.has(codigo)) return true;
+    atual = (atual as { cause?: unknown }).cause;
+  }
+  // Sem código (driver que não o propaga), a frase do Postgres serve de rede.
+  const texto = e instanceof Error ? e.message : String(e ?? "");
+  return /does not exist/i.test(texto) && /relation|schema/i.test(texto);
+}
+
 export async function checkSchema(force = false): Promise<SchemaStatus> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.status;
 
@@ -74,15 +94,41 @@ export async function checkSchema(force = false): Promise<SchemaStatus> {
       pending,
     };
   } catch (e) {
-    // Banco fora do ar é diferente de banco atrasado: não afirmamos nada sobre
-    // o schema, e quem chama não deve derrubar o processo por causa disto.
-    status = {
-      ok: false,
-      expected: ENTRIES.length,
-      applied: 0,
-      pending: [],
-      error: e instanceof Error ? e.message : String(e),
-    };
+    // ---- "Não existe a tabela" NÃO é "banco fora do ar" ----
+    //
+    // Os dois caíam aqui e saíam iguais: `error` preenchido, `db:
+    // "unreachable"` no health, e SILÊNCIO no aviso de subida (que ignora
+    // `error` de propósito, para não alarmar por oscilação de rede).
+    //
+    // Só que as duas situações pedem ações opostas — uma é rede ou credencial,
+    // a outra é `npm run db:migrate` — e a segunda é a que acontece em todo
+    // servidor novo. Foi exatamente o caso de um deploy em máquina dedicada: o
+    // banco respondia, a migração nunca tinha rodado, e a única pista era o
+    // worker repetindo a consulta que falhava a cada 15 segundos.
+    //
+    // O Postgres já responde isso com todas as letras, num código: `42P01` é
+    // "tabela não existe" e `3F000` é "schema não existe". Com um deles, o
+    // desfecho é o de schema ATRASADO — que já tem mensagem acionável, já
+    // devolve 503 no login e já imprime o `MIGRATE_HINT` na subida.
+    if (semSchema(e)) {
+      status = {
+        ok: false,
+        expected: ENTRIES.length,
+        applied: 0,
+        // Nenhuma aplicada: TODAS estão pendentes.
+        pending: ENTRIES.map((x) => x.tag),
+      };
+    } else {
+      // Banco fora do ar é diferente de banco atrasado: não afirmamos nada
+      // sobre o schema, e quem chama não deve derrubar o processo por isto.
+      status = {
+        ok: false,
+        expected: ENTRIES.length,
+        applied: 0,
+        pending: [],
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
   }
 
   cache = { at: Date.now(), status };
