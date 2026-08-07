@@ -72,6 +72,15 @@ Antes de copiar qualquer valor, pergunte à própria instância:
 curl -s https://starguard.starbridge.com.br/api/health | jq .scan
 ```
 
+> **Incidente confirmado em 07/08/2026:** o host novo tinha 4 GB, mas o recurso
+> da aplicação continuava com `memoriaMb: 512`, `memoriaDe: "cgroup"` e
+> `cotaDeCpu: 1`. Mover o deploy para outro host não altera automaticamente os
+> limites do contêiner. No Coolify, abra os limites de recursos da aplicação,
+> remova o teto herdado ou defina **3 GB e pelo menos 2 CPUs** (quando o Postgres
+> compartilha o host), salve e **recrie/reimplante** o contêiner. Um simples
+> restart conserva o cgroup antigo. Depois, o health deve mostrar cerca de
+> `memoriaMb: 3072`, `cotaDeCpu >= 2` e nunca mais `512/1`.
+
 ```jsonc
 {
   "slots": 1,          // quantos scanners rodam ao mesmo tempo
@@ -149,6 +158,7 @@ variável daqui contorna um cgroup.
 | `SCAN_JOB_TTL_MS` | `120000` | Fallback para resultado pronto. Clientes atuais enviam um ACK (`DELETE`) assim que consomem e liberam a cópia imediatamente |
 | `SCAN_MAX_OUTPUT_MB` | derivado (5% da caixa, entre 8 e 64) | Teto do JSON de resultado. Um JSON de N bytes custa **3 a 4× N** no V8 — é a única coisa deste caminho cujo tamanho não se conhece de antemão |
 | `SCAN_MAX_FINDINGS` | `5000` | Achados guardados por scan. Acima disso ficam os mais graves e o corte é dito na tela |
+| `SAST_MIN_SERVER_MEMORY_MB` | `1024` | Piso de segurança: abaixo dele o servidor responde 503 antes de iniciar o Opengrep, evitando OOM e permitindo fallback local |
 
 Baixar `SCAN_MAX_FILES` é a alavanca mais direta quando não há CPU a dar: menos
 arquivos por scan, dentro do mesmo teto de tempo. O que fica de fora é dito na

@@ -9,6 +9,7 @@ import { checkBinaries, type BinaryStatus } from "@starguard/core/binaries";
 import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot";
 import { limitesDaCaixa } from "@starguard/core/container";
 import { jobsAtivos, recolherAbandonados, totalDeJobs } from "@/lib/scan-jobs";
+import { processInstance } from "@/lib/process-instance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -176,6 +177,7 @@ export async function GET(req: Request) {
     },
     // `null` viaja como `null`: quem consome vê "não sei", não "nada a relatar".
     scanners: binaries,
+    process: processInstance(),
     /**
      * O estado da fila, em números.
      *

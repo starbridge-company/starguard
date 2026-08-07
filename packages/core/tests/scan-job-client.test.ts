@@ -236,6 +236,75 @@ describe("o que o servidor responde vira o desfecho certo", () => {
     expect((erro as RemoteScanError).code).toBe("unreachable");
     expect(podeCairParaLocal(erro)).toBe(true);
   });
+
+  it("prova reinício/OOM ou troca de réplica quando a instância mudou", async () => {
+    globalThis.fetch = (async (url: string, init: { method: string }) => {
+      const headers = {
+        "content-type": "application/json",
+        "x-starguard-instance": "processo-novo",
+      };
+      if (init.method === "POST") {
+        return new Response(
+          JSON.stringify({ jobId: "j-1", instanceId: "processo-antigo" }),
+          { status: 202, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (!String(url).includes("job=")) {
+        return new Response(JSON.stringify({ maxFiles: 800, maxBytes: 1 }), {
+          status: 200,
+          headers,
+        });
+      }
+      return new Response(JSON.stringify({ error: "Scan não encontrado." }), {
+        status: 404,
+        headers,
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const erro = await callRemoteScan(t, {
+      analyzer: "sast",
+      files: arquivos,
+      locale: "pt-BR",
+    }).catch((e: RemoteScanError) => e);
+
+    expect(erro.code).toBe("unreachable");
+    expect(erro.message).toMatch(/mudou de instância/i);
+    expect(erro.message).toMatch(/OOM|réplicas/i);
+  });
+
+  it("não acusa reinício quando o mesmo processo removeu o job", async () => {
+    globalThis.fetch = (async (url: string, init: { method: string }) => {
+      const headers = {
+        "content-type": "application/json",
+        "x-starguard-instance": "mesmo-processo",
+      };
+      if (init.method === "POST") {
+        return new Response(
+          JSON.stringify({ jobId: "j-1", instanceId: "mesmo-processo" }),
+          { status: 202, headers }
+        );
+      }
+      if (!String(url).includes("job=")) {
+        return new Response(JSON.stringify({ maxFiles: 800, maxBytes: 1 }), {
+          status: 200,
+          headers,
+        });
+      }
+      return new Response(JSON.stringify({ error: "Scan não encontrado." }), {
+        status: 404,
+        headers,
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    const erro = await callRemoteScan(t, {
+      analyzer: "sast",
+      files: arquivos,
+      locale: "pt-BR",
+    }).catch((e: RemoteScanError) => e);
+
+    expect(erro.message).toMatch(/sem reinício/i);
+    expect(erro.message).not.toMatch(/mudou de instância/i);
+  });
 });
 
 describe("uma consulta perdida não joga fora o scan", () => {

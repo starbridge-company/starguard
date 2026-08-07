@@ -59,6 +59,7 @@ async function corpo() {
     scanners: unknown;
     scannersMessage?: string;
     scannersBusyMessage?: string;
+    process: { id: string; startedAt: string; uptimeSeconds: number };
     scan: {
       memory: {
         rssMb: number;
@@ -107,6 +108,14 @@ describe("sondagem que respondeu", () => {
     expect(memory.rssMb).toBeGreaterThan(0);
     expect(memory.heapUsedMb).toBeGreaterThan(0);
     expect(memory.heapTotalMb).toBeGreaterThanOrEqual(memory.heapUsedMb);
+  });
+
+  it("publica a identidade do processo para provar reinício durante um job", async () => {
+    checkBinaries.mockResolvedValue([]);
+    const processInfo = (await corpo()).process;
+    expect(processInfo.id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(processInfo.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(processInfo.uptimeSeconds).toBeGreaterThanOrEqual(0);
   });
 
   it("os dois presentes = «ok»", async () => {

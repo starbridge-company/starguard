@@ -888,6 +888,8 @@ export const PT_BR = {
   // código tinha ido para um servidor quando ele não saiu do disco — e, num
   // produto cujo transporte remoto existe justamente para ser uma ESCOLHA
   // declarada, essa é a última frase que pode ser imprecisa.
+  "scan.serverMemoryTooLow":
+    "O SAST remoto precisa de pelo menos {min} MB no contêiner; o limite detectado é {actual} MB. Ajuste os limites de recursos e recrie o contêiner.",
   "scan.scanningLocal": "escaneando o código…",
   "scan.slotQueued": "aguardando vaga de scanner ({n}º)",
   // O que NÃO coube no envio é dito em voz alta: um resultado parcial
@@ -2014,6 +2016,8 @@ const EN: Record<MessageKey, string> = {
   "scan.uploading": "uploading {n} files ({mb} MB) to the server…",
   "scan.queuedAt": "queued on the server (#{n}) — your turn is coming",
   "scan.scanning": "scanning on the server…",
+  "scan.serverMemoryTooLow":
+    "Remote SAST needs at least {min} MB in the container; the detected limit is {actual} MB. Adjust the resource limits and recreate the container.",
   "scan.scanningLocal": "scanning the code…",
   "scan.slotQueued": "waiting for a scanner slot (#{n})",
   "scan.truncated": "{n} files were left out of the upload (server limit)",
@@ -3088,6 +3092,8 @@ const ES: Record<MessageKey, string> = {
   "scan.uploading": "enviando {n} archivos ({mb} MB) al servidor…",
   "scan.queuedAt": "en cola en el servidor (nº {n}) — tu turno ya llega",
   "scan.scanning": "escaneando en el servidor…",
+  "scan.serverMemoryTooLow":
+    "El SAST remoto necesita al menos {min} MB en el contenedor; el límite detectado es {actual} MB. Ajusta los límites de recursos y vuelve a crear el contenedor.",
   "scan.scanningLocal": "escaneando el código…",
   "scan.slotQueued": "esperando un puesto de escáner (nº {n})",
   "scan.truncated": "{n} archivos quedaron fuera del envío (límite del servidor)",

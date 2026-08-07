@@ -383,6 +383,22 @@ describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
   // que o outro arquivo já não afirme melhor.
 });
 
+describe("o SAST não pode aceitar um job que derrubará o servidor", () => {
+  it("confere a memória antes de gravar o pacote e criar o job", async () => {
+    const fonte = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/api/scan/route.ts", "utf8")
+    );
+    const confere = fonte.indexOf('if (analyzer === "sast")');
+    const grava = fonte.indexOf("await prepararDiretorio(aprovados)");
+    const cria = fonte.indexOf("job = criarJob({");
+    expect(confere).toBeGreaterThan(0);
+    expect(confere).toBeLessThan(grava);
+    expect(confere).toBeLessThan(cria);
+    expect(fonte).toContain("SAST_MIN_SERVER_MEMORY_MB");
+    expect(fonte).toContain("scan.serverMemoryTooLow");
+  });
+});
+
 describe("a consulta não pode matar o job que ela vem buscar", () => {
   it("o `tocarJob` acontece ANTES do `recolherAbandonados` no GET", async () => {
     // A ordem era a inversa, e nela uma consulta que chegasse um segundo depois

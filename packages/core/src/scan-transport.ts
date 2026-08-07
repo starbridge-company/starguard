@@ -460,7 +460,7 @@ export async function callRemoteScan(
   );
   // Servidor antigo (ou pacote vazio): respondeu o resultado direto, sem job.
   if (!("jobId" in aceite)) return aceite.result;
-  return acompanharJob(t, input, aceite.jobId, aceite.position);
+  return acompanharJob(t, input, aceite.jobId, aceite.position, aceite.instanceId);
 }
 
 /** Chave da mensagem "na fila do cliente". Quem traduz é o analisador. */
@@ -491,7 +491,9 @@ export const MSG_VAGA_NA_FILA = "scan.slotQueued";
  * (200). Descobrir qual é lendo a resposta custa uma linha; exigir versões
  * casadas custaria uma janela em que ninguém consegue analisar nada.
  */
-type AceiteDeScan = { jobId: string; position?: number } | { result: unknown };
+type AceiteDeScan =
+  | { jobId: string; position?: number; instanceId?: string }
+  | { result: unknown };
 
 /**
  * Uma requisição ao `/api/scan`, com teto de tempo próprio e cancelamento.
@@ -599,10 +601,13 @@ async function enviarScan(
     const j = (await res.json().catch(() => ({}))) as {
       jobId?: string;
       position?: number;
+      instanceId?: string;
       result?: unknown;
     };
     // 202 com `jobId`: o trabalho foi ACEITO e acontece do outro lado.
-    if (j.jobId) return { jobId: j.jobId, position: j.position };
+    if (j.jobId) {
+      return { jobId: j.jobId, position: j.position, instanceId: j.instanceId };
+    }
     // 200 com `result`: servidor da geração anterior, que escaneia dentro da
     // requisição. Continua funcionando — ver `AceiteDeScan`.
     return { result: j.result ?? null };
@@ -768,7 +773,8 @@ async function acompanharJob(
   t: RemoteScanTransport,
   input: RemoteScanInput,
   jobId: string,
-  posicaoInicial?: number
+  posicaoInicial?: number,
+  instanceIdInicial?: string
 ): Promise<unknown> {
   const ritmo = ritmoDeConsulta();
   const ate = Date.now() + PRAZO_MS;
@@ -832,11 +838,22 @@ async function acompanharJob(
         throw new RemoteScanError("Sessão expirada. Entre novamente.", "unauthorized");
       }
       if (res.status === 404) {
-        // O job sumiu: o servidor reiniciou, ou a limpeza o recolheu por
-        // abandono. Não é recusa — o trabalho simplesmente não existe mais, e
-        // isso autoriza o socorro local em vez de deixar a pessoa sem análise.
+        const instanceIdAtual = res.headers.get("x-starguard-instance") || undefined;
+        // A identidade transforma uma suposicao em diagnostico: se mudou, o
+        // processo reiniciou (frequentemente por OOM) ou o proxy mandou o GET
+        // a outra replica. Em ambos os casos o job em memoria nao esta aqui.
+        if (instanceIdInicial && instanceIdAtual && instanceIdInicial !== instanceIdAtual) {
+          throw new RemoteScanError(
+            "O servidor mudou de instância durante o SAST. Isso confirma reinício/OOM ou consultas roteadas para réplicas diferentes; confira o limite de memória e use uma única réplica para jobs em memória.",
+            "unreachable"
+          );
+        }
+        // Com a mesma identidade, a causa e a limpeza/expiracao do proprio job;
+        // sem identidade, mantemos compatibilidade com servidores antigos.
         throw new RemoteScanError(
-          "O scan foi perdido pelo servidor (ele pode ter reiniciado).",
+          instanceIdInicial && instanceIdAtual
+            ? "O job foi removido pelo servidor antes de terminar, sem reinício do processo. Confira os prazos de abandono e os logs do scan."
+            : "O scan foi perdido pelo servidor (ele pode ter reiniciado).",
           "unreachable"
         );
       }

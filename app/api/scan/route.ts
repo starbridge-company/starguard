@@ -61,6 +61,9 @@ import {
 } from "@/lib/http";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { normalizeLocale } from "@/lib/i18n/config";
+import { translateIn } from "@starguard/core/i18n/translate";
+import { memoriaDisponivelMb } from "@starguard/core/container";
+import { processInstanceId } from "@/lib/process-instance";
 import {
   acharJob,
   cancelarJob,
@@ -111,6 +114,14 @@ interface ArquivoRecebido {
  * a recusa é `429` com `Retry-After`, que o cliente espera e repete.
  */
 const FILA_MAX = Number(process.env.SCAN_QUEUE_MAX) || 8;
+
+/**
+ * Abaixo deste total, iniciar o Opengrep pode matar o proprio servidor.
+ * Configuravel para uma imagem/ruleset medidos de forma diferente, mas com um
+ * padrao conservador: rejeitar com 503 preserva o servidor e habilita o
+ * fallback local; aceitar e sofrer OOM apaga o job e todas as requisicoes.
+ */
+const SAST_MIN_SERVER_MEMORY_MB = Number(process.env.SAST_MIN_SERVER_MEMORY_MB) || 1024;
 
 /**
  * O caminho relativo, ou `null` se ele tentar sair da raiz.
@@ -210,6 +221,25 @@ export async function POST(req: NextRequest) {
   if (analyzer !== "sast" && analyzer !== "sca") {
     return jsonError(400, "Analisador inválido.", "err.badRequest");
   }
+  const locale = normalizeLocale(corpo?.locale);
+
+  // O limite precisa ser conferido antes de gravar os arquivos e antes de
+  // criar um job. Em producao, o host tem 4 GB, mas o cgroup antigo ainda
+  // entrega apenas 512 MB ao container: o Opengrep derruba o Node e o Map em
+  // memoria desaparece, que chega ao cliente como um 404 misterioso.
+  if (analyzer === "sast") {
+    const memoriaMb = memoriaDisponivelMb();
+    if (memoriaMb !== null && memoriaMb < SAST_MIN_SERVER_MEMORY_MB) {
+      return jsonError(
+        503,
+        translateIn(locale, "scan.serverMemoryTooLow", {
+          min: SAST_MIN_SERVER_MEMORY_MB,
+          actual: memoriaMb,
+        }),
+        null
+      );
+    }
+  }
   let files = Array.isArray(corpo?.files) ? corpo!.files! : [];
   if (files.length === 0) return jsonError(400, "Nenhum arquivo enviado.", "err.badRequest");
   if (files.length > MAX_FILES) {
@@ -256,7 +286,6 @@ export async function POST(req: NextRequest) {
   files.length = 0;
   files = [];
 
-  const locale = normalizeLocale(corpo?.locale);
   const { dir, escritos } = await prepararDiretorio(aprovados);
   if (escritos === 0) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -310,7 +339,12 @@ export async function POST(req: NextRequest) {
   }
 
   return jsonOk(
-    { jobId: job.id, status: job.status, position: posicaoNaFila(job.id) },
+    {
+      jobId: job.id,
+      status: job.status,
+      position: posicaoNaFila(job.id),
+      instanceId: processInstanceId(),
+    },
     202
   );
 }
@@ -406,7 +440,11 @@ export async function GET(req: NextRequest) {
     return jsonOk({ maxFiles: MAX_FILES, maxBytes: MAX_BYTES, active: jobsAtivos() });
   }
 
-  if (!job) return jsonError(404, "Scan não encontrado.", "err.notFound");
+  if (!job) {
+    const res = jsonError(404, "Scan não encontrado.", "err.notFound");
+    res.headers.set("X-StarGuard-Instance", processInstanceId());
+    return res;
+  }
 
   if (job.status === "queued") {
     return jsonOk({ status: "queued", position: posicaoNaFila(job.id) });
