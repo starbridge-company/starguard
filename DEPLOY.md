@@ -94,14 +94,14 @@ javascript+typescript+generic:
 
 | Onde | Arquivos | `--jobs` | Tempo |
 |---|---|---|---|
-| Imagem de produção, meia CPU | 27 | 1 | 65 s |
+| Medição histórica no Render, meia CPU | 27 | 1 | 65 s |
 | Máquina de desenvolvimento, um núcleo | 268 | 1 | 35 s |
 
 Em produção o custo fica na ordem de **1,3 s por arquivo**. A rota aceita **800
 arquivos por scan**, o que dá ≈ **17 minutos com `--jobs 1`**. É isso que o
 relato "demora muito e quebra" descreve, e é aritmética, não defeito.
 
-#### Caixa pequena (meia CPU, 512 MB) — os valores defensivos
+#### Caixa pequena histórica (Render, meia CPU/512 MB) — valores de referência
 
 | Variável | Valor | |
 |---|---|---|
@@ -111,16 +111,28 @@ relato "demora muito e quebra" descreve, e é aritmética, não defeito.
 
 #### Servidor dedicado (o caso atual: 4 GB) — **apague estas variáveis**
 
-Deixe `SAST_JOBS`, `SCAN_SLOTS`, `SAST_MAX_MEMORY_MB` e `NODE_OPTIONS`
-**ausentes**: o código lê o cgroup e se dimensiona sozinho, reservando um núcleo
-para o Node continuar respondendo (`processosDeScan`). Confira em `/api/health`
-que `sastJobsDe` deixou de ser `"env"`.
+Deixe `SAST_JOBS`, `SCAN_SLOTS` e `SAST_MAX_MEMORY_MB` **ausentes**: o código lê
+o cgroup e, quando Docker não declara uma cota, usa a
+RAM física do host. CPU e memória são dimensionadas juntas: uma vaga de SAST já
+contabiliza todos os filhos abertos por `--jobs`, e metade da caixa fica fora do
+orçamento dos scanners. Confira em `/api/health` `scan.box.memoriaDe`,
+`sastJobsDe`, `scan.slots` e `scan.memory`.
+
+Para a caixa atual de 4 GB, use `NODE_OPTIONS=--max-old-space-size=1280`. Isso
+deixa ~2 GB para os scanners, até 1,25 GB de old-space para o V8 e a folga
+restante para RSS nativo, buffers e sistema. Ajuste somente depois de observar
+`scan.memory.heapUsedMb` e `rssMb`; não volte ao antigo teto de 256 MB.
+
+Se o Postgres divide os mesmos 4 GB físicos, dê ao contêiner da aplicação uma
+cota de **3 GB** e use `NODE_OPTIONS=--max-old-space-size=1024`. O código lerá a
+cota pelo cgroup e reduzirá sozinho o orçamento agregado dos scanners para
+aproximadamente 1,5 GB, deixando 1 GB físico para banco e sistema.
 
 > **`--max-old-space-size=256` numa caixa de 4 GB deixou de ser prudência e
 > virou a causa.** Ele não protege memória nenhuma: limita o heap do V8 a 256 MB
 > e faz o processo morrer com `JavaScript heap out of memory` enquanto 3,7 GB
 > ficam parados. Se preferir declarar um valor em vez de deixar o padrão do
-> Node, use algo como `--max-old-space-size=2048`.
+> Node, use o orçamento de `--max-old-space-size=1280` acima.
 
 Se o Coolify impuser cota de CPU ao recurso, é lá que ela sobe — nenhuma
 variável daqui contorna um cgroup.
@@ -134,6 +146,7 @@ variável daqui contorna um cgroup.
 | `SAST_TIMEOUT_MS` | `900000` (padrão) | Teto do opengrep. **Tem de caber o que `SCAN_MAX_FILES` autoriza** — era 300 s fixo, e 800 arquivos nunca couberam nele |
 | `SCA_TIMEOUT_MS` | `900000` (padrão) | idem, trivy |
 | `SCAN_JOB_IDLE_MS` | derivado | Silêncio até dar o job por abandonado. O padrão sai da tolerância do CLIENTE; fixá-lo abaixo dela faz o servidor recolher scans que estão sendo acompanhados |
+| `SCAN_JOB_TTL_MS` | `120000` | Fallback para resultado pronto. Clientes atuais enviam um ACK (`DELETE`) assim que consomem e liberam a cópia imediatamente |
 | `SCAN_MAX_OUTPUT_MB` | derivado (5% da caixa, entre 8 e 64) | Teto do JSON de resultado. Um JSON de N bytes custa **3 a 4× N** no V8 — é a única coisa deste caminho cujo tamanho não se conhece de antemão |
 | `SCAN_MAX_FINDINGS` | `5000` | Achados guardados por scan. Acima disso ficam os mais graves e o corte é dito na tela |
 

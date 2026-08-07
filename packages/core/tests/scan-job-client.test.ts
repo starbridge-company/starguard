@@ -85,7 +85,7 @@ const arquivos = [{ path: "a.ts", content: "x" }];
 
 describe("o caminho normal: aceita, acompanha, entrega", () => {
   it("o resultado vem da consulta, não da resposta do envio", async () => {
-    servidorDeJob([
+    const chamadas = servidorDeJob([
       { status: "queued", position: 1 },
       { status: "running" },
       { status: "done", result: [{ id: "V-1" }] },
@@ -93,6 +93,7 @@ describe("o caminho normal: aceita, acompanha, entrega", () => {
 
     const r = await callRemoteScan(t, { analyzer: "sast", files: arquivos, locale: "pt-BR" });
     expect(r).toEqual([{ id: "V-1" }]);
+    await expect.poll(() => chamadas.filter((c) => c.metodo === "DELETE").length).toBe(1);
   });
 
   it("a espera é CONTADA na tela, com a posição", async () => {

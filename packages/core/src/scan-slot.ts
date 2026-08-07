@@ -15,15 +15,13 @@
 // sempre teve.
 //
 // **O padrão se auto-configura, e é isso que o mantém honesto.** O número de
-// vagas sai de `paralelismoDisponivel()`, que lê o cgroup: no servidor de meia
-// CPU responde 1 e os scanners passam um de cada vez; na máquina de quem
-// desenvolve responde o número de núcleos e nada é serializado. Um teto fixo em
-// 1 tornaria o terminal de todo mundo mais lento para proteger uma caixa que
-// não é a deles.
+// vagas considera CPU, memória e quantos filhos cada SAST já abre. Contar só
+// núcleos duas vezes (`scans × --jobs`) multiplicava processos e RAM. Quem quer
+// trocar isolamento por throughput ainda pode declarar `SCAN_SLOTS`.
 //
 // NODE-ONLY.
 // ============================================================
-import { paralelismoDisponivel } from "./container";
+import { scanSlotsSugeridos } from "./container";
 
 /**
  * Vagas simultâneas. `SCAN_SLOTS` tem precedência: quem hospeda sabe da
@@ -32,7 +30,7 @@ import { paralelismoDisponivel } from "./container";
 export function scanSlots(): number {
   const env = Number(process.env.SCAN_SLOTS);
   if (Number.isFinite(env) && env >= 1) return Math.floor(env);
-  return Math.max(1, paralelismoDisponivel());
+  return scanSlotsSugeridos();
 }
 
 let emUso = 0;

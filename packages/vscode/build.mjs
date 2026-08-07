@@ -16,18 +16,25 @@
 // ============================================================
 import { build } from "esbuild";
 import { rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const producao = process.argv.includes("--producao");
+const ROOT = dirname(fileURLToPath(import.meta.url));
 
 // Limpa antes de gerar. O `dist` já carregou sobras de um build anterior feito
 // com `tsc` (um `findings.js` solto), e elas ENTRARAM no `.vsix` — arquivo
 // morto distribuído para dentro do editor de alguém. Como o bundle é um
 // arquivo só, tudo que sobreviver a esta linha é lixo.
-await rm("dist", { recursive: true, force: true });
+await rm(join(ROOT, "dist"), { recursive: true, force: true });
 
 await build({
-  entryPoints: ["src/extension.ts"],
-  outfile: "dist/extension.js",
+  // Absolutos porque este script também é chamado da raiz por automações e
+  // por `node packages/vscode/build.mjs`. Depender do cwd fazia o esbuild
+  // procurar `src/extension.ts` no projeto web e a publicação morrer antes de
+  // produzir o VSIX.
+  entryPoints: [join(ROOT, "src", "extension.ts")],
+  outfile: join(ROOT, "dist", "extension.js"),
   bundle: true,
   platform: "node",
   // O host é CommonJS. O motor é ESM. A conversão acontece aqui.

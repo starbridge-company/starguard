@@ -25,8 +25,13 @@ const manifesto = JSON.parse(
 ) as {
   publisher: string;
   name: string;
+  version: string;
+  scripts: Record<string, string>;
   contributes: Record<string, unknown>;
 };
+const lock = JSON.parse(
+  readFileSync(join(aqui, "..", "..", "..", "package-lock.json"), "utf8")
+) as { packages: Record<string, { version?: string }> };
 const authTs = readFileSync(join(aqui, "..", "src", "auth.ts"), "utf8");
 const configTs = readFileSync(join(aqui, "..", "src", "config.ts"), "utf8");
 
@@ -207,6 +212,27 @@ describe("a chave de IA é da Starbridge — não há chave local a configurar",
 });
 
 describe("metadados exigidos para publicar", () => {
+  it("a versão do workspace e a do lock estão sincronizadas", () => {
+    // O manifesto já estava em 0.4.1 enquanto o lock continuava em 0.3.3.
+    // `npm ci` e as ferramentas de release passavam a descrever versões
+    // diferentes do mesmo pacote, justamente onde a versão prova qual bundle
+    // o editor carregou.
+    expect(lock.packages["packages/vscode"]?.version).toBe(manifesto.version);
+  });
+
+  it("a extensão pode ser testada diretamente pelo workspace", () => {
+    // A suíte raiz já incluía estes arquivos, mas `npm test -w` falhava com
+    // "Missing script". Um pacote publicável precisa carregar o próprio gate.
+    expect(manifesto.scripts.test).toContain("vitest run");
+  });
+
+  it("o build resolve entrada e saída pelo próprio script, não pelo cwd", () => {
+    const fonteBuild = readFileSync(join(aqui, "..", "build.mjs"), "utf8");
+    expect(fonteBuild).toContain("fileURLToPath(import.meta.url)");
+    expect(fonteBuild).toContain('join(ROOT, "src", "extension.ts")');
+    expect(fonteBuild).toContain('join(ROOT, "dist", "extension.js")');
+  });
+
   it("tem ícone declarado", () => {
     expect((manifesto as unknown as { icon?: string }).icon).toBe("icon.png");
   });

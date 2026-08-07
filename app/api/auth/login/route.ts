@@ -62,7 +62,11 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     if (e instanceof InfraUnavailable) {
       console.error(`[login] ${e.message}`);
-      return jsonError(503, e.message, "err.schemaOutdated");
+      return jsonError(
+        503,
+        e.message,
+        e.kind === "schema" ? "err.schemaOutdated" : "err.databaseUnavailable"
+      );
     }
     throw e;
   }

@@ -64,6 +64,7 @@ describe("checkSchema · ARQ-12", () => {
     // `pending` vazio é o sinal de "não sei", e é o que impede o
     // instrumentation.ts de derrubar o processo por uma oscilação de rede.
     expect(s.pending).toEqual([]);
+    expect(s.applied).toBeNull();
   });
 
   it("usa cache: a rota /api/health é pública e não pode virar carga no banco", async () => {

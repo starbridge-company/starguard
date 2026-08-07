@@ -1,6 +1,7 @@
 // ============================================================
-// Middleware (edge) — authn/authz default-deny + rate limit global por IP,
-// em TODAS as rotas. Só importa libs edge-safe (jose, config, ratelimit).
+// Proxy do Next — authn/authz default-deny + rate limit global por IP,
+// em TODAS as rotas. Só importa libs que também funcionavam no antigo Edge
+// middleware; manter a fronteira pequena reduz o custo de cada requisição.
 // A verificação criptográfica completa também é refeita nas rotas (defesa
 // em profundidade), mas nada passa daqui sem sessão válida.
 // ============================================================
@@ -58,7 +59,7 @@ function json(status: number, body: Record<string, unknown>): NextResponse {
   return res;
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith("/api");
   const ip = clientIp(req.headers);

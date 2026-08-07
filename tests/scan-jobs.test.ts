@@ -363,9 +363,18 @@ describe("o teto de tamanho tem que valer ANTES do corpo ser lido", () => {
       fs.readFile("app/api/scan/route.ts", "utf8")
     );
     const antes = fonte.indexOf('req.headers.get("content-length")');
-    const depois = fonte.indexOf("await readJson(req)");
+    const depois = fonte.indexOf("await readJsonWithLimit(req");
     expect(antes).toBeGreaterThan(0);
     expect(antes).toBeLessThan(depois);
+  });
+
+  it("o teto continua valendo sem content-length e as referências são soltas", async () => {
+    const fonte = await import("node:fs/promises").then((fs) =>
+      fs.readFile("app/api/scan/route.ts", "utf8")
+    );
+    expect(fonte).toContain("readJsonWithLimit(req, MAX_BYTES * 2)");
+    expect(fonte).toContain("files.length = 0");
+    expect(fonte).toContain('Buffer.byteLength(f.content, "utf8")');
   });
 
   // O guarda de caminho (`caminhoSeguro`) tem suíte própria em

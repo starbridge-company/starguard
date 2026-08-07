@@ -2,7 +2,7 @@
   "name": "starguard-vscode",
   "displayName": "StarGuard",
   "description": "Análise de segurança no editor com a sua conta StarGuard: código, dependências, regras de negócio e skills — cada uma por conta própria, com correção assistida. Requer conta da Starbridge.",
-  "version": "0.4.1",
+  "version": "0.4.4",
   "publisher": "starbridge",
   "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
@@ -174,6 +174,7 @@
   },
   "scripts": {
     "build": "node build.mjs --producao",
+    "test": "vitest run --config ../../vitest.config.ts tests",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "build:dev": "node build.mjs",
     "vscode:prepublish": "npm run build",
@@ -186,7 +187,7 @@
     "@types/node": "^22.15.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.9.2",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0",
     "@starguard/core": "0.1.0"
   },

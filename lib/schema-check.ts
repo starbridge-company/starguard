@@ -20,8 +20,8 @@ export interface SchemaStatus {
   ok: boolean;
   /** Quantas migrações o repositório tem. */
   expected: number;
-  /** Quantas o banco registra como aplicadas. */
-  applied: number;
+  /** Quantas o banco registra como aplicadas; `null` quando não foi possível consultar. */
+  applied: number | null;
   /** Tags das que faltam, na ordem. */
   pending: string[];
   /** Preenchido quando NÃO foi possível checar (banco fora do ar). */
@@ -37,6 +37,9 @@ interface JournalEntry {
 const ENTRIES = (journal.entries as JournalEntry[])
   .slice()
   .sort((a, b) => a.idx - b.idx);
+
+/** Disponível mesmo quando o banco não responde: vem do journal versionado. */
+export const EXPECTED_MIGRATIONS = ENTRIES.length;
 
 export const MIGRATE_HINT = "npm run db:migrate";
 
@@ -133,7 +136,7 @@ export async function checkSchema(force = false): Promise<SchemaStatus> {
       status = {
         ok: false,
         expected: ENTRIES.length,
-        applied: 0,
+        applied: null,
         pending: [],
         error: descreverErro(e),
       };

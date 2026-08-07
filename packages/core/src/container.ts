@@ -20,7 +20,7 @@
 // o erro moraria.
 // ============================================================
 import { readFileSync } from "node:fs";
-import { cpus } from "node:os";
+import { cpus, totalmem } from "node:os";
 
 /**
  * Interpreta o `cpu.max` do cgroup v2: "<cota> <período>", ou "max <período>"
@@ -94,10 +94,26 @@ export function memoriaDeCgroup(conteudo: string | null): number | null {
 }
 
 export function memoriaDisponivelMb(): number | null {
-  return (
+  const cgroup =
     memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory.max")) ??
-    memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory/memory.limit_in_bytes"))
-  );
+    memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory/memory.limit_in_bytes"));
+  if (cgroup) return cgroup;
+
+  // Servidor Docker sem `mem_limit`: memory.max responde `max`, mas isso não
+  // transforma a máquina em memória infinita. É exatamente o caso comum de um
+  // servidor privado dedicado. `os.totalmem()` vira o segundo teto, mantendo o
+  // scanner dimensionado mesmo quando o orquestrador não criou uma cota.
+  const host = Math.floor(totalmem() / (1024 * 1024));
+  return Number.isFinite(host) && host > 0 ? host : null;
+}
+
+/** Origem da memória publicada no health, para o número não aparecer sem causa. */
+export function origemDaMemoria(): "cgroup" | "hospedeiro" | "desconhecida" {
+  const cgroup =
+    memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory.max")) ??
+    memoriaDeCgroup(lerOuNulo("/sys/fs/cgroup/memory/memory.limit_in_bytes"));
+  if (cgroup) return "cgroup";
+  return totalmem() > 0 ? "hospedeiro" : "desconhecida";
 }
 
 // ------------------------------------------------------------
@@ -138,7 +154,19 @@ export function memoriaDisponivelMb(): number | null {
 export function sastJobs(): number {
   const env = Number(process.env.SAST_JOBS);
   if (Number.isFinite(env) && env >= 1) return Math.floor(env);
-  return processosDeScan(paralelismoDisponivel());
+  return sastJobsParaRecursos(paralelismoDisponivel(), memoriaDisponivelMb());
+}
+
+/**
+ * Filhos do Opengrep limitados pelos dois recursos. Cada filho recebe uma fatia
+ * do orçamento agregado de scanners (metade da caixa); 512 MB evita criar uma
+ * dezena de runtimes OCaml pequenos numa máquina com muitos CPUs e pouca RAM.
+ */
+export function sastJobsParaRecursos(nucleos: number, memoriaMb: number | null): number {
+  const porCpu = processosDeScan(nucleos);
+  if (!memoriaMb) return porCpu;
+  const porMemoria = Math.max(1, Math.floor((memoriaMb * 0.5) / 512));
+  return Math.max(1, Math.min(porCpu, porMemoria));
 }
 
 /**
@@ -151,13 +179,52 @@ export function sastJobs(): number {
  * um scan que "travou" para quem está olhando.
  *
  * Guardar um núcleo é barato: numa caixa de 16, é 1/16 do paralelismo do
- * scanner em troca de o servidor continuar atendendo. Numa caixa pequena
- * (1 ou 2 núcleos, que é o caso da produção) nada muda — não há o que reservar,
- * e o piso de 1 continua valendo.
+ * scanner em troca de o servidor continuar atendendo. Numa caixa de 1 ou 2
+ * núcleos nada muda — não há o que reservar, e o piso de 1 continua valendo.
  */
 export function processosDeScan(nucleos: number): number {
   if (nucleos <= 2) return Math.max(1, nucleos);
   return nucleos - 1;
+}
+
+/**
+ * Quantos scanners NATIVOS cabem ao mesmo tempo sem multiplicar CPU e RAM.
+ *
+ * Um SAST já abre `processosPorSast` filhos. Usar novamente todos os núcleos
+ * como número de scans simultâneos transformava 4 CPUs em até 12 processos de
+ * Opengrep, além do Trivy e do Node. A memória impõe um segundo teto: reservamos
+ * metade da caixa para Node, Postgres client, JSON e sistema, e orçamos 1 GB por
+ * scanner nativo na metade restante.
+ */
+export function scanSlotsParaRecursos(
+  nucleos: number,
+  processosPorSast: number,
+  memoriaMb: number | null
+): number {
+  const porCpu = Math.max(1, Math.floor(Math.max(1, nucleos) / Math.max(1, processosPorSast)));
+  if (!memoriaMb) return porCpu;
+  const porMemoria = Math.max(1, Math.floor((memoriaMb * 0.5) / 1024));
+  return Math.max(1, Math.min(porCpu, porMemoria));
+}
+
+/** Padrão autoajustado; `SCAN_SLOTS` continua tendo precedência em scan-slot.ts. */
+export function scanSlotsSugeridos(): number {
+  return scanSlotsParaRecursos(paralelismoDisponivel(), sastJobs(), memoriaDisponivelMb());
+}
+
+/** Orçamento por filho do Opengrep, isolado para a aritmética ter teste direto. */
+export function sastMaxMemoryParaRecursos(
+  totalMb: number,
+  slots: number,
+  processosPorSast: number
+): number {
+  return Math.max(
+    64,
+    Math.min(
+      1024,
+      Math.floor((Math.max(1, totalMb) * 0.5) / Math.max(1, slots) / Math.max(1, processosPorSast))
+    )
+  );
 }
 
 /**
@@ -207,9 +274,10 @@ export function limitesDaCaixa(): {
   cotaDeCpu: number | null;
   /** Memória do contêiner em MB. `null` = sem limite declarado. */
   memoriaMb: number | null;
+  memoriaDe: "cgroup" | "hospedeiro" | "desconhecida";
   /** Processos que o SAST abre, e de onde o número veio. */
   sastJobs: number;
-  sastJobsDe: "env" | "cgroup" | "hospedeiro";
+  sastJobsDe: "env" | "cgroup" | "hospedeiro" | "memoria";
   scanSlotsDe: "env" | "cgroup" | "hospedeiro";
 } {
   const hospedeiro = Math.max(1, cpus().length);
@@ -222,12 +290,20 @@ export function limitesDaCaixa(): {
   const envJobs = Number(process.env.SAST_JOBS);
   const envSlots = Number(process.env.SCAN_SLOTS);
   const daCota = cotaDeCpu === null ? "hospedeiro" : "cgroup";
+  const jobsPorCpu = processosDeScan(paralelismoDisponivel());
+  const jobsAtuais = sastJobs();
   return {
     hospedeiro,
     cotaDeCpu,
     memoriaMb: memoriaDisponivelMb(),
-    sastJobs: sastJobs(),
-    sastJobsDe: Number.isFinite(envJobs) && envJobs >= 1 ? "env" : daCota,
+    memoriaDe: origemDaMemoria(),
+    sastJobs: jobsAtuais,
+    sastJobsDe:
+      Number.isFinite(envJobs) && envJobs >= 1
+        ? "env"
+        : jobsAtuais < jobsPorCpu
+          ? "memoria"
+          : daCota,
     scanSlotsDe: Number.isFinite(envSlots) && envSlots >= 1 ? "env" : daCota,
   };
 }
@@ -242,7 +318,14 @@ export function sastMaxMemoryMb(): number | null {
   if (Number.isFinite(env) && env > 0) return Math.floor(env);
   const total = memoriaDisponivelMb();
   if (!total) return null;
-  // Metade da caixa para os scanners, dividida entre os processos. A outra
-  // metade é do Node, do JSON de saída e do sistema.
-  return Math.max(128, Math.floor((total * 0.5) / sastJobs()));
+  const slotsEnv = Number(process.env.SCAN_SLOTS);
+  const slots =
+    Number.isFinite(slotsEnv) && slotsEnv >= 1
+      ? Math.floor(slotsEnv)
+      : scanSlotsSugeridos();
+  // Metade da caixa para TODOS os scanners, não metade para CADA scan. Divide
+  // primeiro pelas vagas e depois pelos filhos do Opengrep. O teto de 1 GB por
+  // processo evita que uma regra patológica tome a máquina mesmo numa caixa
+  // grande; quem realmente precisar pode usar SAST_MAX_MEMORY_MB.
+  return sastMaxMemoryParaRecursos(total, slots, sastJobs());
 }

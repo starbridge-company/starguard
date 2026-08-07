@@ -41,6 +41,7 @@ import { StarGuardAuthProvider, definirLog, pedirLogin, sessaoAtual } from "./au
 import { setAiTransport } from "@starguard/core/ai-transport";
 import { setScanTransport } from "@starguard/core/scan-transport";
 import { cfg, servidor, urlDeAcesso } from "./config.js";
+import { checkServerReadiness } from "./server-readiness.js";
 import { usingRemoteScan } from "@starguard/core/scan-transport";
 import {
   PainelStarGuard,
@@ -196,6 +197,30 @@ async function exigirConta(pedirSeNaoTiver = false): Promise<vscode.Authenticati
   return sessao;
 }
 
+/**
+ * Pede login apenas quando o servidor tem condições de concluí-lo.
+ *
+ * O health público responde em até oito segundos mesmo com o Postgres
+ * pendurado. Sem esta sonda, o OAuth abre o navegador e espera minutos por um
+ * retorno impossível; o relato inevitável é "a análise nunca termina", embora
+ * nenhum analisador tenha sido iniciado.
+ */
+async function pedirContaComServidorPronto(): Promise<vscode.AuthenticationSession | undefined> {
+  const atual = await exigirConta();
+  if (atual) return atual;
+
+  const pronto = await checkServerReadiness(servidor());
+  if (!pronto.ok) {
+    const mensagem = t(pronto.errorKey ?? "err.network");
+    saida.appendLine(
+      `[server] ${mensagem}${pronto.detail ? ` · ${pronto.detail}` : ""}`
+    );
+    void vscode.window.showErrorMessage(mensagem);
+    return undefined;
+  }
+  return exigirConta(true);
+}
+
 function raiz(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
@@ -272,10 +297,7 @@ async function analisar(select: AnalyzerId[]): Promise<void> {
 
   // `true`: quem clicou em analisar está pedindo para usar a ferramenta, então
   // abrir o login é a resposta esperada — não uma interrupção.
-  if (!(await exigirConta(true))) {
-    void vscode.window.showWarningMessage(t("auth.required"));
-    return;
-  }
+  if (!(await pedirContaComServidorPronto())) return;
 
   const root = raiz();
   if (!root) {
@@ -1540,7 +1562,7 @@ function montarResultado(): ResultadoNaTela {
  */
 async function comandoEntrar(): Promise<void> {
   try {
-    const s = await exigirConta(true);
+    const s = await pedirContaComServidorPronto();
     if (!s) return;
     void vscode.window.showInformationMessage(
       t("auth.connected", { email: s.account.label })
@@ -1930,7 +1952,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     // consentimento de sempre — só que pedido no momento em que a pessoa
     // demonstrou querer aquele analisador, e não no meio de uma análise.
     vscode.commands.registerCommand("starguard.enableAccountAi", async () => {
-      if (!(await exigirConta(true))) return;
+      if (!(await pedirContaComServidorPronto())) return;
       await configurarIa(ctxGlobal);
       await painel.atualizar();
     }),

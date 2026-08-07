@@ -33,6 +33,7 @@ vi.mock("@/lib/schema-check", () => ({
   checkSchema: async () => ({ ok: true, expected: 9, applied: 9, pending: [] }),
   schemaMessage: () => "Schema em dia.",
   MIGRATE_HINT: "",
+  EXPECTED_MIGRATIONS: 9,
 }));
 
 vi.mock("@/lib/scan-jobs", () => ({
@@ -58,6 +59,15 @@ async function corpo() {
     scanners: unknown;
     scannersMessage?: string;
     scannersBusyMessage?: string;
+    scan: {
+      memory: {
+        rssMb: number;
+        heapUsedMb: number;
+        heapTotalMb: number;
+        externalMb: number;
+        arrayBuffersMb: number;
+      };
+    };
   };
 }
 
@@ -91,6 +101,14 @@ describe("sondagem que não respondeu a tempo", () => {
 });
 
 describe("sondagem que respondeu", () => {
+  it("publica o uso de memória do processo para diagnosticar pressão real", async () => {
+    checkBinaries.mockResolvedValue([]);
+    const memory = (await corpo()).scan.memory;
+    expect(memory.rssMb).toBeGreaterThan(0);
+    expect(memory.heapUsedMb).toBeGreaterThan(0);
+    expect(memory.heapTotalMb).toBeGreaterThanOrEqual(memory.heapUsedMb);
+  });
+
   it("os dois presentes = «ok»", async () => {
     checkBinaries.mockResolvedValue([
       { name: "sast", configured: "opengrep", required: true, present: true, version: "1.25.0" },

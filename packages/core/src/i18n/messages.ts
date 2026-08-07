@@ -602,6 +602,8 @@ export const PT_BR = {
     "Informe um token do GitHub com permissão de escrita para abrir o pull request.",
   "err.schemaOutdated":
     "O banco de dados está desatualizado em relação à aplicação. Avise quem administra: faltam migrações.",
+  "err.databaseUnavailable":
+    "O servidor está no ar, mas não consegue acessar o banco de dados. Login e análises remotas ficam indisponíveis até quem administra corrigir a conexão com o Postgres.",
   "err.badRequest": "Dados inválidos.",
   "err.network": "Sem conexão com o servidor.",
   // Mensagens específicas de rota: sem chave própria elas cairiam no genérico
@@ -1766,6 +1768,8 @@ const EN: Record<MessageKey, string> = {
     "Provide a GitHub token with write access to open the pull request.",
   "err.schemaOutdated":
     "The database is out of date with the application. Tell whoever administers it: migrations are missing.",
+  "err.databaseUnavailable":
+    "The server is online but cannot reach the database. Sign-in and remote analyses are unavailable until an administrator fixes the PostgreSQL connection.",
   "err.badRequest": "Invalid data.",
   "err.network": "No connection to the server.",
   "err.csrf": "Invalid CSRF token.",
@@ -2834,6 +2838,8 @@ const ES: Record<MessageKey, string> = {
     "Indica un token de GitHub con permiso de escritura para abrir el pull request.",
   "err.schemaOutdated":
     "La base de datos está desactualizada respecto a la aplicación. Avisa a quien la administra: faltan migraciones.",
+  "err.databaseUnavailable":
+    "El servidor está activo, pero no puede acceder a la base de datos. El inicio de sesión y los análisis remotos no estarán disponibles hasta que la persona administradora corrija la conexión con PostgreSQL.",
   "err.badRequest": "Datos no válidos.",
   "err.network": "Sin conexión con el servidor.",
   "err.csrf": "Token CSRF no válido.",

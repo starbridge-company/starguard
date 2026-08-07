@@ -50,8 +50,15 @@
 // ============================================================
 import type { NextRequest } from "next/server";
 import { rm } from "node:fs/promises";
+import { Buffer } from "node:buffer";
 import { isAbsolute, normalize } from "node:path";
-import { jsonError, jsonOk, readJson, requireSession, credentialSource } from "@/lib/http";
+import {
+  jsonError,
+  jsonOk,
+  readJsonWithLimit,
+  requireSession,
+  credentialSource,
+} from "@/lib/http";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { normalizeLocale } from "@/lib/i18n/config";
 import {
@@ -190,7 +197,9 @@ export async function POST(req: NextRequest) {
     return limiteExcedido("Pacote grande demais.");
   }
 
-  const corpo = (await readJson(req)) as {
+  const leitura = await readJsonWithLimit(req, MAX_BYTES * 2);
+  if (leitura.tooLarge) return limiteExcedido("Pacote grande demais.");
+  const corpo = leitura.value as {
     analyzer?: string;
     locale?: string;
     mode?: string;
@@ -201,7 +210,7 @@ export async function POST(req: NextRequest) {
   if (analyzer !== "sast" && analyzer !== "sca") {
     return jsonError(400, "Analisador inválido.", "err.badRequest");
   }
-  const files = Array.isArray(corpo?.files) ? corpo!.files! : [];
+  let files = Array.isArray(corpo?.files) ? corpo!.files! : [];
   if (files.length === 0) return jsonError(400, "Nenhum arquivo enviado.", "err.badRequest");
   if (files.length > MAX_FILES) {
     return limiteExcedido("Arquivos demais para um scan.");
@@ -212,7 +221,9 @@ export async function POST(req: NextRequest) {
     if (typeof f?.path !== "string" || typeof f?.content !== "string") {
       return jsonError(400, "Arquivo malformado.", "err.badRequest");
     }
-    bytes += f.content.length;
+    // Caracteres não são bytes: emoji e texto não ASCII ocupam mais em UTF-8.
+    // O nome do teto e a gravação em disco trabalham com bytes reais.
+    bytes += Buffer.byteLength(f.content, "utf8");
     if (bytes > MAX_BYTES) return limiteExcedido("Pacote grande demais.");
   }
 
@@ -239,6 +250,11 @@ export async function POST(req: NextRequest) {
   //
   // `bytes` e `files.length` já foram medidos acima; nada abaixo lê `corpo`.
   if (corpo) corpo.files = undefined;
+  // `files` era uma segunda referência local ao array original. Limpar apenas
+  // `corpo.files` não liberava objeto nenhum; as strings continuavam vivas até
+  // o fim da requisição, em paralelo às cópias gravadas no temporário.
+  files.length = 0;
+  files = [];
 
   const locale = normalizeLocale(corpo?.locale);
   const { dir, escritos } = await prepararDiretorio(aprovados);

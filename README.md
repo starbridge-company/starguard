@@ -199,7 +199,7 @@ packages/core/              @starguard/core — o motor (sem Next, React ou banc
   i18n/  catalog/             os três idiomas, para os três produtos
 packages/cli/               binário `starguard`
 packages/vscode/            extensão
-middleware.ts               authn/authz + rate limit + headers
+proxy.ts                    authn/authz + rate limit + headers
 db/migrations/              geradas por `npm run db:generate`
 ```
 

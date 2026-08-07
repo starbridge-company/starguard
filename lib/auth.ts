@@ -81,7 +81,13 @@ async function seedOnce(): Promise<void> {
 export class InfraUnavailable extends Error {
   constructor(
     message: string,
-    public cause?: unknown
+    public cause?: unknown,
+    /**
+     * A interface precisa distinguir "execute as migrações" de "o servidor
+     * não alcança o Postgres". Misturar os dois mandava quem administra agir
+     * na camada errada e foi exatamente o falso alerta visto em produção.
+     */
+    public kind: "schema" | "database" = "database"
   ) {
     super(message);
     this.name = "InfraUnavailable";
@@ -111,7 +117,13 @@ async function ensureSeededOrExplain(): Promise<void> {
   } catch (e) {
     const { checkSchema, schemaMessage } = await import("@/lib/schema-check");
     const status = await checkSchema(true);
-    if (!status.ok) throw new InfraUnavailable(schemaMessage(status), e);
+    if (!status.ok) {
+      throw new InfraUnavailable(
+        schemaMessage(status),
+        e,
+        status.error ? "database" : "schema"
+      );
+    }
     throw new InfraUnavailable(
       "Banco de dados indisponível. Tente novamente em instantes.",
       e

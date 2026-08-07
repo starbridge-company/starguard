@@ -217,3 +217,48 @@ export async function readJson(req: NextRequest): Promise<unknown> {
     return null;
   }
 }
+
+/**
+ * JSON com teto REAL, inclusive quando o cliente usa transferência chunked e
+ * omite `content-length`.
+ *
+ * `req.json()` só devolve o controle depois de bufferizar o corpo inteiro. Para
+ * o upload de código isso tornava o limite da rota decorativo: bastava não
+ * mandar o cabeçalho para alocar quanto quisesse. A leitura incremental mantém
+ * somente a string que será parseada e cancela o stream no primeiro byte além
+ * do teto, sem acumular também um array de Buffers.
+ */
+export async function readJsonWithLimit(
+  req: NextRequest,
+  maxBytes: number
+): Promise<{ value: unknown | null; tooLarge: boolean }> {
+  const declarado = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declarado) && declarado > maxBytes) {
+    return { value: null, tooLarge: true };
+  }
+
+  const reader = req.body?.getReader();
+  if (!reader) return { value: null, tooLarge: false };
+
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { value: null, tooLarge: true };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return { value: JSON.parse(text), tooLarge: false };
+  } catch {
+    return { value: null, tooLarge: false };
+  } finally {
+    text = "";
+  }
+}

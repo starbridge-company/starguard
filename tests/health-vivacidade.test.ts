@@ -40,6 +40,7 @@ vi.mock("@/lib/schema-check", () => ({
   checkSchema: () => new Promise(() => {}),
   schemaMessage: () => "",
   MIGRATE_HINT: "",
+  EXPECTED_MIGRATIONS: 9,
 }));
 vi.mock("@starguard/core/binaries", () => ({
   checkBinaries: () => new Promise(() => {}),

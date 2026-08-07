@@ -116,7 +116,7 @@ const ABANDONO_MS =
  * são apagados assim que o scanner termina). Cinco minutos cobrem uma retomada
  * de rede sem transformar a instância em cache.
  */
-const TTL_MS = Number(process.env.SCAN_JOB_TTL_MS) || 5 * 60_000;
+const TTL_MS = Number(process.env.SCAN_JOB_TTL_MS) || 2 * 60_000;
 
 /**
  * Quantos jobs uma pessoa pode ter ao mesmo tempo.
@@ -311,7 +311,10 @@ async function executar(job: ScanJob): Promise<void> {
         }
       },
     };
-    const bruto =
+    let bruto:
+      | Awaited<ReturnType<typeof runSast>>
+      | Awaited<ReturnType<typeof runSca>>
+      | undefined =
       job.analyzer === "sast" ? await runSast(dir, opcoes) : await runSca(dir, opcoes);
 
     if (job.abortar.signal.aborted) {
@@ -327,6 +330,10 @@ async function executar(job: ScanJob): Promise<void> {
       job.analyzer === "sast"
         ? await enrichFindings(bruto as Awaited<ReturnType<typeof runSast>>, job.locale)
         : enrichDependencies(bruto as Awaited<ReturnType<typeof runSca>>, job.locale);
+    // O parser cru e o enriquecido são arrays distintos. Depois do
+    // enriquecimento, manter o primeiro referenciado até o `finally` dobra a
+    // parte mais pesada do heap sem nenhuma utilidade.
+    bruto = undefined;
     desfecho = { status: "done", result };
 
     audit(

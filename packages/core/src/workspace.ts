@@ -29,8 +29,11 @@ function confine(root: string, rel: string): string | null {
   // Caminho absoluto nunca é aceito: mesmo que apontasse para dentro da raiz,
   // aceitá-lo tornaria a regra dependente do que veio de fora.
   if (!rel || isAbsolute(rel)) return null;
-  const base = resolve(root);
-  const alvo = resolve(base, rel);
+  // Estes caminhos existem em runtime (CLI/VS Code) e não são ativos do app.
+  // Sem o marcador, o file tracer do Next interpreta a leitura dinâmica abaixo
+  // como "inclua o projeto inteiro" no artefato do servidor.
+  const base = resolve(/*turbopackIgnore: true*/ root);
+  const alvo = resolve(/*turbopackIgnore: true*/ base, rel);
   if (alvo !== base && !alvo.startsWith(base + sep)) return null;
   return alvo;
 }
@@ -49,15 +52,15 @@ function makeWorkspace(
     async readFile(rel) {
       const alvo = confine(root, rel);
       if (!alvo) return null;
-      return readFile(alvo, "utf8").catch(() => null);
+      return readFile(/*turbopackIgnore: true*/ alvo, "utf8").catch(() => null);
     },
     async writeFile(rel, content) {
       const alvo = confine(root, rel);
       if (!alvo) {
         throw new Error(`Caminho fora do workspace, gravação recusada: ${rel}`);
       }
-      await mkdir(dirname(alvo), { recursive: true });
-      await writeFile(alvo, content, "utf8");
+      await mkdir(/*turbopackIgnore: true*/ dirname(alvo), { recursive: true });
+      await writeFile(/*turbopackIgnore: true*/ alvo, content, "utf8");
     },
     async dispose() {
       // Idempotente: o orquestrador descarta no `finally`, e quem abriu pode
@@ -75,8 +78,8 @@ export async function openWorkspace(
   if (source.type === "none") return undefined;
 
   if (source.type === "local") {
-    const root = resolve(source.path);
-    const info = await stat(root).catch(() => null);
+    const root = resolve(/*turbopackIgnore: true*/ source.path);
+    const info = await stat(/*turbopackIgnore: true*/ root).catch(() => null);
     if (!info?.isDirectory()) {
       throw new ScanUnavailable(`Diretório não encontrado: ${source.path}`);
     }

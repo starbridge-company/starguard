@@ -19,6 +19,9 @@ import {
   memoriaDeCgroup,
   processosPara,
   processosDeScan,
+  scanSlotsParaRecursos,
+  sastJobsParaRecursos,
+  sastMaxMemoryParaRecursos,
 } from "../src/container";
 
 describe("fatia de CPU no cgroup v2", () => {
@@ -130,6 +133,34 @@ describe("processosDeScan — o scanner não pode tomar a caixa inteira", () => 
   it("nunca devolve menos de 1, nem com entrada absurda", () => {
     expect(processosDeScan(0)).toBe(1);
     expect(processosDeScan(-3)).toBe(1);
+  });
+});
+
+describe("orçamento combinado de CPU e memória", () => {
+  it("4 GB limitam hosts com muitos núcleos a quatro filhos", () => {
+    expect(sastJobsParaRecursos(32, 4096)).toBe(4);
+    expect(sastJobsParaRecursos(4, 4096)).toBe(3);
+  });
+
+  it("a antiga caixa de 512 MB continua com um único filho", () => {
+    expect(sastJobsParaRecursos(8, 512)).toBe(1);
+  });
+
+  it("num servidor de 4 GB, um SAST multiprocesso ocupa uma única vaga", () => {
+    expect(scanSlotsParaRecursos(4, 3, 4096)).toBe(1);
+  });
+
+  it("reduzir SAST_JOBS permite concorrência sem ultrapassar metade da RAM", () => {
+    expect(scanSlotsParaRecursos(4, 1, 4096)).toBe(2);
+  });
+
+  it("o orçamento de 4 GB deixa metade da caixa fora do Opengrep", () => {
+    expect(sastMaxMemoryParaRecursos(4096, 1, 3)).toBe(682);
+    expect(sastMaxMemoryParaRecursos(4096, 2, 1)).toBe(1024);
+  });
+
+  it("nem uma caixa enorme autoriza mais de 1 GB por filho", () => {
+    expect(sastMaxMemoryParaRecursos(65_536, 1, 1)).toBe(1024);
   });
 });
 

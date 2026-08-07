@@ -855,7 +855,17 @@ async function acompanharJob(
       falhasSeguidas = 0;
       const estado = (await res.json().catch(() => ({}))) as EstadoDoJob;
 
-      if (estado.status === "done") return estado.result ?? null;
+      if (estado.status === "done") {
+        const result = estado.result ?? null;
+        // ACK explícito: depois que o cliente recebeu e parseou a resposta, o
+        // servidor não precisa manter outra cópia do resultado no Map por cinco
+        // minutos. O DELETE também serve como confirmação de consumo; se ele
+        // falhar, o TTL do servidor continua sendo a rede de segurança.
+        // Não segura a entrega por causa do ACK: numa rede ruim, esperar o
+        // DELETE acrescentaria até 20 s depois de o resultado já estar pronto.
+        void cancelarJob(t, jobId);
+        return result;
+      }
       if (estado.status === "cancelled") {
         throw new RemoteScanError("O scan foi cancelado no servidor.", "cancelled");
       }

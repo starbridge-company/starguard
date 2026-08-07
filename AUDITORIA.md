@@ -665,7 +665,7 @@ A divisão em partes existe pelo `UX-27`: um intermediário recusa o pacote
 respondeu** — DNS que não resolve, porta fechada, tempo esgotado — o tamanho do
 pacote não tem nada a ver com a falha. Cada metade só repaga o mesmo teto.
 
-- **`unreachable` e `blocked` viraram códigos diferentes.** Nada respondeu × 
+- **`unreachable` e `blocked` viraram códigos diferentes.** Nada respondeu ×
   alguém respondeu recusando. Só o segundo autoriza dividir. Os dois continuam
   autorizando o socorro local — que era o ponto do UX-27 e segue valendo.
 - **A sonda barata vai na frente.** `servidorRespondeu()` faz um `GET` de
@@ -2630,8 +2630,8 @@ aplicados pelo próprio entrypoint.
 >
 > Sobre um arquivo que ESTÁ lá, com permissão de execução. A causa: eu editei o
 > `docker-entrypoint.sh` por uma ferramenta que escreve em modo texto no
-> Windows, e o LF virou **CRLF**. O shebang passou a ser `#!/bin/sh`, e o
-> Linux foi procurar um interpretador chamado `sh`.
+> Windows, e o LF virou **CRLF**. O shebang passou a ser `#!/bin/sh\r`, e o
+> Linux foi procurar um interpretador chamado `sh\r`.
 >
 > O que torna isto perigoso é o formato do sintoma: a mensagem acusa o SCRIPT
 > quando o ausente é o INTERPRETADOR, e o `docker build` não reclama de nada —
@@ -2649,8 +2649,7 @@ aplicados pelo próprio entrypoint.
 | Imagem | `EXPOSE` grava `{"3003/tcp":{}}` e `ENV` grava `PORT=3003` |
 | Contêiner de pé | `[entrypoint] StarGuard subindo em 0.0.0.0:3003` · `/api/health` **200 em 0,024 s**, com `opengrep 1.26.0` e `trivy 0.73.0` presentes |
 | `PORT` injetado | `-e PORT=8080` → sobe em 8080 e responde 200 ali: o padrão não amarra o host |
-| Shebang na imagem | `# ! / b i n / s h 
-` — LF, como tem de ser |
+| Shebang na imagem | `# ! / b i n / s h` seguido de LF, como tem de ser |
 | Suíte | `typecheck` 0 erros · `lint` 0 erros · **856 testes + 2 skipped** |
 
 ### BUG-29 · Três erros de banco saíam com a mesma cara ✅
@@ -2906,7 +2905,13 @@ scanner.
 | `stat()` antes do `readFile`/`JSON.parse` | A recusa passa a ser uma decisão **antes** de gastar memória. Teto em `SCAN_MAX_OUTPUT_MB`, padrão 5% da caixa (8–64 MB) |
 | `scan.outputTooLarge` | "o scan aconteceu e o resultado não cabe" deixa de sair com a cara de "o binário está quebrado" |
 | Teto de achados (`SCAN_MAX_FINDINGS`, 5.000) | `enrichFindings` devolve um array NOVO, o job segura o resultado pelo TTL e ele ainda vai para o JSONB — um repositório patológico multiplicava tudo isso. Corta pelos **mais graves** e **diz** quantos ficaram de fora |
-| `prepararDiretorio` solta cada conteúdo ao gravar, e a rota larga `corpo.files` | O pico do upload deixa de ser "o pacote inteiro duas vezes" e vira "um arquivo de cada vez". As duas metades são necessárias: com duas referências para a mesma string, o coletor não recupera nada |
+| `prepararDiretorio` solta cada conteúdo ao gravar; a rota larga `corpo.files` **e o alias local `files`** | O pico do upload deixa de ser "o pacote inteiro duas vezes" e vira "um arquivo de cada vez". A primeira correção ainda deixava o array vivo pelo alias local; agora todas as referências anteriores a `aprovados` são realmente eliminadas |
+| RAM sem cota no Docker | `memory.max=max` agora cai para `os.totalmem()`: servidor privado sem `mem_limit` deixou de significar "memória infinita" |
+| `SAST_JOBS` e `SCAN_SLOTS` | CPU e memória entram na mesma conta. Em 4 GB, no máximo metade da caixa é orçamento agregado dos scanners; vagas × filhos do Opengrep não voltam a multiplicar a máquina |
+| Corpo chunked | `readJsonWithLimit` conta os bytes durante a leitura e cancela acima do teto mesmo sem `content-length`; caracteres são contabilizados com `Buffer.byteLength`, não como UTF-16 |
+| Resultado consumido | O cliente envia ACK (`DELETE`) sem bloquear a UI; o servidor libera o array imediatamente. O TTL de fallback caiu de 5 para 2 min |
+| Telemetria | `/api/health` publica RSS, heap, memória externa e ArrayBuffers do processo, além da origem da RAM (`cgroup` ou `hospedeiro`) |
+| Heap do Node em 4 GB | Deploy recomendado com `NODE_OPTIONS=--max-old-space-size=1280`; substitui o teto histórico de 256 MB sem permitir que V8 e scanners prometam a mesma RAM |
 
 **Duas otimizações foram TENTADAS e DESCARTADAS**, e ficam registradas com a
 medição porque parecem boa ideia e não são:
@@ -2925,12 +2930,12 @@ Medido depois, com o opengrep de verdade sobre este repositório (268 arquivos):
 **692 achados em 35,2 s, heap retido +4,2 MB, RSS 45 MB.**
 
 **O que ficou de fora, e por quê:** o corpo do `POST /api/scan` continua sendo um
-JSON único bufferizado por `readJson`. Trocá-lo por um formato em fluxo
-(NDJSON/multipart escrito direto no disco) tiraria o pico de ~16 MB por envio,
-mas muda o protocolo dos três produtos ao mesmo tempo, e a geração anterior do
-cliente precisa continuar funcionando durante uma implantação. Não é "fica para a
-próxima": é trabalho de escopo próprio, que não cabe dentro de uma correção de
-defeito sem colocar em risco justamente o caminho que se está consertando.
+JSON único. Ele agora é lido incrementalmente e tem teto real mesmo em chunked,
+mas o parse ainda mantém o pacote aprovado no heap até começar a gravação.
+NDJSON/multipart escrito direto no disco tiraria esse último pico (~16 MB), porém
+muda o protocolo dos três produtos e exige negociação de capacidade para manter
+clientes antigos funcionando durante o deploy. Continua como evolução isolada,
+sem misturar uma migração de transporte à correção do orçamento de memória.
 
 ## Como o sprint foi validado — 07/08/2026 (SAST no servidor)
 
@@ -2945,26 +2950,84 @@ defeito sem colocar em risco justamente o caminho que se está consertando.
 | Produção, `/api/health` | `opengrep 1.26.0` e `trivy 0.73.0` presentes; `scan.slots: 1`; **`db: unreachable`** |
 | Suíte | `typecheck` 0 erros · `lint` **0 erros** (12 avisos, todos anteriores) · **941 testes + 2 skipped, 63 arquivos** (eram 927) |
 
-## As 8 pendências que sobraram, e o que cada uma precisa de você
+### BUG-32 · Banco inalcançável era anunciado como migration pendente ✅
 
-Esta sprint fechou **24 das 32** pendências abertas. As oito que restam têm uma
-coisa em comum: **nenhuma delas é código faltando**. Todas dependem de uma
+*07/08/2026.* O painel dizia *“O banco de dados está desatualizado em relação
+à aplicação: faltam migrações”*. A hipótese foi confrontada com os três lados:
+
+| Medição | Resultado |
+|---|---|
+| `npm run db:generate` | **No schema changes, nothing to migrate** |
+| `npm run db:doctor` na máquina | Postgres autenticado, **9 migrações aplicadas** |
+| produção, `/api/health` | **503**, `db: "unreachable"`, `Sem resposta do banco em 8000 ms` |
+
+A causa do texto falso estava na rota de login: qualquer `InfraUnavailable`
+recebia `errorKey: "err.schemaOutdated"`, inclusive timeout de rede. O tipo
+agora carrega `kind: "schema" | "database"`; a interface traduz cada desfecho
+separadamente nos três idiomas. O health também deixou de devolver a dica
+`db:migrate` quando o banco não responde.
+
+O fallback do health dizia ainda `expected: 0, applied: 0`. Os zeros não eram
+medição, mas pareciam confirmar que “não há migration nenhuma”. Agora o esperado
+vem do journal mesmo sem banco (**9**) e o aplicado é `null` quando desconhecido.
+
+Na extensão, o efeito indireto era mais caro: todo analisador exigia OAuth; com
+o Postgres inalcançável, o navegador nunca conseguia concluir e o editor
+esperava até o timeout, fazendo parecer que o SAST tinha começado e travado. A
+0.4.4 consulta a prontidão antes de abrir OAuth, falha cedo com a causa correta
+e confirma o consumo do resultado para o servidor liberar a cópia em memória.
+
+**Melhorias de entrega encontradas no mesmo percurso:**
+
+- o workspace da extensão não tinha script `test`, embora os testes existissem;
+- `package-lock.json` descrevia a extensão como 0.3.3 e o manifesto como 0.4.1;
+- `build.mjs` dependia do diretório corrente; entrada/saída agora se resolvem
+  pelo caminho do próprio script;
+- migração oficial do Next 16 de `middleware.ts` para `proxy.ts`;
+- caminhos dinâmicos de workspace deixaram de fazer o Turbopack rastrear o
+  repositório inteiro no artefato do servidor.
+- `next`/`eslint-config-next` subiram para 16.3.0 e os transitivos vulneráveis
+  foram atualizados: o `npm audit` caiu de **7 altos + 7 moderados** para
+  **0 altos + 4 moderados**. Os quatro restantes são exclusivamente a cadeia
+  de desenvolvimento legada `drizzle-kit → @esbuild-kit → esbuild`; o único
+  “fix” automático é fazer downgrade incompatível do Drizzle para 0.18.1.
+- o esbuild do tooling e da extensão foi alinhado em 0.28.1; antes, o Vite
+  resolvia 0.25.12 e `npm ls` marcava a árvore como `invalid`.
+
+| Validação | Resultado medido |
+|---|---|
+| Suíte completa | **969 testes passaram + 2 skipped, 69 arquivos** |
+| Extensão isolada | **137 testes, 0 skipped** depois do bundle |
+| Typecheck | app, core, CLI e extensão: **0 erros** |
+| Lint | **0 erros**, 13 avisos de hooks/navegação já catalogados |
+| Build Next 16.3.0 | 23 páginas; **zero warnings de build** |
+| Dependências | `npm ls` consistente; `npm audit --omit=dev`: **0 vulnerabilidades em produção**; auditoria completa: 4 moderadas dev-only |
+| VSIX | 8 arquivos, 176,17 kB; SHA-256 `13823003A984B4FEC80B9A4F8B0834698D2907B80BDD7E2B3CE230EBEF8B7871` |
+| Instalação local | 0.4.3 removida; `starbridge.starguard-vscode-0.4.4` no disco |
+| Marketplace | **Publicado `starbridge.starguard-vscode v0.4.4`** |
+
+## As pendências externas que sobraram, e o que cada uma precisa de você
+
+As pendências que restam têm uma coisa em comum: **nenhuma delas é código
+faltando**. Todas dependem de uma
 credencial, de um serviço de terceiro ou de alguém com o editor aberto — e é por
 isso que continuam registradas em vez de resolvidas.
 
 | Pendência | O que falta, concretamente |
 |---|---|
 | PEND-25 · SARIF no Code Scanning | Um repositório no GitHub e um token com escopo `security-events`. O arquivo é gerado e validado por teste; o que não dá para provar daqui é o GitHub ACEITANDO o upload |
-| PEND-33 · interface da extensão | Alguém com o VS Code aberto. A 0.3.3 está instalada; falta abrir a barra lateral, clicar nos cartões e ver a árvore. O motor por trás dela foi exercitado ponta a ponta (OAuth → `/api/scan` → achados) |
-| PEND-36 · pacotes publicados | Credencial de npm e do Marketplace. `@starguard/core` e `@starguard/cli` compilam e o `.vsix` é gerado e instalado localmente; publicar é uma decisão sua |
+| PEND-33 · interface da extensão | Alguém com o VS Code aberto. A **0.4.4** está instalada; falta abrir a barra lateral, clicar nos cartões e ver a árvore. O motor por trás dela foi exercitado ponta a ponta (OAuth → `/api/scan` → achados) |
+| PEND-36 · pacotes publicados | A extensão **0.4.4 está publicada no Marketplace**. Falta apenas credencial npm e a decisão de publicar `@starguard/core`/`@starguard/cli`; ambos compilam |
 | PEND-40 · GitHub App | Um App ID, uma chave privada e um webhook secret — que só quem administra a organização cria |
 | PEND-44 · PR da extensão | Um repositório real e um token com permissão de escrita. Abrir PR de teste no repositório de alguém não é coisa que eu deva fazer sem você pedir |
 | PEND-45 · travamentos do UX-26 | Reprodução na interface do editor, com as mãos |
 | PEND-46 · caminho dos scanners na tela | Idem: configurar `starguard.semgrepPath` pela tela e ver o cartão acender sem recarregar a janela |
 | PEND-30 (telas em espanhol) | O TEXTO da IA em espanhol foi provado. O que falta é passar o olho nas telas em espanhol — trabalho de pessoa, não de teste |
+| **PEND-54 · banco em produção** | No Coolify, colocar app e Postgres na mesma rede predefinida, trocar `DATABASE_URL` pelo hostname/porta internos, manter `RUN_MIGRATIONS=true` e redeployar. Aceite: `/api/health` retorna `db: "ok"`, `expected: 9`, `applied: 9` e os scanners continuam presentes |
 
-Nenhuma delas bloqueia o produto: o painel, o terminal e a extensão foram
-exercitados de ponta a ponta contra a imagem de produção nesta mesma sprint.
+O **PEND-54 bloqueia login e scans remotos na produção atual**. Os demais não
+bloqueiam o código entregue; o painel, o terminal e a extensão passaram pelas
+suítes automatizadas, e a imagem contém os dois scanners esperados.
 
 ---
 

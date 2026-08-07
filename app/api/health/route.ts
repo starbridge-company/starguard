@@ -1,5 +1,10 @@
 import { jsonOk } from "@/lib/http";
-import { checkSchema, schemaMessage, MIGRATE_HINT } from "@/lib/schema-check";
+import {
+  checkSchema,
+  schemaMessage,
+  MIGRATE_HINT,
+  EXPECTED_MIGRATIONS,
+} from "@/lib/schema-check";
 import { checkBinaries, type BinaryStatus } from "@starguard/core/binaries";
 import { naFilaDeVagas, scanSlots, vagasEmUso } from "@starguard/core/scan-slot";
 import { limitesDaCaixa } from "@starguard/core/container";
@@ -87,6 +92,18 @@ function vivacidade(): Response {
   return jsonOk({ status: "live" }, 200);
 }
 
+function memoriaDoProcesso() {
+  const m = process.memoryUsage();
+  const mb = (n: number) => Number((n / (1024 * 1024)).toFixed(1));
+  return {
+    rssMb: mb(m.rss),
+    heapUsedMb: mb(m.heapUsed),
+    heapTotalMb: mb(m.heapTotal),
+    externalMb: mb(m.external),
+    arrayBuffersMb: mb(m.arrayBuffers),
+  };
+}
+
 export async function GET(req: Request) {
   // `?probe=live` antes de qualquer coisa: nada abaixo desta linha pode entrar
   // no caminho de uma sonda que existe justamente para não depender de nada.
@@ -101,8 +118,11 @@ export async function GET(req: Request) {
   const [schema, binaries] = await Promise.all([
     comPrazo(checkSchema(), {
       ok: false,
-      expected: 0,
-      applied: 0,
+      // O journal está no bundle mesmo quando o banco não responde. Zero aqui
+      // parecia dizer "não existem migrations"; o que não sabemos é apenas
+      // quantas o banco aplicou.
+      expected: EXPECTED_MIGRATIONS,
+      applied: null,
       pending: [],
       error: `Sem resposta do banco em ${prazoDeChecagem()} ms.`,
     }),
@@ -171,6 +191,7 @@ export async function GET(req: Request) {
       waiting: naFilaDeVagas(),
       jobs: totalDeJobs(),
       activeJobs: jobsAtivos(),
+      memory: memoriaDoProcesso(),
       /**
        * De ONDE saiu o `slots` acima — ver `limitesDaCaixa()` no núcleo.
        *
@@ -184,7 +205,11 @@ export async function GET(req: Request) {
       box: limitesDaCaixa(),
     },
     message: schemaMessage(schema),
-    ...(schema.ok ? {} : { hint: MIGRATE_HINT }),
+    // Uma dica errada custa mais que nenhuma. Quando o banco não responde,
+    // `db:migrate` só repete a mesma falha; a ação é corrigir rede/credencial.
+    // A dica de migração existe apenas quando conseguimos consultar a tabela e
+    // provar que o journal está atrás.
+    ...(schema.ok || schema.error ? {} : { hint: MIGRATE_HINT }),
     ...(naoVerificado
       ? {
           scannersMessage: `Não deu para verificar os scanners em ${prazoDeChecagem()} ms. Isto NÃO quer dizer que estão ausentes — numa instância pequena a primeira sondagem depois de acordar pode passar do prazo. Consulte de novo em alguns segundos.`,
